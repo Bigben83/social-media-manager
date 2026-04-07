@@ -1,48 +1,165 @@
-# Simplify Social Media Management with our Web Application
+# SocialManager — Personal Social Media Manager
 
-## Introduction
+A self-hosted, local-first social media management platform. Aggregate feeds from all your platforms, compose and cross-post content, schedule posts, and get AI-powered suggestions — all from one dashboard.
 
-Welcome to our innovative project, an all-inclusive web application designed to revolutionize how we manage social media. Our goal is to provide a unified platform that simplifies the complexities of handling multiple social media platforms, streamlining tasks, and optimizing engagement.
+---
 
-## Project Overview
+## Features
 
-We are excited to introduce an innovative endeavor aimed at transforming the landscape of social media management. Our primary objective is to seamlessly integrate a variety of social media APIs into a unified solution, consolidating the management of multiple social media channels within a single, robust application.
+- **Unified Feed** — Pull feeds from Twitter/X, Mastodon, Bluesky, LinkedIn, Instagram, Reddit and YouTube into a single dashboard
+- **Filter & Tag** — Filter your feed by platform or custom tags
+- **Cross-post** — Write once, publish to multiple platforms simultaneously
+- **Scheduler** — Schedule posts for a specific date/time with BullMQ job queue
+- **AI Assistance** — Grammar correction and platform-specific content adaptation (T5 model, runs locally)
+- **Multi-language UI** — English and Turkish built-in; adding a new language is a single file
+- **Microservices** — Each platform is an independent service, easy to add or remove
+- **Fully local** — No SaaS, no subscriptions. Runs entirely on your machine via Docker
 
-![Alt text](socialMediaManager.png?raw=true "Social Media Manager")
+---
 
-## The Vision
+## Tech Stack
 
-Imagine a powerful web app that empowers you to efficiently oversee your presence across a plethora of social media platforms. Our app's core functionality revolves around automating tasks such as cross-platform content reposting, complete with AI-driven formatting adjustments tailored for each specific platform. By leveraging APIs from different social media platforms, our app becomes the centralized hub for managing all your accounts.
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Vue 3, TypeScript, Vite, Tailwind CSS, Pinia, Vue Router, vue-i18n |
+| API Gateway | Node.js / Fastify |
+| Message Broker | RabbitMQ |
+| Database | MongoDB |
+| Job Queue | Redis + BullMQ |
+| AI Service | Python / HappyTransformer (T5) |
+| Platform SDKs | twitter-api-v2, masto, @atproto/api |
+| Reverse Proxy | Nginx |
+| Containerization | Docker Compose |
 
-Additionally, our app offers a convenient scheduling feature that enables you to plan and publish posts across diverse social media platforms. This is particularly advantageous when catering to a global audience spread across different time zones. With our scheduling feature, your content can go live at the optimal moment, ensuring maximum reach and impact.
+---
 
-## Benefits for Developers
+## Services
 
-This project addresses real-world scenarios that many developers encounter. Whether you're a business looking to efficiently share updates across multiple social media accounts or a social media influencer aiming to automate engagement with specific hashtags, our app eliminates the complexity of these processes, allowing you to focus on creating meaningful content.
+| Service | Port | Description |
+|---------|------|-------------|
+| `nginx` | 8081 | Reverse proxy — main entry point |
+| `ui` | — | Vue 3 frontend (Vite dev server) |
+| `gateway` | 8084 | REST API gateway |
+| `socket` | 8085 | WebSocket server (real-time feed updates) |
+| `formatter` | — | Platform-specific content formatter |
+| `ai-grammar-correction` | — | AI grammar correction (T5) |
+| `feed-aggregator` | 3010 | Pulls feeds from all platforms periodically |
+| `scheduler` | 3011 | Scheduled post management (BullMQ) |
+| `twitter` | 3001 | Twitter/X integration |
+| `linkedin` | 3002 | LinkedIn integration |
+| `mastodon` | 3003 | Mastodon integration |
+| `bluesky` | 3004 | Bluesky (AT Protocol) integration |
+| `mongodb` | 27018 | Database |
+| `redis` | 6379 | Cache & job queue |
+| `messageBroker` | 5672 / 15672 | RabbitMQ (+ management UI) |
 
-## The Technical Challenge
+---
 
-A significant technical challenge we're addressing involves formatting individual posts for various social media platforms, including Twitter, Facebook, Instagram, and LinkedIn. Furthermore, the intricacies of these platforms' APIs and integrations can pose difficulties for individual developers. To overcome these challenges, our strategy involves leveraging a combination of official API wrappers and AI techniques for post formatting across different platforms.
+## Getting Started
 
-## Key Technical Features
+### 1. Clone the repository
 
-- **Time Management and Automated Formatting**: Our app excels in efficient time management and automates the process of formatting posts according to each platform's requirements.
+```bash
+git clone https://github.com/mehmetkirkoca/social-media-manager.git
+cd social-media-manager
+```
 
-## Get Involved!
+### 2. Configure environment
 
-Your insights and contributions are invaluable to us. If you're excited about the potential of this app, show your support by giving it a ⭐️ on GitHub. If you're eager to contribute, feel free to fork the project and become an active participant. Encountered a bug or have an innovative feature in mind? Open an issue, and let's have a constructive discussion. Together, we're building a scalable code architecture that caters to a diverse range of use cases.
+```bash
+cp .env.example .env
+```
 
-## Frequently Asked Questions
+Edit `.env` and fill in your API credentials for the platforms you want to use. You can start with just Mastodon or Bluesky — both have free, open APIs.
 
-- **Tech Stack**: We've chosen a robust tech stack for this project. The backend will be built using Node.js, employing a microservices architecture. On the frontend, we're utilizing Vue.js to create a seamless user experience. Additionally, our deployment includes Nginx, RabbitMQ for messaging, and Docker for containerization.
+```env
+# Mastodon (easiest — get token from instance Settings > Development)
+MASTODON_INSTANCE_URL=https://mastodon.social
+MASTODON_ACCESS_TOKEN=your_token_here
 
-## How to Get Started
+# Bluesky (use an App Password from Settings > App Passwords)
+BLUESKY_IDENTIFIER=yourhandle.bsky.social
+BLUESKY_APP_PASSWORD=your_app_password_here
+```
 
-Here's a quick guide on how to set up and run the project using Docker commands:
+### 3. Start the application
 
-1. Clone the repository to your local machine.
-2. Navigate to the project directory.
-3. Run `docker-compose up` to start the microservices, frontend, and backend.
-4. Access the application by opening your web browser and navigating to the [specified URL](http://localhost:8081).
+```bash
+docker compose up -d
+```
 
-Your enthusiasm and involvement in this project are immensely appreciated. Let's collaborate to revolutionize social media management, one commit at a time!
+Open **http://localhost:8081** in your browser.
+
+---
+
+## Platform Connection Guide
+
+| Platform | API Cost | Feed | Post | Notes |
+|----------|----------|------|------|-------|
+| Mastodon | Free | ✅ | ✅ | Easiest — open REST API |
+| Bluesky | Free | ✅ | ✅ | App Password auth, no OAuth needed |
+| Reddit | Free | ✅ | ✅ | Register an app at reddit.com/prefs/apps |
+| Twitter/X | Paid ($100/mo Basic) | ⚠️ | ✅ | Free tier very limited |
+| LinkedIn | Free | ⚠️ | ✅ | Personal feed read not available via API |
+| Instagram | Free | ⚠️ | ⚠️ | Business/Creator account required |
+| YouTube | Free | ✅ | ❌ | Subscription feed read-only |
+
+---
+
+## Adding a New Language
+
+1. Create `ui/src/locales/xx.ts` (copy `en.ts` and translate)
+2. In `ui/src/locales/index.ts`:
+   ```ts
+   import xx from './xx'
+   // Add to messages: { en, tr, xx }
+   // Add to SUPPORTED_LOCALES: { code: 'xx', label: '...', flag: '🇽🇽' }
+   ```
+3. Done — language will appear in the NavBar dropdown automatically
+
+---
+
+## Adding a New Platform
+
+1. Create `services/{platform}/` with `index.js`, `package.json`, `Dockerfile`
+2. Extend `BasePlatformService` and implement `fetchFeed()`, `publishPost()`, `getStatus()`
+3. Add the service to `docker-compose.yml`
+4. Add the service URL to `feed-aggregator` and `scheduler` environment variables
+5. Add platform metadata to `ui/src/stores/platforms.ts`
+
+---
+
+## Project Structure
+
+```
+.
+├── services/
+│   ├── utils/               # Shared: RabbitMQ, MongoDB, BasePlatformService
+│   ├── gateway/             # API gateway
+│   ├── socket/              # WebSocket server
+│   ├── formatter/           # Content formatter
+│   ├── ai_grammar_correction/
+│   ├── feed-aggregator/
+│   ├── scheduler/
+│   ├── twitter/
+│   ├── linkedin/
+│   ├── mastodon/
+│   └── bluesky/
+├── ui/
+│   └── src/
+│       ├── views/           # Dashboard, Compose, Scheduler, Settings
+│       ├── components/
+│       ├── stores/          # Pinia: feed, compose, platforms
+│       ├── locales/         # i18n: en, tr
+│       └── router/
+├── docs/                    # Architecture, roadmap, platform guides (gitignored)
+├── docker-compose.yml
+├── nginx.conf
+└── .env.example
+```
+
+---
+
+## License
+
+[LICENSE.txt](LICENSE.txt)

@@ -1,23 +1,22 @@
 {
-  "name": "twitter-service",
+  "name": "scheduler-service",
   "version": "1.0.0",
-  "description": "Twitter/X platform service",
+  "description": "Scheduled post and task management service",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
   "dependencies": {
-    "twitter-api-v2": "^1.17.0",
     "fastify": "^4.24.3",
+    "bullmq": "^5.1.0",
+    "ioredis": "^5.3.2",
+    "axios": "^1.6.2",
     "amqplib": "^0.10.3",
     "mongodb": "^6.3.0",
     "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }

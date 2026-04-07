@@ -1,15 +1,12 @@
-<script setup lang="ts">
-import PostSender from './components/PostSender.vue'
-import NavBar from './components/NavBar.vue'
-import Footer from './components/Footer.vue';
-</script>
-
 <template>
-  <NavBar/>
-  <PostSender/>
-  <Footer/>
+  <div class="min-h-screen bg-gray-950 flex flex-col">
+    <NavBar />
+    <div class="flex-1">
+      <RouterView />
+    </div>
+  </div>
 </template>
 
-<style scoped>
-
-</style>
+<script setup lang="ts">
+import NavBar from './components/NavBar.vue'
+</script>

@@ -1,23 +1,21 @@
 {
-  "name": "twitter-service",
+  "name": "feed-aggregator",
   "version": "1.0.0",
-  "description": "Twitter/X platform service",
+  "description": "Feed aggregation service — pulls feeds from all platform services",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
   "dependencies": {
-    "twitter-api-v2": "^1.17.0",
     "fastify": "^4.24.3",
+    "axios": "^1.6.2",
+    "node-cron": "^3.0.3",
     "amqplib": "^0.10.3",
     "mongodb": "^6.3.0",
     "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }

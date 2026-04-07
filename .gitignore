@@ -68,3 +68,6 @@ Thumbs.db
 
 # Test coverage directory used by tools like istanbul
 coverage/
+
+# Docs folder
+docs/

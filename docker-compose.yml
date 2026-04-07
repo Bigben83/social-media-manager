@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
 
   nginx:
@@ -28,6 +26,30 @@ services:
     networks:
       - socialMediaManagerNetwork
 
+  mongodb:
+    container_name: mongodb
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - 27018:27017
+    environment:
+      MONGO_INITDB_DATABASE: socialmedia
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - socialMediaManagerNetwork
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - 6379:6379
+    volumes:
+      - redis-data:/data
+    networks:
+      - socialMediaManagerNetwork
+
   ai-grammer-correction:
     build: ./services/ai_grammar_correction
     volumes:
@@ -43,16 +65,18 @@ services:
     volumes:
       - ./services/utils:/services/gateway/utils
       - ./services/gateway:/services/gateway
+      - gateway_modules:/services/gateway/node_modules
     networks:
       - socialMediaManagerNetwork
     depends_on:
-      - messageBroker  
-  
+      - messageBroker
+
   socket:
     build: ./services/socket
     volumes:
       - ./services/utils:/services/socket/utils
       - ./services/socket:/services/socket
+      - socket_modules:/services/socket/node_modules
     networks:
       - socialMediaManagerNetwork
     depends_on:
@@ -63,6 +87,7 @@ services:
     volumes:
       - ./services/utils:/services/formatter/utils
       - ./services/formatter:/services/formatter
+      - formatter_modules:/services/formatter/node_modules
     restart: unless-stopped
     networks:
       - socialMediaManagerNetwork
@@ -70,31 +95,98 @@ services:
       - messageBroker
 
   twitter:
-    build: ./services/twitter
+    build:
+      context: ./services
+      dockerfile: twitter/dockerfile
     volumes:
-      - ./services/utils:/services/twitter/utils
-      - ./services/twitter:/services/twitter
+      - twitter_modules:/services/twitter/node_modules
     restart: unless-stopped
+    env_file: .env
     networks:
       - socialMediaManagerNetwork
     depends_on:
       - messageBroker
-      
+      - mongodb
+
   linkedin:
     build: ./services/linkedin
     volumes:
       - ./services/utils:/services/linkedin/utils
       - ./services/linkedin:/services/linkedin
+      - linkedin_modules:/services/linkedin/node_modules
     restart: unless-stopped
+    env_file: .env
     networks:
       - socialMediaManagerNetwork
     depends_on:
       - messageBroker
+      - mongodb
+
+  mastodon:
+    build:
+      context: ./services
+      dockerfile: mastodon/Dockerfile
+    volumes:
+      - mastodon_modules:/services/mastodon/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - messageBroker
+      - mongodb
+
+  bluesky:
+    build:
+      context: ./services
+      dockerfile: bluesky/Dockerfile
+    volumes:
+      - bluesky_modules:/services/bluesky/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - messageBroker
+      - mongodb
+
+  feed-aggregator:
+    build:
+      context: ./services
+      dockerfile: feed-aggregator/Dockerfile
+    volumes:
+      - feed_aggregator_modules:/services/feed-aggregator/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - messageBroker
+      - mongodb
+      - twitter
+      - linkedin
+      - mastodon
+      - bluesky
+
+  scheduler:
+    build:
+      context: ./services
+      dockerfile: scheduler/Dockerfile
+    volumes:
+      - scheduler_modules:/services/scheduler/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - mongodb
+      - redis
 
   ui:
     build: ./ui
     volumes:
       - ./ui:/app/ui
+      - ui_modules:/app/ui/node_modules
     networks:
       - socialMediaManagerNetwork
     depends_on:
@@ -103,3 +195,17 @@ services:
 networks:
   socialMediaManagerNetwork:
     driver: bridge
+
+volumes:
+  mongodb-data:
+  redis-data:
+  gateway_modules:
+  socket_modules:
+  formatter_modules:
+  twitter_modules:
+  linkedin_modules:
+  mastodon_modules:
+  bluesky_modules:
+  feed_aggregator_modules:
+  scheduler_modules:
+  ui_modules:
