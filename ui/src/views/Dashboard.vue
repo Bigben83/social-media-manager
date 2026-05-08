@@ -28,10 +28,14 @@
 
           <!-- Facebook sub-pages -->
           <template v-if="key === 'facebook' && platformsStore.connectedPages.length">
-            <div
+            <button
               v-for="page in platformsStore.connectedPages"
               :key="page.id"
-              class="flex items-center gap-2 pl-6 pr-2 py-1 mb-0.5"
+              @click="feedStore.togglePage(page.id)"
+              class="flex items-center gap-2 w-full pl-6 pr-2 py-1 mb-0.5 rounded-lg text-left transition-colors"
+              :class="feedStore.activePageIds.has(page.id)
+                ? 'bg-blue-900/30 text-white'
+                : 'text-gray-500 hover:bg-gray-800/60 hover:text-gray-300'"
             >
               <img v-if="page.picture" :src="page.picture" class="w-3.5 h-3.5 rounded-full flex-shrink-0" />
               <span
@@ -39,16 +43,21 @@
                 class="w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center justify-center text-white"
                 style="background:#1877F2; font-size:8px"
               >f</span>
-              <span class="text-xs text-gray-500 truncate">{{ page.name }}</span>
-            </div>
+              <span class="text-xs truncate flex-1">{{ page.name }}</span>
+              <span v-if="feedStore.activePageIds.has(page.id)" class="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0"></span>
+            </button>
           </template>
 
           <!-- Instagram sub-accounts -->
           <template v-if="key === 'instagram' && platformsStore.connectedIgAccounts.length">
-            <div
+            <button
               v-for="account in platformsStore.connectedIgAccounts"
               :key="account.id"
-              class="flex items-center gap-2 pl-6 pr-2 py-1 mb-0.5"
+              @click="feedStore.toggleIgAccount(account.id)"
+              class="flex items-center gap-2 w-full pl-6 pr-2 py-1 mb-0.5 rounded-lg text-left transition-colors"
+              :class="feedStore.activeIgAccountIds.has(account.id)
+                ? 'bg-pink-900/30 text-white'
+                : 'text-gray-500 hover:bg-gray-800/60 hover:text-gray-300'"
             >
               <img v-if="account.avatar" :src="account.avatar" class="w-3.5 h-3.5 rounded-full flex-shrink-0" />
               <span
@@ -56,8 +65,9 @@
                 class="w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center justify-center text-white"
                 style="background:#E1306C; font-size:8px"
               >I</span>
-              <span class="text-xs text-gray-500 truncate">@{{ account.username }}</span>
-            </div>
+              <span class="text-xs truncate flex-1">@{{ account.username }}</span>
+              <span v-if="feedStore.activeIgAccountIds.has(account.id)" class="w-1.5 h-1.5 rounded-full bg-pink-400 flex-shrink-0"></span>
+            </button>
           </template>
         </template>
       </div>

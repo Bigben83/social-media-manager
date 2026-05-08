@@ -21,15 +21,22 @@ export default {
 
   compose: {
     title: 'New Post',
-    platformsLabel: 'Share to platforms',
+    destinationsLabel: 'Post to',
     placeholder: "What's on your mind?",
-    schedulingLabel: 'Schedule (optional)',
     cancel: 'Cancel',
     schedule: 'Schedule',
     scheduling: 'Scheduling...',
     send: 'Post →',
+    postAndSchedule: 'Post & Schedule',
     sending: 'Posting...',
     successMessage: 'Post sent successfully.',
+    scheduleTitle: 'Schedule this destination (leave empty to post now)',
+    facebookPages: 'Facebook Pages',
+    instagramAccounts: 'Instagram Accounts',
+    igImagePlaceholder: 'Image URL (required for Instagram)',
+    igImageRequired: 'Add an image URL for: {accounts}',
+    noDestinations: 'No platforms configured.',
+    goToSettings: 'Go to Settings →',
   },
 
   scheduler: {

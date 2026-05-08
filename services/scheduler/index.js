@@ -23,23 +23,29 @@ let redis;
 // ─── Job Worker ──────────────────────────────────────────────────────────────
 
 async function processPostJob(job) {
-  const { postId, content, platforms, media = [] } = job.data;
-  console.log(`[Scheduler] Job ${job.id} çalışıyor: ${platforms.join(', ')}`);
+  // destinations: [{ platform, accountId?, imageUrl?, videoUrl?, link? }]
+  // Falls back to legacy { platforms: string[] } format
+  const { postId, content, destinations, platforms, media = [] } = job.data;
+
+  const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
+  console.log(`[Scheduler] Job ${job.id}: ${destList.map((d) => d.accountId ? `${d.platform}:${d.accountId}` : d.platform).join(', ')}`);
 
   const db = await getDb();
   const results = {};
 
-  for (const platform of platforms) {
+  for (const dest of destList) {
+    const { platform, accountId, imageUrl, videoUrl, link } = dest;
+    const resultKey = accountId ? `${platform}:${accountId}` : platform;
     const serviceUrl = PLATFORM_SERVICES[platform];
     if (!serviceUrl) {
-      results[platform] = { success: false, error: 'Bilinmeyen platform' };
+      results[resultKey] = { success: false, error: 'Unknown platform' };
       continue;
     }
     try {
-      const response = await axios.post(`${serviceUrl}/post`, { content, media }, { timeout: 30000 });
-      results[platform] = { success: true, ...response.data.result };
+      const response = await axios.post(`${serviceUrl}/post`, { content, accountId, imageUrl, videoUrl, link, media }, { timeout: 30000 });
+      results[resultKey] = { success: true, ...response.data.result };
     } catch (err) {
-      results[platform] = { success: false, error: err.message };
+      results[resultKey] = { success: false, error: err.message };
     }
   }
 
@@ -72,32 +78,35 @@ async function processPostJob(job) {
 
 app.get('/health', async () => ({ status: 'ok', service: 'scheduler' }));
 
-// Yeni zamanlanmış gönderi oluştur
+// Create a scheduled post.
+// Body: { content, scheduledAt, destinations: [{ platform, accountId?, imageUrl?, videoUrl?, link? }] }
+// Legacy { platforms: string[] } still accepted for backwards compatibility.
 app.post('/schedule', async (request, reply) => {
-  const { postId, content, platforms, scheduledAt, media = [] } = request.body;
+  const { postId, content, destinations, platforms, scheduledAt, media = [] } = request.body;
 
-  if (!content || !platforms?.length || !scheduledAt) {
-    return reply.code(400).send({ error: 'content, platforms ve scheduledAt zorunlu' });
+  const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
+
+  if (!content || !destList.length || !scheduledAt) {
+    return reply.code(400).send({ error: 'content, destinations, and scheduledAt are required' });
   }
 
   const delay = new Date(scheduledAt).getTime() - Date.now();
   if (delay < 0) {
-    return reply.code(400).send({ error: 'scheduledAt geçmiş bir tarih olamaz' });
+    return reply.code(400).send({ error: 'scheduledAt must be in the future' });
   }
 
   const job = await postQueue.add(
     'scheduled-post',
-    { postId, content, platforms, media },
+    { postId, content, destinations: destList, media },
     { delay, attempts: 3, backoff: { type: 'exponential', delay: 60000 } }
   );
 
-  // MongoDB kayıt
   const db = await getDb();
   await db.collection('scheduled_jobs').insertOne({
     postId,
     type: 'one-time',
     scheduledAt: new Date(scheduledAt),
-    platforms,
+    destinations: destList,
     status: 'pending',
     attempts: 0,
     maxAttempts: 3,

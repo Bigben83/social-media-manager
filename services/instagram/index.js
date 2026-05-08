@@ -116,13 +116,17 @@ class InstagramService extends BasePlatformService {
   }
 
   // Instagram requires media (image_url or video_url) — text-only posts are not supported.
-  async publishPost({ content, imageUrl, videoUrl } = {}) {
-    const accounts = await this._getAccounts();
-    if (accounts.length === 0) throw new Error('No Instagram accounts connected');
+  async publishPost({ content, imageUrl, videoUrl, accountId } = {}) {
+    const allAccounts = await this._getAccounts();
+    if (allAccounts.length === 0) throw new Error('No Instagram accounts connected');
 
     if (!imageUrl && !videoUrl) {
       throw new Error('Instagram requires imageUrl or videoUrl — text-only posts are not supported by the Graph API');
     }
+
+    // If a specific account is requested, target only that account
+    const accounts = accountId ? allAccounts.filter((a) => a.id === accountId) : allAccounts;
+    if (accounts.length === 0) throw new Error(`Instagram account ${accountId} not found or not connected`);
 
     const results = [];
     for (const account of accounts) {

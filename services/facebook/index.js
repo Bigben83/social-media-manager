@@ -109,10 +109,14 @@ class FacebookService extends BasePlatformService {
     return allItems;
   }
 
-  async publishPost({ content, link, imageUrl } = {}) {
-    const pages = await this._getPages();
-    if (pages.length === 0) throw new Error('No Facebook Pages connected');
+  async publishPost({ content, link, imageUrl, accountId } = {}) {
+    const allPages = await this._getPages();
+    if (allPages.length === 0) throw new Error('No Facebook Pages connected');
     if (!content) throw new Error('content is required');
+
+    // If a specific page is requested, target only that page
+    const pages = accountId ? allPages.filter((p) => p.id === accountId) : allPages;
+    if (pages.length === 0) throw new Error(`Facebook page ${accountId} not found or not connected`);
 
     const results = [];
     for (const page of pages) {

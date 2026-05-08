@@ -42,6 +42,43 @@ async function deleteCredentials(id) {
   await db.collection('platform_credentials').deleteOne({ _id: id });
 }
 
+// ─── Platform service URLs ────────────────────────────────────────────────────
+
+const PLATFORM_SERVICES = {
+  twitter:   process.env.TWITTER_SERVICE_URL   || 'http://twitter:3001',
+  linkedin:  process.env.LINKEDIN_SERVICE_URL  || 'http://linkedin:3002',
+  mastodon:  process.env.MASTODON_SERVICE_URL  || 'http://mastodon:3003',
+  bluesky:   process.env.BLUESKY_SERVICE_URL   || 'http://bluesky:3004',
+  instagram: process.env.INSTAGRAM_SERVICE_URL || 'http://instagram:3005',
+  facebook:  process.env.FACEBOOK_SERVICE_URL  || 'http://facebook:3006',
+};
+
+// Direct multi-platform post endpoint.
+// Body: { content: string, destinations: Array<{ platform, accountId?, imageUrl?, videoUrl?, link? }> }
+app.post('/post', async (request, reply) => {
+  const { content, destinations = [] } = request.body || {};
+  if (!content?.trim()) return reply.code(400).send({ error: 'content is required' });
+  if (!destinations.length) return reply.code(400).send({ error: 'destinations must not be empty' });
+
+  const results = await Promise.allSettled(
+    destinations.map(async ({ platform, accountId, imageUrl, videoUrl, link }) => {
+      const serviceUrl = PLATFORM_SERVICES[platform];
+      if (!serviceUrl) throw new Error(`Unknown platform: ${platform}`);
+      const res = await axios.post(`${serviceUrl}/post`, { content, accountId, imageUrl, videoUrl, link }, { timeout: 30000 });
+      return { platform, accountId, ...res.data };
+    })
+  );
+
+  const output = results.map((r, i) =>
+    r.status === 'fulfilled'
+      ? r.value
+      : { platform: destinations[i].platform, accountId: destinations[i].accountId, success: false, error: r.reason?.message }
+  );
+
+  const anyFailed = output.some((r) => !r.success);
+  return reply.code(anyFailed ? 207 : 200).send({ results: output });
+});
+
 // ─── Legacy post route ────────────────────────────────────────────────────────
 
 let rabbitMQProducer = new RabbitMQProducer();

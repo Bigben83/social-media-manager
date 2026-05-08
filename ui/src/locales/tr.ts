@@ -21,15 +21,22 @@ export default {
 
   compose: {
     title: 'Yeni Gönderi',
-    platformsLabel: 'Paylaşılacak platformlar',
+    destinationsLabel: 'Şuralara gönder',
     placeholder: 'Ne düşünüyorsun?',
-    schedulingLabel: 'Zamanlama (opsiyonel)',
     cancel: 'İptal',
     schedule: 'Zamanla',
     scheduling: 'Zamanlanıyor...',
     send: 'Gönder →',
+    postAndSchedule: 'Gönder & Zamanla',
     sending: 'Gönderiliyor...',
     successMessage: 'Gönderi başarıyla gönderildi.',
+    scheduleTitle: 'Bu hedef için zamanlama (boş bırakırsan hemen gönderilir)',
+    facebookPages: 'Facebook Sayfaları',
+    instagramAccounts: 'Instagram Hesapları',
+    igImagePlaceholder: 'Görsel URL\'si (Instagram için zorunlu)',
+    igImageRequired: 'Görsel URL\'si ekle: {accounts}',
+    noDestinations: 'Hiçbir platform yapılandırılmamış.',
+    goToSettings: 'Ayarlara git →',
   },
 
   scheduler: {
