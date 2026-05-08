@@ -183,6 +183,37 @@ app.delete('/drafts/:id', async (request, reply) => {
   return { success: true };
 });
 
+// ─── Account Profiles ────────────────────────────────────────────────────────
+
+app.get('/profiles', async () => {
+  const db = await getDb();
+  const profiles = await db.collection('account_profiles').find({}).toArray();
+  return { profiles };
+});
+
+app.get('/profiles/:accountKey', async (request, reply) => {
+  const { accountKey } = request.params;
+  const db = await getDb();
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  return profile ?? { _id: accountKey };
+});
+
+app.put('/profiles/:accountKey', async (request, reply) => {
+  const { accountKey } = request.params;
+  const {
+    businessName = '', description = '', websiteUrl = '', industry = '',
+    targetAudience = '', toneOfVoice = '', keywords = '', hashtags = '',
+    postingGuidelines = '',
+  } = request.body || {};
+  const db = await getDb();
+  await db.collection('account_profiles').updateOne(
+    { _id: accountKey },
+    { $set: { businessName, description, websiteUrl, industry, targetAudience, toneOfVoice, keywords, hashtags, postingGuidelines, updatedAt: new Date() } },
+    { upsert: true }
+  );
+  return { success: true };
+});
+
 // ─── Platform service URLs ────────────────────────────────────────────────────
 
 const PLATFORM_SERVICES = {

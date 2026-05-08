@@ -258,6 +258,191 @@
         </div>
       </div>
 
+      <!-- ═══════════════════════════════════════════════════════════════════
+           ACCOUNT PROFILES
+      ════════════════════════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+        <!-- Header -->
+        <div class="p-5 border-b border-gray-800">
+          <p class="font-semibold">{{ $t('settings.profiles.sectionTitle') }}</p>
+          <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.profiles.sectionSubtitle') }}</p>
+        </div>
+
+        <!-- No accounts -->
+        <div v-if="!allConnectedAccounts.length" class="px-5 py-6 text-sm text-gray-600 text-center">
+          {{ $t('settings.profiles.noAccounts') }}
+        </div>
+
+        <!-- Account rows -->
+        <div v-else class="divide-y divide-gray-800">
+          <div v-for="account in allConnectedAccounts" :key="account.key">
+
+            <!-- Account header row -->
+            <button
+              @click="toggleProfile(account.key)"
+              class="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-gray-800/50 transition-colors text-left"
+            >
+              <!-- Avatar -->
+              <div class="flex-shrink-0">
+                <img
+                  v-if="account.avatar"
+                  :src="account.avatar"
+                  class="w-8 h-8 rounded-full object-cover"
+                />
+                <span
+                  v-else
+                  class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                  :style="{ backgroundColor: account.color }"
+                >
+                  {{ account.label[0] }}
+                </span>
+              </div>
+
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium truncate">{{ account.label }}</p>
+                <p class="text-xs text-gray-600">{{ $t(`platforms.${account.platform}`) }}</p>
+              </div>
+
+              <!-- Filled indicator -->
+              <span
+                v-if="profileFilled(account.key)"
+                class="text-xs text-green-400 flex-shrink-0"
+              >✓</span>
+
+              <!-- Chevron -->
+              <svg
+                class="w-4 h-4 text-gray-500 flex-shrink-0 transition-transform"
+                :class="expandedProfileKey === account.key ? 'rotate-180' : ''"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <!-- Expanded profile form -->
+            <div v-if="expandedProfileKey === account.key" class="px-5 pb-5 pt-1 space-y-4 bg-gray-950/40">
+
+              <!-- Row 1: Business Name + Website -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.businessName') }}</label>
+                  <input
+                    v-model="editingProfiles[account.key].businessName"
+                    type="text"
+                    :placeholder="$t('settings.profiles.businessNameHint')"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.websiteUrl') }}</label>
+                  <input
+                    v-model="editingProfiles[account.key].websiteUrl"
+                    type="url"
+                    placeholder="https://"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <!-- Description -->
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.description') }}</label>
+                <textarea
+                  v-model="editingProfiles[account.key].description"
+                  :placeholder="$t('settings.profiles.descriptionHint')"
+                  rows="2"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+                />
+              </div>
+
+              <!-- Row 2: Industry + Tone -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.industry') }}</label>
+                  <input
+                    v-model="editingProfiles[account.key].industry"
+                    type="text"
+                    :placeholder="$t('settings.profiles.industryHint')"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.toneOfVoice') }}</label>
+                  <select
+                    v-model="editingProfiles[account.key].toneOfVoice"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">{{ $t('settings.profiles.toneSelect') }}</option>
+                    <option v-for="tone in TONE_OPTIONS" :key="tone.value" :value="tone.value">{{ tone.label }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Target Audience -->
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.targetAudience') }}</label>
+                <input
+                  v-model="editingProfiles[account.key].targetAudience"
+                  type="text"
+                  :placeholder="$t('settings.profiles.targetAudienceHint')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <!-- Row 3: Keywords + Hashtags -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.keywords') }}</label>
+                  <input
+                    v-model="editingProfiles[account.key].keywords"
+                    type="text"
+                    :placeholder="$t('settings.profiles.keywordsHint')"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.hashtags') }}</label>
+                  <input
+                    v-model="editingProfiles[account.key].hashtags"
+                    type="text"
+                    :placeholder="$t('settings.profiles.hashtagsHint')"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <!-- Posting Guidelines -->
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.postingGuidelines') }}</label>
+                <textarea
+                  v-model="editingProfiles[account.key].postingGuidelines"
+                  :placeholder="$t('settings.profiles.postingGuidelinesHint')"
+                  rows="3"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+                />
+              </div>
+
+              <!-- Save button -->
+              <div class="flex items-center justify-end gap-3">
+                <span v-if="profileSavedKey === account.key" class="text-xs text-green-400">
+                  {{ $t('settings.profiles.saved') }}
+                </span>
+                <button
+                  @click="saveProfile(account.key)"
+                  :disabled="profileSaving === account.key"
+                  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {{ profileSaving === account.key ? $t('settings.profiles.saving') : $t('settings.profiles.save') }}
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+
       <!-- Refresh button -->
       <button
         @click="platformsStore.fetchStatuses()"
@@ -273,7 +458,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
+
+const { t } = useI18n()
 
 const route = useRoute()
 const platformsStore = usePlatformsStore()
@@ -358,6 +547,103 @@ function getStatus(platform: string) {
 function confirmDisconnect() {
   if (window.confirm(platformsStore.metaCredentials?.appId ? 'This will disconnect all Facebook Pages and Instagram accounts. Continue?' : '')) {
     platformsStore.disconnectMeta().then(loadMetaConnections)
+  }
+}
+
+// ─── Account Profiles ────────────────────────────────────────────────────────
+
+const TONE_OPTIONS = [
+  { value: 'professional', label: 'Professional' },
+  { value: 'casual',       label: 'Casual' },
+  { value: 'friendly',     label: 'Friendly' },
+  { value: 'formal',       label: 'Formal' },
+  { value: 'humorous',     label: 'Humorous' },
+  { value: 'inspiring',    label: 'Inspiring' },
+  { value: 'educational',  label: 'Educational' },
+]
+
+interface AccountProfile {
+  businessName: string
+  description: string
+  websiteUrl: string
+  industry: string
+  targetAudience: string
+  toneOfVoice: string
+  keywords: string
+  hashtags: string
+  postingGuidelines: string
+}
+
+interface ProfileAccount {
+  key: string
+  label: string
+  platform: string
+  color: string
+  avatar: string | null
+}
+
+function emptyProfile(): AccountProfile {
+  return { businessName: '', description: '', websiteUrl: '', industry: '', targetAudience: '', toneOfVoice: '', keywords: '', hashtags: '', postingGuidelines: '' }
+}
+
+const expandedProfileKey = ref<string | null>(null)
+const editingProfiles = ref<Record<string, AccountProfile>>({})
+const profileSaving = ref<string | null>(null)
+const profileSavedKey = ref<string | null>(null)
+
+const allConnectedAccounts = computed((): ProfileAccount[] => {
+  const accounts: ProfileAccount[] = []
+
+  for (const [platform, meta] of Object.entries(PLATFORM_META)) {
+    if (platform === 'facebook' || platform === 'instagram') continue
+    if (platformsStore.isConnected(platform)) {
+      accounts.push({ key: platform, label: t(`platforms.${platform}`), platform, color: meta.color, avatar: null })
+    }
+  }
+
+  for (const page of platformsStore.connectedPages) {
+    accounts.push({ key: `facebook:${page.id}`, label: page.name, platform: 'facebook', color: PLATFORM_META.facebook.color, avatar: page.picture || null })
+  }
+
+  for (const account of platformsStore.connectedIgAccounts) {
+    accounts.push({ key: `instagram:${account.id}`, label: `@${account.username}`, platform: 'instagram', color: PLATFORM_META.instagram.color, avatar: account.avatar || null })
+  }
+
+  return accounts
+})
+
+function profileFilled(key: string): boolean {
+  const p = editingProfiles.value[key]
+  return !!p && !!(p.businessName || p.description || p.industry)
+}
+
+async function toggleProfile(key: string) {
+  if (expandedProfileKey.value === key) {
+    expandedProfileKey.value = null
+    return
+  }
+  expandedProfileKey.value = key
+  if (!editingProfiles.value[key]) {
+    try {
+      const res = await axios.get(`/api/profiles/${encodeURIComponent(key)}`)
+      const { _id, updatedAt, ...data } = res.data
+      editingProfiles.value[key] = { ...emptyProfile(), ...data }
+    } catch {
+      editingProfiles.value[key] = emptyProfile()
+    }
+  }
+}
+
+async function saveProfile(key: string) {
+  profileSaving.value = key
+  try {
+    await axios.put(`/api/profiles/${encodeURIComponent(key)}`, editingProfiles.value[key])
+    profileSavedKey.value = key
+    setTimeout(() => { if (profileSavedKey.value === key) profileSavedKey.value = null }, 2500)
+  } catch (err) {
+    console.error('Save profile error:', err)
+  } finally {
+    profileSaving.value = null
   }
 }
 
