@@ -27,7 +27,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
+| --- | --- |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind CSS, Pinia, Vue Router, vue-i18n |
 | API Gateway | Node.js / Fastify 4 |
 | Platform Services | Node.js / Fastify (one per platform) |
@@ -43,7 +43,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 ## Services
 
 | Service | Port | Description |
-|---------|------|-------------|
+| --- | --- | --- |
 | `nginx` | 8081 | Reverse proxy — main entry point |
 | `ui` | — | Vue 3 frontend (Vite dev server) |
 | `gateway` | 8084 | REST API gateway |
@@ -100,7 +100,7 @@ BLUESKY_APP_PASSWORD=your_app_password_here
 docker compose up -d
 ```
 
-Open **http://localhost:8081** in your browser.
+Open **<http://localhost:8081>** in your browser.
 
 ### 4. (Optional) Connect AI via Ollama
 
@@ -118,15 +118,18 @@ Then go to **Settings → AI Integration**, set the endpoint to `http://host.doc
 ## Platform Connection Guide
 
 | Platform | API Cost | Feed | Post | Notes |
-|----------|----------|------|------|-------|
+| --- | --- | --- | --- | --- |
 | Mastodon | Free | ✅ | ✅ | Easiest — open REST API |
 | Bluesky | Free | ✅ | ✅ | App Password auth, no OAuth needed |
 | Reddit | Free | ✅ | ✅ | Register an app at reddit.com/prefs/apps |
-| Twitter/X | Paid ($100/mo Basic) | ⚠️ | ✅ | Free tier very limited |
-| LinkedIn | Free | ⚠️ | ✅ | Personal feed read not available via API |
+| Twitter/X | Paid ($100/mo Basic) | ⚠️ | ✅ | Free tier limited; OAuth 2.0 in pipeline |
+| LinkedIn | Free | ⚠️ | ✅ | Personal feed read not available; env var token for now |
 | Instagram | Free | ✅ | ✅ | Business/Creator account + Facebook Page required |
 | Facebook | Free | ✅ | ✅ | Facebook Page required (personal timelines not supported) |
-| YouTube | Free | ✅ | ❌ | Subscription feed read-only |
+| YouTube | Free | ✅ | ❌ | Subscription feed only; publishing in pipeline |
+| TikTok | Free | — | — | In pipeline |
+| Pinterest | Free | — | — | In pipeline |
+| Google Business | Free | — | — | In pipeline |
 
 ---
 
@@ -159,7 +162,7 @@ Both Instagram and Facebook share **one Facebook Developer App**. You set it up 
 **Required permissions** (Development mode — no App Review needed for your own accounts):
 
 | Permission | Used for |
-|------------|----------|
+| --- | --- |
 | `pages_manage_posts` | Post to Facebook Page |
 | `pages_read_engagement` | Read Facebook Page feed |
 | `instagram_basic` | Read Instagram media |
@@ -179,7 +182,7 @@ Tokens are stored encrypted in MongoDB — no `.env` editing required.
 ### Token Notes
 
 | Token | Expiry | How it is handled |
-|-------|--------|-------------------|
+| --- | --- | --- |
 | Short-lived user token | 1–2 hours | Exchanged automatically during OAuth |
 | Long-lived user token | ~60 days | Stored encrypted; reconnect via Settings when it expires |
 | Page access token | Never expires | Fetched during OAuth and stored encrypted |
@@ -190,15 +193,53 @@ Tokens are stored encrypted in MongoDB — no `.env` editing required.
 
 ---
 
+## LinkedIn Setup
+
+LinkedIn currently uses a **personal access token** stored in `.env`. A full OAuth 2.0 flow is in the pipeline.
+
+### Step 1 — Create a LinkedIn App
+
+1. Go to [linkedin.com/developers/apps](https://www.linkedin.com/developers/apps) and click **Create App**
+2. Fill in the app name, LinkedIn Page (required — create a company page if you don't have one), and logo
+3. Under the **Products** tab, request access to:
+   - **Share on LinkedIn** — enables posting to your profile/page
+   - **Sign In with LinkedIn using OpenID Connect** — enables OAuth login (needed for the upcoming OAuth flow)
+4. Under **Auth**, note your **Client ID** and **Client Secret**
+5. Add your redirect URI under **OAuth 2.0 Settings**:
+
+   ```text
+   http://localhost:8081/api/auth/linkedin/callback
+   ```
+
+### Step 2 — Generate an Access Token
+
+Until the OAuth flow is built, generate a token manually:
+
+1. Use the [LinkedIn Token Generator](https://www.linkedin.com/developers/tools/oauth/token-generator) in the developer portal
+2. Select scopes: `w_member_social`, `r_liteprofile`, `r_emailaddress`
+3. Copy the generated access token
+
+### Step 3 — Add to `.env`
+
+```env
+LINKEDIN_ACCESS_TOKEN=your_token_here
+```
+
+> **Note:** Manual tokens expire after 60 days. A full OAuth 2.0 connection flow (similar to the Meta flow) is planned in the pipeline — once built, you will connect LinkedIn from the Settings UI with one click and tokens will be refreshed automatically.
+
+---
+
 ## Adding a New Language
 
 1. Create `ui/src/locales/xx.ts` (copy `en.ts` and translate)
 2. In `ui/src/locales/index.ts`:
+
    ```ts
    import xx from './xx'
    // Add to messages: { en, tr, xx }
    // Add to SUPPORTED_LOCALES: { code: 'xx', label: '...', flag: '🇽🇽' }
    ```
+
 3. Done — the language appears in the NavBar dropdown automatically
 
 ---
@@ -217,7 +258,7 @@ Tokens are stored encrypted in MongoDB — no `.env` editing required.
 
 ## Project Structure
 
-```
+```text
 .
 ├── services/
 │   ├── utils/               # Shared: BasePlatformService, MongoDB, RabbitMQ, logger, crypto
