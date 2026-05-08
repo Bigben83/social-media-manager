@@ -20,7 +20,7 @@ export interface FeedItem {
 export const useFeedStore = defineStore('feed', () => {
   const items = ref<FeedItem[]>([])
   const loading = ref(false)
-  const activePlatforms = ref<Set<string>>(new Set(['twitter', 'mastodon', 'bluesky', 'linkedin']))
+  const activePlatforms = ref<Set<string>>(new Set(['twitter', 'mastodon', 'bluesky', 'linkedin', 'instagram', 'facebook']))
   const activeTag = ref<string | null>(null)
   const searchQuery = ref('')
 

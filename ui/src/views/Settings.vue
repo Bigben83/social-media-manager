@@ -301,17 +301,12 @@ const igStatus = computed(() => platformsStore.getStatus('instagram'))
 const fbConnected = computed(() => fbStatus.value?.connected ?? false)
 const igConnected = computed(() => igStatus.value?.connected ?? false)
 
-// These come from the gateway /api/credentials endpoint (richer than platform-status)
-const fbPages = ref<Array<{ id: string; name: string; picture?: string }>>([])
-const igAccounts = ref<Array<{ id: string; username: string; avatar?: string }>>([])
+// Pull connected pages/accounts from the shared store
+const fbPages = computed(() => platformsStore.connectedPages)
+const igAccounts = computed(() => platformsStore.connectedIgAccounts)
 
 async function loadMetaConnections() {
-  try {
-    const res = await fetch('/api/credentials')
-    const data = await res.json()
-    fbPages.value = data.facebook?.pages || []
-    igAccounts.value = data.instagram?.accounts || []
-  } catch (_) { /* ignore */ }
+  await platformsStore.fetchMetaConnections()
 }
 
 // ─── OAuth discovery ─────────────────────────────────────────────────────────

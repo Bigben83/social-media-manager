@@ -58,6 +58,19 @@ export const usePlatformsStore = defineStore('platforms', () => {
   const metaLoading = ref(false)
   const metaError = ref<string | null>(null)
 
+  // Connected pages/accounts (fetched from gateway)
+  const connectedPages = ref<MetaPage[]>([])
+  const connectedIgAccounts = ref<MetaIgAccount[]>([])
+
+  async function fetchMetaConnections() {
+    try {
+      const res = await fetch('/api/credentials')
+      const data = await res.json()
+      connectedPages.value = data.facebook?.pages || []
+      connectedIgAccounts.value = data.instagram?.accounts || []
+    } catch (_) { /* ignore */ }
+  }
+
   // ─── Platform status ──────────────────────────────────────────────────────
 
   async function fetchStatuses() {
@@ -73,7 +86,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
   }
 
   function getStatus(platform: string): PlatformStatus | undefined {
-    return statuses.value.find((s) => s.platform === platform)
+    return statuses.value.find((s: PlatformStatus) => s.platform === platform)
   }
 
   function isConnected(platform: string): boolean {
@@ -157,6 +170,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
   return {
     statuses, loading, fetchStatuses, getStatus, isConnected,
     metaCredentials, metaDiscovery, metaLoading, metaError,
+    connectedPages, connectedIgAccounts, fetchMetaConnections,
     fetchMetaCredentials, saveMetaApp, startMetaOAuth,
     fetchMetaDiscovery, saveMetaSelection, disconnectMeta,
   }
