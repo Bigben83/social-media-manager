@@ -66,46 +66,93 @@
             class="w-full bg-transparent text-gray-100 placeholder-gray-600 resize-none focus:outline-none text-sm leading-relaxed p-4"
           ></textarea>
 
-          <!-- Media preview -->
+          <!-- Media: attached file preview -->
           <div v-if="composeStore.mediaUrl.trim()" class="px-4 pb-3">
-            <div class="relative inline-block">
+            <div class="relative inline-block group">
+              <!-- Image preview -->
               <img
+                v-if="isImage(composeStore.mediaUrl)"
                 :src="composeStore.mediaUrl"
                 class="rounded-lg max-h-48 max-w-full object-cover border border-gray-700"
-                @error="mediaError = true"
+                @error="mediaLoadError = true"
               />
+              <!-- Video preview -->
+              <div
+                v-else
+                class="flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5"
+              >
+                <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.882v6.236a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span class="text-xs text-gray-300 truncate max-w-xs">{{ mediaFilename }}</span>
+              </div>
               <button
-                @click="composeStore.mediaUrl = ''; mediaError = false"
-                class="absolute -top-2 -right-2 w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-xs"
+                @click="removeMedia"
+                class="absolute -top-2 -right-2 w-5 h-5 bg-gray-700 hover:bg-red-600 rounded-full flex items-center justify-center text-xs transition-colors"
+                title="Remove"
               >✕</button>
             </div>
-            <p v-if="mediaError" class="text-xs text-red-400 mt-1">Could not load this image URL.</p>
+            <p v-if="mediaLoadError" class="text-xs text-red-400 mt-1">{{ $t('compose.mediaLoadError') }}</p>
           </div>
 
-          <!-- Media URL input (shown when toolbar button clicked) -->
-          <div v-if="showMediaInput && !composeStore.mediaUrl.trim()" class="px-4 pb-3">
+          <!-- Upload progress -->
+          <div v-if="uploading" class="px-4 pb-3 flex items-center gap-2 text-sm text-gray-400">
+            <svg class="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+            </svg>
+            {{ $t('compose.uploading') }}
+          </div>
+
+          <!-- Upload error -->
+          <div v-if="uploadError" class="px-4 pb-3 text-xs text-red-400">{{ uploadError }}</div>
+
+          <!-- Paste-URL fallback input -->
+          <div v-if="showUrlInput && !composeStore.mediaUrl.trim() && !uploading" class="px-4 pb-3">
             <input
-              v-model="mediaInputValue"
-              @keydown.enter="applyMedia"
-              @blur="applyMedia"
+              v-model="pasteUrlValue"
+              @keydown.enter="applyPastedUrl"
+              @blur="applyPastedUrl"
               type="url"
               :placeholder="$t('compose.mediaUrlPlaceholder')"
               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
-              ref="mediaInputRef"
+              ref="urlInputRef"
             />
           </div>
 
+          <!-- Hidden file input -->
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo"
+            class="hidden"
+            @change="handleFileChange"
+          />
+
           <!-- Toolbar -->
           <div class="flex items-center gap-2 px-4 py-2.5 border-t border-gray-800">
+            <!-- Upload file button -->
             <button
-              @click="toggleMediaInput"
-              class="text-gray-500 hover:text-gray-300 transition-colors p-1 rounded"
-              :class="showMediaInput || composeStore.mediaUrl ? 'text-blue-400' : ''"
-              :title="$t('compose.addMedia')"
+              @click="fileInputRef?.click()"
+              :disabled="uploading"
+              class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-40 px-2 py-1 rounded hover:bg-gray-800"
+              :class="composeStore.mediaUrl ? 'text-blue-400' : ''"
+              :title="$t('compose.uploadFile')"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
+              {{ $t('compose.addMedia') }}
+            </button>
+
+            <!-- Paste URL toggle -->
+            <button
+              v-if="!composeStore.mediaUrl && !uploading"
+              @click="toggleUrlInput"
+              class="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+              :class="showUrlInput ? 'text-blue-400' : ''"
+            >
+              {{ showUrlInput ? $t('compose.cancelUrl') : $t('compose.pasteUrl') }}
             </button>
 
             <span class="ml-auto text-xs font-mono" :class="overLimit ? 'text-red-400' : charNearLimit ? 'text-amber-400' : 'text-gray-600'">
@@ -177,8 +224,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import axios from 'axios'
 import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
 import PostPreview from '../components/compose/PostPreview.vue'
@@ -187,11 +235,15 @@ const { t } = useI18n()
 const composeStore = useComposeStore()
 const platformsStore = usePlatformsStore()
 const router = useRouter()
+const route = useRoute()
 
-const showMediaInput = ref(false)
-const mediaInputValue = ref('')
-const mediaInputRef = ref<HTMLInputElement | null>(null)
-const mediaError = ref(false)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const urlInputRef = ref<HTMLInputElement | null>(null)
+const pasteUrlValue = ref('')
+const showUrlInput = ref(false)
+const uploading = ref(false)
+const uploadError = ref('')
+const mediaLoadError = ref(false)
 const activePreviewKey = ref('')
 
 onMounted(async () => {
@@ -200,6 +252,12 @@ onMounted(async () => {
     platformsStore.fetchMetaConnections(),
   ])
   composeStore.initDestinations()
+
+  // Pre-fill media URL when arriving from the Media Library ("Use in Post")
+  if (route.query.media) {
+    composeStore.mediaUrl = String(route.query.media)
+    mediaLoadError.value = false
+  }
 })
 
 // Keep activePreviewKey pointed at a selected destination
@@ -215,32 +273,67 @@ watch(
 
 function toggle(key: string) {
   composeStore.toggleDestination(key)
-  // Set preview to the newly selected destination
   const dest = composeStore.destinations.find((d) => d.key === key)
   if (dest?.selected) activePreviewKey.value = key
 }
 
-async function toggleMediaInput() {
-  if (composeStore.mediaUrl.trim()) {
-    composeStore.mediaUrl = ''
-    mediaError.value = false
-    return
-  }
-  showMediaInput.value = !showMediaInput.value
-  if (showMediaInput.value) {
-    await nextTick()
-    mediaInputRef.value?.focus()
+async function handleFileChange(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  uploading.value = true
+  uploadError.value = ''
+  mediaLoadError.value = false
+
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await axios.post('/api/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    composeStore.mediaUrl = res.data.url
+  } catch (err: any) {
+    uploadError.value = err.response?.data?.error ?? t('compose.uploadFailed')
+  } finally {
+    uploading.value = false
+    // Reset file input so the same file can be re-selected if needed
+    if (fileInputRef.value) fileInputRef.value.value = ''
   }
 }
 
-function applyMedia() {
-  if (mediaInputValue.value.trim()) {
-    composeStore.mediaUrl = mediaInputValue.value.trim()
-    mediaInputValue.value = ''
-    showMediaInput.value = false
-    mediaError.value = false
+async function toggleUrlInput() {
+  showUrlInput.value = !showUrlInput.value
+  uploadError.value = ''
+  if (showUrlInput.value) {
+    await nextTick()
+    urlInputRef.value?.focus()
   }
 }
+
+function applyPastedUrl() {
+  const url = pasteUrlValue.value.trim()
+  if (url) {
+    composeStore.mediaUrl = url
+    pasteUrlValue.value = ''
+    showUrlInput.value = false
+    mediaLoadError.value = false
+  }
+}
+
+function removeMedia() {
+  composeStore.mediaUrl = ''
+  mediaLoadError.value = false
+  uploadError.value = ''
+  showUrlInput.value = false
+}
+
+function isImage(url: string) {
+  return /\.(jpe?g|png|gif|webp)(\?.*)?$/i.test(url)
+}
+
+const mediaFilename = computed(() => {
+  try { return decodeURIComponent(composeStore.mediaUrl.split('/').pop() ?? '') } catch { return composeStore.mediaUrl }
+})
 
 const igSelectedWithoutMedia = computed(() =>
   composeStore.selectedDestinations.some((d) => d.platform === 'instagram') &&

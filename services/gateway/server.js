@@ -1,8 +1,21 @@
 require('dotenv').config();
 const app = require('fastify')({ logger: false });
+const multipart = require('@fastify/multipart');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { pipeline } = require('stream/promises');
 const { getDb } = require('./utils/MongoDBConnector');
 const RabbitMQProducer = require('./utils/RabbitMQProducer');
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
+const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi']);
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+app.register(multipart, { limits: { fileSize: MAX_FILE_SIZE } });
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 
@@ -41,6 +54,81 @@ async function deleteCredentials(id) {
   const db = await getDb();
   await db.collection('platform_credentials').deleteOne({ _id: id });
 }
+
+// ─── Media Upload & Library ───────────────────────────────────────────────────
+
+app.post('/upload', async (request, reply) => {
+  const data = await request.file();
+  if (!data) return reply.code(400).send({ error: 'No file provided' });
+
+  const ext = path.extname(data.filename).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    data.file.resume();
+    return reply.code(400).send({ error: `File type "${ext}" is not allowed. Allowed: jpg, jpeg, png, gif, webp, mp4, mov, avi` });
+  }
+
+  const filename = `${crypto.randomUUID()}${ext}`;
+  const filepath = path.join(UPLOAD_DIR, filename);
+
+  try {
+    await pipeline(data.file, fs.createWriteStream(filepath));
+  } catch (err) {
+    console.error('[Gateway] Upload write error:', err.message);
+    return reply.code(500).send({ error: 'Failed to save file' });
+  }
+
+  const stat = fs.statSync(filepath);
+  const record = {
+    filename,
+    originalName: data.filename,
+    url: `/media/${filename}`,
+    mimetype: data.mimetype,
+    size: stat.size,
+    uploadedAt: new Date(),
+  };
+
+  try {
+    const db = await getDb();
+    await db.collection('media_files').insertOne(record);
+  } catch (err) {
+    console.error('[Gateway] Media metadata save error:', err.message);
+  }
+
+  return { url: record.url, filename, originalName: data.filename, mimetype: data.mimetype, size: stat.size };
+});
+
+// List all uploaded media files, newest first
+app.get('/media-library', async () => {
+  const db = await getDb();
+  const files = await db.collection('media_files').find({}).sort({ uploadedAt: -1 }).toArray();
+  return { files };
+});
+
+// Delete a media file from disk and database
+app.delete('/media/:filename', async (request, reply) => {
+  const { filename } = request.params;
+
+  // Prevent path traversal
+  if (!filename || filename.includes('/') || filename.includes('..') || filename.includes('\0')) {
+    return reply.code(400).send({ error: 'Invalid filename' });
+  }
+
+  const filepath = path.join(UPLOAD_DIR, filename);
+  try {
+    fs.unlinkSync(filepath);
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error('[Gateway] Delete error:', err.message);
+      return reply.code(500).send({ error: 'Failed to delete file' });
+    }
+    // Already gone from disk — still clean up DB record
+  }
+
+  const db = await getDb();
+  await db.collection('media_files').deleteOne({ filename });
+
+  return { success: true };
+});
 
 // ─── Platform service URLs ────────────────────────────────────────────────────
 

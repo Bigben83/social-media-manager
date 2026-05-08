@@ -63,6 +63,7 @@ const showLangMenu = ref(false)
 const navLinks = [
   { to: '/dashboard', label: 'nav.feed' },
   { to: '/compose',   label: 'nav.compose' },
+  { to: '/media',     label: 'nav.media' },
   { to: '/scheduler', label: 'nav.scheduler' },
   { to: '/settings',  label: 'nav.settings' },
 ]

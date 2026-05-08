@@ -6,6 +6,7 @@ services:
       - "8081:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - media_uploads:/media:ro
     networks:
       - socialMediaManagerNetwork
     depends_on:
@@ -66,6 +67,7 @@ services:
       - ./services/utils:/services/gateway/utils
       - ./services/gateway:/services/gateway
       - gateway_modules:/services/gateway/node_modules
+      - media_uploads:/uploads
     env_file: .env
     networks:
       - socialMediaManagerNetwork
@@ -231,6 +233,7 @@ networks:
 volumes:
   mongodb-data:
   redis-data:
+  media_uploads:
   gateway_modules:
   socket_modules:
   formatter_modules:

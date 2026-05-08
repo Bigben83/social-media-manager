@@ -8,6 +8,7 @@
         "test": "jest --forceExit"
     },
     "dependencies": {
+        "@fastify/multipart": "^8.3.0",
         "amqplib": "^0.10.3",
         "axios": "^1.6.7",
         "dotenv": "^16.3.1",

@@ -23,6 +23,11 @@ const router = createRouter({
       component: () => import('../views/Scheduler.vue'),
     },
     {
+      path: '/media',
+      name: 'media',
+      component: () => import('../views/Media.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),
