@@ -30,14 +30,24 @@ async function processPostJob(job) {
   const { postId, content, destinations, platforms, media = [] } = job.data;
 
   const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
-  log.info({ action: 'job_process', jobId: job.id, destinations: destList.map((d) => d.accountId ? `${d.platform}:${d.accountId}` : d.platform) });
+  log.info({ action: 'job_process', jobId: job.id, attempt: job.attemptsMade + 1, destinations: destList.map((d) => d.accountId ? `${d.platform}:${d.accountId}` : d.platform) });
 
   const db = await getDb();
-  const results = {};
+
+  // Load any results already recorded from previous attempts so we can skip
+  // destinations that already succeeded — preventing duplicate posts on retry.
+  const existingPost = postId ? await db.collection('posts').findOne({ _id: postId }, { projection: { platformResults: 1 } }) : null;
+  const results = { ...(existingPost?.platformResults || {}) };
 
   for (const dest of destList) {
     const { platform, accountId, imageUrl, videoUrl, link } = dest;
     const resultKey = accountId ? `${platform}:${accountId}` : platform;
+
+    if (results[resultKey]?.success) {
+      log.info({ action: 'job_skip_dest', jobId: job.id, destination: resultKey, reason: 'already_published' });
+      continue;
+    }
+
     const serviceUrl = PLATFORM_SERVICES[platform];
     if (!serviceUrl) {
       results[resultKey] = { success: false, error: 'Unknown platform' };
