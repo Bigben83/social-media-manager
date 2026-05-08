@@ -86,7 +86,7 @@ class MastodonService extends BasePlatformService {
         );
       }
     } catch (err) {
-      console.error('[Mastodon] MongoDB write error:', err.message);
+      this.app.log.error({ action: 'feed_write', platform: 'mastodon', outcome: 'failure', err: err.message });
     }
 
     return items;

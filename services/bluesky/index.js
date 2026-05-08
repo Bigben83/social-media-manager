@@ -90,7 +90,7 @@ class BlueskyService extends BasePlatformService {
         );
       }
     } catch (err) {
-      console.error('[Bluesky] MongoDB write error:', err.message);
+      this.app.log.error({ action: 'feed_write', platform: 'bluesky', outcome: 'failure', err: err.message });
     }
 
     return items;

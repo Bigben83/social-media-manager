@@ -1,5 +1,7 @@
 require('dotenv').config();
-const app = require('fastify')({ logger: false });
+const { createLogger } = require('./utils/logger');
+const log = createLogger('gateway');
+const app = require('fastify')({ logger: log });
 const multipart = require('@fastify/multipart');
 const axios = require('axios');
 const fs = require('fs');
@@ -74,7 +76,7 @@ app.post('/upload', async (request, reply) => {
   try {
     await pipeline(data.file, fs.createWriteStream(filepath));
   } catch (err) {
-    console.error('[Gateway] Upload write error:', err.message);
+    app.log.error({ action: 'media_upload', outcome: 'failure', err: err.message });
     return reply.code(500).send({ error: 'Failed to save file' });
   }
 
@@ -92,7 +94,7 @@ app.post('/upload', async (request, reply) => {
     const db = await getDb();
     await db.collection('media_files').insertOne(record);
   } catch (err) {
-    console.error('[Gateway] Media metadata save error:', err.message);
+    app.log.error({ action: 'media_metadata_save', outcome: 'failure', err: err.message });
   }
 
   return { url: record.url, filename, originalName: data.filename, mimetype: data.mimetype, size: stat.size };
@@ -119,7 +121,7 @@ app.delete('/media/:filename', async (request, reply) => {
     fs.unlinkSync(filepath);
   } catch (err) {
     if (err.code !== 'ENOENT') {
-      console.error('[Gateway] Delete error:', err.message);
+      app.log.error({ action: 'media_delete', outcome: 'failure', err: err.message });
       return reply.code(500).send({ error: 'Failed to delete file' });
     }
     // Already gone from disk — still clean up DB record
@@ -217,7 +219,7 @@ app.get('/meta/token-expiry', async (request, reply) => {
         : null;
       accounts.push({ id: account.id, username: account.username, expiresAt, daysLeft, isValid: !!data.is_valid });
     } catch (err) {
-      console.error(`[Gateway] Token expiry check failed for ${account.username}:`, err.message);
+      app.log.warn({ action: 'token_expiry_check', platform: 'instagram', username: account.username, outcome: 'failure', err: err.message });
     }
   }
 
@@ -435,7 +437,7 @@ app.post('/', async (request, reply) => {
     await rabbitMQProducer.sendMessage('formatter', request.body.message);
     reply.send({ status: 'ok' });
   } catch (error) {
-    console.error('Error handling POST request:', error);
+    app.log.error({ action: 'legacy_post', outcome: 'failure', err: error.message });
     reply.status(500).send({ error: 'Internal Server Error' });
   }
 });
@@ -574,7 +576,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
 
     reply.redirect(`${APP_BASE_URL}/settings?meta_discovery=1`);
   } catch (err) {
-    console.error('[Gateway] Meta OAuth error:', err.response?.data || err.message);
+    app.log.error({ action: 'meta_oauth_callback', platform: 'meta', outcome: 'failure', err: err.response?.data?.error?.message || err.message });
     reply.redirect(`${APP_BASE_URL}/settings?meta_error=${encodeURIComponent(err.message)}`);
   }
 });

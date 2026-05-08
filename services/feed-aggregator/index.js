@@ -4,10 +4,10 @@ const axios = require('axios');
 const cron = require('node-cron');
 const { getDb } = require('./utils/MongoDBConnector');
 const RabbitMQProducer = require('./utils/RabbitMQProducer');
+const { createLogger } = require('./utils/logger');
 
-const FEED_REFRESH_INTERVAL = process.env.FEED_REFRESH_INTERVAL || '*/5 * * * *'; // Her 5 dakika
+const FEED_REFRESH_INTERVAL = process.env.FEED_REFRESH_INTERVAL || '*/5 * * * *';
 
-// Platform servis URL'leri (docker network içinde)
 const PLATFORM_SERVICES = {
   twitter:   process.env.TWITTER_SERVICE_URL   || 'http://twitter:3001',
   linkedin:  process.env.LINKEDIN_SERVICE_URL  || 'http://linkedin:3002',
@@ -17,7 +17,8 @@ const PLATFORM_SERVICES = {
   facebook:  process.env.FACEBOOK_SERVICE_URL  || 'http://facebook:3006',
 };
 
-const app = Fastify({ logger: false });
+const log = createLogger('feed-aggregator');
+const app = Fastify({ logger: log });
 let producer;
 
 // ─── Feed Çekme ──────────────────────────────────────────────────────────────
@@ -26,7 +27,7 @@ async function fetchPlatformFeed(platform, serviceUrl) {
   try {
     const response = await axios.get(`${serviceUrl}/feed`, { timeout: 15000 });
     const items = response.data.items || [];
-    console.log(`[FeedAggregator] ${platform}: ${items.length} öğe çekildi`);
+    log.info({ action: 'feed_fetch', platform, count: items.length, outcome: 'success' });
 
     // WebSocket üzerinden UI'ya bildir
     if (producer && items.length > 0) {
@@ -35,13 +36,13 @@ async function fetchPlatformFeed(platform, serviceUrl) {
 
     return items;
   } catch (err) {
-    console.error(`[FeedAggregator] ${platform} feed hatası:`, err.message);
+    log.error({ action: 'feed_fetch', platform, outcome: 'failure', err: err.message });
     return [];
   }
 }
 
 async function fetchAllFeeds() {
-  console.log('[FeedAggregator] Tüm platformlardan feed çekiliyor...');
+  log.info({ action: 'feed_fetch_all' }, 'Fetching feeds from all platforms');
 
   const results = await Promise.allSettled(
     Object.entries(PLATFORM_SERVICES).map(([platform, url]) =>
@@ -54,7 +55,7 @@ async function fetchAllFeeds() {
     summary[platform] = results[i].status === 'fulfilled' ? results[i].value.length : 0;
   });
 
-  console.log('[FeedAggregator] Tamamlandı:', summary);
+  log.info({ action: 'feed_fetch_all', outcome: 'success', summary });
   return summary;
 }
 
@@ -115,14 +116,14 @@ async function start() {
 
   // Periyodik feed yenileme
   cron.schedule(FEED_REFRESH_INTERVAL, () => {
-    fetchAllFeeds().catch(console.error);
+    fetchAllFeeds().catch((err) => log.error({ action: 'feed_fetch_all', outcome: 'failure', err: err.message }));
   });
 
   await app.listen({ port: process.env.PORT || 3010, host: '0.0.0.0' });
-  console.log(`[FeedAggregator] Started. Cron: ${FEED_REFRESH_INTERVAL}`);
+  log.info({ action: 'service_start', outcome: 'success', cronInterval: FEED_REFRESH_INTERVAL }, 'Feed aggregator started');
 
   // İlk çalıştırma
   setTimeout(() => fetchAllFeeds(), 5000);
 }
 
-start().catch(console.error);
+start().catch((err) => { log.error({ action: 'service_start', outcome: 'failure', err: err.message }); process.exit(1); });

@@ -4,6 +4,7 @@ const { Queue, Worker, QueueEvents } = require('bullmq');
 const IORedis = require('ioredis');
 const axios = require('axios');
 const { getDb, connect } = require('./utils/MongoDBConnector');
+const { createLogger } = require('./utils/logger');
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
 
@@ -16,7 +17,8 @@ const PLATFORM_SERVICES = {
   facebook:  process.env.FACEBOOK_SERVICE_URL  || 'http://facebook:3006',
 };
 
-const app = Fastify({ logger: false });
+const log = createLogger('scheduler');
+const app = Fastify({ logger: log });
 let postQueue;
 let redis;
 
@@ -28,7 +30,7 @@ async function processPostJob(job) {
   const { postId, content, destinations, platforms, media = [] } = job.data;
 
   const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
-  console.log(`[Scheduler] Job ${job.id}: ${destList.map((d) => d.accountId ? `${d.platform}:${d.accountId}` : d.platform).join(', ')}`);
+  log.info({ action: 'job_process', jobId: job.id, destinations: destList.map((d) => d.accountId ? `${d.platform}:${d.accountId}` : d.platform) });
 
   const db = await getDb();
   const results = {};
@@ -157,11 +159,11 @@ async function start() {
 
   const worker = new Worker('post-queue', processPostJob, { connection: redis });
   worker.on('failed', (job, err) => {
-    console.error(`[Scheduler] Job ${job?.id} başarısız:`, err.message);
+    log.error({ action: 'job_process', jobId: job?.id, outcome: 'failure', err: err.message });
   });
 
   await app.listen({ port: process.env.PORT || 3011, host: '0.0.0.0' });
-  console.log('[Scheduler] Started on port 3011');
+  log.info({ action: 'service_start', port: 3011, outcome: 'success' }, 'Scheduler started');
 }
 
-start().catch(console.error);
+start().catch((err) => { log.error({ action: 'service_start', outcome: 'failure', err: err.message }); process.exit(1); });

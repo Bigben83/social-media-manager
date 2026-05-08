@@ -1,5 +1,6 @@
 const Fastify = require('fastify');
 const RabbitMQConnector = require('./RabbitMQConnector');
+const { createLogger } = require('./logger');
 
 /**
  * BasePlatformService — tüm platform servisleri bu sınıftan extend eder.
@@ -14,7 +15,8 @@ class BasePlatformService extends RabbitMQConnector {
   constructor(platformName) {
     super();
     this.platformName = platformName;
-    this.app = Fastify({ logger: false });
+    this.log = createLogger(platformName);
+    this.app = Fastify({ logger: this.log });
     this._setupRoutes();
   }
 
@@ -56,7 +58,7 @@ class BasePlatformService extends RabbitMQConnector {
   async start(port = 3000) {
     await this.connect();
     await this.app.listen({ port, host: '0.0.0.0' });
-    console.log(`[${this.platformName}] Service started on port ${port}`);
+    this.app.log.info({ action: 'service_start', port, outcome: 'success' }, `${this.platformName} service started`);
   }
 
   // ─── Alt sınıfların override edeceği metodlar ───────────────────────────────

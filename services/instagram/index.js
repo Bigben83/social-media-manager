@@ -109,7 +109,7 @@ class InstagramService extends BasePlatformService {
         );
       }
     } catch (err) {
-      console.error('[Instagram] MongoDB write error:', err.message);
+      this.app.log.error({ action: 'feed_write', platform: 'instagram', outcome: 'failure', err: err.message });
     }
 
     return allItems;

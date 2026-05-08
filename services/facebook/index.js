@@ -103,7 +103,7 @@ class FacebookService extends BasePlatformService {
         );
       }
     } catch (err) {
-      console.error('[Facebook] MongoDB write error:', err.message);
+      this.app.log.error({ action: 'feed_write', platform: 'facebook', outcome: 'failure', err: err.message });
     }
 
     return allItems;
