@@ -257,6 +257,97 @@ app.put('/profiles/:accountKey', async (request, reply) => {
   return { success: true };
 });
 
+// ─── AI / Ollama ──────────────────────────────────────────────────────────────
+
+const DEFAULT_OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://ollama:11434';
+const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+
+app.get('/ai/config', async () => {
+  const config = await getCredentials('ai_config');
+  return {
+    provider: config?.provider || 'ollama',
+    endpoint: config?.endpoint || DEFAULT_OLLAMA_ENDPOINT,
+    model:    config?.model    || DEFAULT_OLLAMA_MODEL,
+    enabled:  config?.enabled  ?? true,
+  };
+});
+
+app.put('/ai/config', async (request, reply) => {
+  const { provider = 'ollama', endpoint, model, enabled = true } = request.body || {};
+  if (!endpoint) return reply.code(400).send({ error: 'endpoint is required' });
+  await setCredentials('ai_config', { provider, endpoint, model, enabled });
+  return { success: true };
+});
+
+app.get('/ai/models', async (request, reply) => {
+  const config = await getCredentials('ai_config');
+  // Allow caller to override endpoint for test-without-save UX
+  const endpoint = request.query.endpoint || config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
+  try {
+    const res = await axios.get(`${endpoint}/api/tags`, { timeout: 5000 });
+    const models = (res.data.models || []).map((m) => m.name);
+    return { models, endpoint };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Could not reach Ollama — check the endpoint', detail: err.message });
+  }
+});
+
+app.post('/ai/generate', async (request, reply) => {
+  const { prompt, system, model: reqModel } = request.body || {};
+  if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
+
+  const config = await getCredentials('ai_config');
+  const endpoint = config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
+  const model = reqModel || config?.model || DEFAULT_OLLAMA_MODEL;
+
+  try {
+    const res = await axios.post(`${endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
+    return { text: res.data.response, model, done: res.data.done };
+  } catch (err) {
+    const status = err.response?.status || 503;
+    return reply.code(status).send({ error: 'AI generation failed', detail: err.message });
+  }
+});
+
+// SSE streaming endpoint — sends token-by-token as text/event-stream
+app.post('/ai/stream', async (request, reply) => {
+  const { prompt, system, model: reqModel } = request.body || {};
+  if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
+
+  const config = await getCredentials('ai_config');
+  const endpoint = config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
+  const model = reqModel || config?.model || DEFAULT_OLLAMA_MODEL;
+
+  reply.raw.setHeader('Content-Type', 'text/event-stream');
+  reply.raw.setHeader('Cache-Control', 'no-cache');
+  reply.raw.setHeader('X-Accel-Buffering', 'no');
+  reply.raw.setHeader('Connection', 'keep-alive');
+  reply.raw.flushHeaders();
+
+  try {
+    const ollamaRes = await axios.post(`${endpoint}/api/generate`, { model, prompt, system, stream: true }, { responseType: 'stream', timeout: 120000 });
+
+    ollamaRes.data.on('data', (chunk) => {
+      try {
+        const lines = chunk.toString().split('\n').filter(Boolean);
+        for (const line of lines) {
+          const data = JSON.parse(line);
+          reply.raw.write(`data: ${JSON.stringify({ token: data.response || '', done: !!data.done })}\n\n`);
+        }
+      } catch (_) {}
+    });
+
+    ollamaRes.data.on('end', () => { reply.raw.end(); });
+    ollamaRes.data.on('error', (err) => {
+      reply.raw.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+      reply.raw.end();
+    });
+  } catch (err) {
+    reply.raw.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    reply.raw.end();
+  }
+});
+
 // ─── Platform service URLs ────────────────────────────────────────────────────
 
 const PLATFORM_SERVICES = {

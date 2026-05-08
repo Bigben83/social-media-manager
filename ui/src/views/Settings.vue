@@ -443,6 +443,84 @@
 
       </div>
 
+      <!-- ═══════════════════════════════════════════════════════════════════
+           AI INTEGRATION — Ollama configuration card
+      ════════════════════════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+        <!-- Header -->
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-violet-700 flex items-center justify-center text-white text-sm font-bold shrink-0">AI</div>
+          <div>
+            <p class="font-semibold">{{ $t('ai.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('ai.sectionSubtitle') }}</p>
+          </div>
+          <!-- Connection status pill -->
+          <div v-if="aiConnected !== null" class="ml-auto shrink-0">
+            <span
+              class="text-xs px-2 py-0.5 rounded-full font-medium"
+              :class="aiConnected ? 'bg-green-900/50 text-green-400 border border-green-700' : 'bg-red-900/40 text-red-400 border border-red-800'"
+            >
+              {{ aiConnected ? $t('ai.connected') : $t('ai.connectionFailed') }}
+            </span>
+          </div>
+        </div>
+
+        <div class="p-5 space-y-4">
+
+          <!-- Endpoint -->
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.endpointLabel') }}</label>
+            <div class="flex gap-2">
+              <input
+                v-model="aiEndpoint"
+                type="text"
+                :placeholder="$t('ai.endpointPlaceholder')"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+              />
+              <button
+                @click="testAiConnection"
+                :disabled="aiStore.modelsLoading || !aiEndpoint"
+                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 border border-gray-600 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+              >
+                {{ aiStore.modelsLoading ? $t('ai.testing') : $t('ai.testConnection') }}
+              </button>
+            </div>
+            <p class="text-xs text-gray-600 mt-1">{{ $t('ai.endpointHint') }}</p>
+          </div>
+
+          <!-- Model selector -->
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
+            <select
+              v-model="aiModel"
+              :disabled="!aiModels.length"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500 disabled:opacity-40"
+            >
+              <option value="">{{ $t('ai.modelPlaceholder') }}</option>
+              <option v-for="m in aiModels" :key="m" :value="m">{{ m }}</option>
+            </select>
+            <p v-if="aiConnected === false" class="text-xs text-red-400 mt-1">{{ $t('ai.noModels') }}</p>
+            <p v-else-if="aiModels.length" class="text-xs text-gray-600 mt-1">
+              {{ $t('ai.modelsAvailable', aiModels.length) }}
+            </p>
+          </div>
+
+          <!-- Save -->
+          <div class="flex items-center justify-end gap-3">
+            <span v-if="aiSaved" class="text-xs text-green-400">{{ $t('ai.saved') }}</span>
+            <button
+              @click="saveAiConfig"
+              :disabled="aiStore.saving || !aiEndpoint"
+              class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+            >
+              {{ aiStore.saving ? $t('ai.saving') : $t('ai.saveConfig') }}
+            </button>
+          </div>
+
+        </div>
+      </div>
+
       <!-- Refresh button -->
       <button
         @click="platformsStore.fetchStatuses()"
@@ -461,11 +539,13 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
+import { useAiStore } from '../stores/ai'
 
 const { t } = useI18n()
 
 const route = useRoute()
 const platformsStore = usePlatformsStore()
+const aiStore = useAiStore()
 
 // ─── App credential form state ──────────────────────────────────────────────
 
@@ -647,6 +727,30 @@ async function saveProfile(key: string) {
   }
 }
 
+// ─── AI Configuration ─────────────────────────────────────────────────────────
+
+const aiEndpoint = ref('')
+const aiModel = ref('')
+const aiModels = computed(() => aiStore.models)
+const aiConnected = ref<boolean | null>(null)
+const aiSaved = ref(false)
+
+async function testAiConnection() {
+  const ok = await aiStore.fetchModels(aiEndpoint.value)
+  aiConnected.value = ok
+  if (ok && !aiModel.value && aiStore.models.length) {
+    aiModel.value = aiStore.models[0]
+  }
+}
+
+async function saveAiConfig() {
+  const ok = await aiStore.saveConfig({ endpoint: aiEndpoint.value, model: aiModel.value })
+  if (ok) {
+    aiSaved.value = true
+    setTimeout(() => { aiSaved.value = false }, 2500)
+  }
+}
+
 // ─── On mount ────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -665,6 +769,11 @@ onMounted(async () => {
     platformsStore.fetchStatuses(),
     platformsStore.fetchMetaCredentials(),
     loadMetaConnections(),
+    aiStore.fetchConfig(),
   ])
+
+  // Seed local form from fetched config
+  aiEndpoint.value = aiStore.config.endpoint
+  aiModel.value = aiStore.config.model
 })
 </script>

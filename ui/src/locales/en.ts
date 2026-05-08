@@ -157,7 +157,31 @@ export default {
       errorTitle: 'OAuth Error',
       getAppHelp: 'Get your App ID and Secret from',
       devPortal: 'developers.facebook.com',
+
+      expiryWarningTitle: 'Instagram token expiring soon',
+      expiryWarningBody: '{username} expires in {days} day | {username} expires in {days} days',
+      expiryReconnect: 'Reconnect now',
+      expiryDismiss: 'Dismiss',
     },
+  },
+
+  ai: {
+    sectionTitle: 'AI Integration',
+    sectionSubtitle: 'Connect a local Ollama instance to generate post content with AI.',
+    endpointLabel: 'Ollama Endpoint',
+    endpointPlaceholder: 'http://localhost:11434',
+    endpointHint: 'Inside Docker the default is http://ollama:11434',
+    modelLabel: 'Model',
+    modelPlaceholder: 'Select a model…',
+    testConnection: 'Test Connection',
+    testing: 'Testing…',
+    saveConfig: 'Save',
+    saving: 'Saving…',
+    saved: 'Saved!',
+    noModels: 'No models found — is Ollama running?',
+    connected: 'Connected',
+    connectionFailed: 'Connection failed',
+    modelsAvailable: '{count} model available | {count} models available',
   },
 
   feed: {

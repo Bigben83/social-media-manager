@@ -216,6 +216,19 @@ services:
       - mongodb
       - redis
 
+  # ── Optional: Ollama local AI ─────────────────────────────────────────────────
+  # Uncomment to run Ollama inside Docker (CPU only).
+  # For GPU acceleration, add a `deploy.resources.reservations.devices` block.
+  # After starting, pull a model:  docker exec -it ollama ollama pull llama3.2
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #   networks:
+  #     - socialMediaManagerNetwork
+
   ui:
     build: ./ui
     volumes:
@@ -234,6 +247,7 @@ volumes:
   mongodb-data:
   redis-data:
   media_uploads:
+  ollama-data:
   gateway_modules:
   socket_modules:
   formatter_modules:

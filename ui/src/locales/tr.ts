@@ -157,7 +157,31 @@ export default {
       errorTitle: 'OAuth Hatası',
       getAppHelp: 'Uygulama Kimliği ve Gizli Anahtarını şuradan al:',
       devPortal: 'developers.facebook.com',
+
+      expiryWarningTitle: 'Instagram token\'ı yakında sona eriyor',
+      expiryWarningBody: '{username} {days} gün içinde sona eriyor | {username} {days} gün içinde sona eriyor',
+      expiryReconnect: 'Şimdi yeniden bağlan',
+      expiryDismiss: 'Kapat',
     },
+  },
+
+  ai: {
+    sectionTitle: 'Yapay Zeka Entegrasyonu',
+    sectionSubtitle: 'Gönderi içeriği oluşturmak için yerel bir Ollama örneği bağla.',
+    endpointLabel: 'Ollama Adresi',
+    endpointPlaceholder: 'http://localhost:11434',
+    endpointHint: 'Docker içinde varsayılan: http://ollama:11434',
+    modelLabel: 'Model',
+    modelPlaceholder: 'Model seç…',
+    testConnection: 'Bağlantıyı Test Et',
+    testing: 'Test ediliyor…',
+    saveConfig: 'Kaydet',
+    saving: 'Kaydediliyor…',
+    saved: 'Kaydedildi!',
+    noModels: 'Model bulunamadı — Ollama çalışıyor mu?',
+    connected: 'Bağlandı',
+    connectionFailed: 'Bağlantı başarısız',
+    modelsAvailable: '{count} model mevcut',
   },
 
   feed: {
