@@ -155,9 +155,100 @@
               {{ showUrlInput ? $t('compose.cancelUrl') : $t('compose.pasteUrl') }}
             </button>
 
+            <!-- AI Generate toggle -->
+            <button
+              @click="toggleAiPanel"
+              class="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors"
+              :class="aiPanelOpen ? 'text-violet-400 bg-violet-900/30' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'"
+            >
+              <span>✨</span>
+              <span>{{ $t('compose.aiButton') }}</span>
+            </button>
+
             <span class="ml-auto text-xs font-mono" :class="overLimit ? 'text-red-400' : charNearLimit ? 'text-amber-400' : 'text-gray-600'">
               {{ composeStore.content.length }}<template v-if="composeStore.activeCharLimit">/{{ composeStore.activeCharLimit }}</template>
             </span>
+          </div>
+
+          <!-- AI Panel -->
+          <div v-if="aiPanelOpen" class="border-t border-violet-900/40 bg-violet-950/20 px-4 py-3 space-y-3">
+
+            <!-- Not configured warning -->
+            <p v-if="!aiConfigured" class="text-xs text-amber-400 flex items-center gap-1.5">
+              <span>⚠</span>{{ $t('compose.aiNotConfigured') }}
+            </p>
+
+            <template v-else>
+              <!-- Context badge -->
+              <p class="text-xs text-gray-500">
+                <span v-if="aiContextAccount">✨ {{ $t('compose.aiContextFrom', { account: aiContextAccount }) }}</span>
+                <span v-else>{{ $t('compose.aiNoContext') }}</span>
+              </p>
+
+              <!-- Topic input -->
+              <input
+                v-model="aiTopic"
+                type="text"
+                :placeholder="$t('compose.aiTopicPlaceholder')"
+                :disabled="generating"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+              />
+
+              <!-- Goal + Tone + Generate -->
+              <div class="flex items-center gap-2 flex-wrap">
+                <select
+                  v-model="aiGoal"
+                  :disabled="generating"
+                  class="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                >
+                  <option value="">{{ $t('compose.aiGoal') }}</option>
+                  <option value="promote">{{ $t('compose.aiGoals.promote') }}</option>
+                  <option value="engage">{{ $t('compose.aiGoals.engage') }}</option>
+                  <option value="inform">{{ $t('compose.aiGoals.inform') }}</option>
+                  <option value="entertain">{{ $t('compose.aiGoals.entertain') }}</option>
+                  <option value="announce">{{ $t('compose.aiGoals.announce') }}</option>
+                </select>
+
+                <select
+                  v-model="aiToneOverride"
+                  :disabled="generating"
+                  class="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                >
+                  <option value="">{{ $t('compose.aiToneDefault') }}</option>
+                  <option value="professional">Professional</option>
+                  <option value="casual">Casual</option>
+                  <option value="friendly">Friendly</option>
+                  <option value="formal">Formal</option>
+                  <option value="humorous">Humorous</option>
+                  <option value="inspiring">Inspiring</option>
+                  <option value="educational">Educational</option>
+                </select>
+
+                <div class="ml-auto flex items-center gap-2">
+                  <p v-if="aiError" class="text-xs text-red-400">{{ $t('compose.aiError') }}</p>
+
+                  <!-- Stop button (during generation) -->
+                  <button
+                    v-if="generating"
+                    @click="stopGeneration"
+                    class="px-3 py-1.5 text-xs font-medium bg-red-700 hover:bg-red-600 rounded-lg transition-colors"
+                  >
+                    {{ $t('compose.aiStop') }}
+                  </button>
+
+                  <!-- Generate button -->
+                  <button
+                    v-else
+                    @click="generatePost"
+                    :disabled="!aiTopic.trim()"
+                    class="px-3 py-1.5 text-xs font-medium bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg transition-colors flex items-center gap-1"
+                  >
+                    <span v-if="generating">{{ $t('compose.aiGenerating') }}</span>
+                    <span v-else>✨ {{ $t('compose.aiGenerate') }}</span>
+                  </button>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -241,11 +332,13 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
+import { useAiStore } from '../stores/ai'
 import PostPreview from '../components/compose/PostPreview.vue'
 
 const { t } = useI18n()
 const composeStore = useComposeStore()
 const platformsStore = usePlatformsStore()
+const aiStore = useAiStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -263,6 +356,7 @@ onMounted(async () => {
   await Promise.all([
     platformsStore.fetchStatuses(),
     platformsStore.fetchMetaConnections(),
+    aiStore.fetchConfig(),
   ])
   composeStore.initDestinations()
 
@@ -382,6 +476,107 @@ const canPost = computed(() =>
 const postButtonLabel = computed(() =>
   composeStore.scheduledAt ? `⏰ ${t('compose.schedule')}` : t('compose.send')
 )
+
+// ─── AI Generation ────────────────────────────────────────────────────────────
+
+const aiPanelOpen = ref(false)
+const aiTopic = ref('')
+const aiGoal = ref('')
+const aiToneOverride = ref('')
+const generating = ref(false)
+const aiError = ref(false)
+const aiContextAccount = ref('')
+const abortController = ref<AbortController | null>(null)
+
+const aiConfigured = computed(() => aiStore.config.enabled && !!aiStore.config.endpoint)
+
+function toggleAiPanel() {
+  aiPanelOpen.value = !aiPanelOpen.value
+  if (aiPanelOpen.value) loadAiContext()
+}
+
+// Profile cache keyed by destination key
+const profileCache: Record<string, Record<string, string>> = {}
+
+async function loadAiContext() {
+  const firstDest = composeStore.selectedDestinations[0]
+  if (!firstDest) { aiContextAccount.value = ''; return }
+
+  aiContextAccount.value = firstDest.label
+
+  if (!profileCache[firstDest.key]) {
+    try {
+      const res = await axios.get(`/api/profiles/${encodeURIComponent(firstDest.key)}`)
+      profileCache[firstDest.key] = res.data
+    } catch {
+      profileCache[firstDest.key] = {}
+    }
+  }
+}
+
+function buildSystemPrompt(profile: Record<string, string>): string {
+  const platforms = composeStore.selectedDestinations.map((d) => d.platform).join(', ')
+  const charLimit = composeStore.activeCharLimit ? `${composeStore.activeCharLimit} characters` : 'no strict limit'
+  const tone = aiToneOverride.value || profile.toneOfVoice || 'professional'
+
+  const lines = [
+    'You are a social media content writer. Write engaging, on-brand post content.',
+    '',
+    'BRAND CONTEXT:',
+  ]
+  if (profile.businessName)     lines.push(`Business: ${profile.businessName}`)
+  if (profile.description)      lines.push(`Description: ${profile.description}`)
+  if (profile.industry)         lines.push(`Industry: ${profile.industry}`)
+  if (profile.targetAudience)   lines.push(`Target audience: ${profile.targetAudience}`)
+  if (profile.keywords)         lines.push(`Keywords: ${profile.keywords}`)
+  if (profile.hashtags)         lines.push(`Preferred hashtags: ${profile.hashtags}`)
+  if (profile.postingGuidelines) lines.push(`Guidelines: ${profile.postingGuidelines}`)
+
+  lines.push('', 'PLATFORM RULES:')
+  lines.push(`Platform(s): ${platforms || 'general'}`)
+  lines.push(`Character limit: ${charLimit}`)
+  lines.push(`Tone of voice: ${tone}`)
+  if (aiGoal.value) lines.push(`Goal: ${aiGoal.value}`)
+
+  lines.push('', 'OUTPUT RULES:')
+  lines.push('- Write ONLY the post content, nothing else.')
+  lines.push('- No preamble, no explanation, no quotation marks around the post.')
+  lines.push('- Include relevant hashtags if appropriate.')
+  lines.push('- Stay within the character limit.')
+
+  return lines.join('\n')
+}
+
+async function generatePost() {
+  aiError.value = false
+  const firstDest = composeStore.selectedDestinations[0]
+  const profile = firstDest ? (profileCache[firstDest.key] || {}) : {}
+  const system = buildSystemPrompt(profile)
+  const prompt = aiTopic.value.trim()
+
+  abortController.value = new AbortController()
+  generating.value = true
+  composeStore.content = ''
+
+  try {
+    const gen = aiStore.streamGenerate(prompt, system, undefined, abortController.value.signal)
+    for await (const token of gen) {
+      composeStore.content += token
+    }
+  } catch (err: any) {
+    if (err.name !== 'AbortError') {
+      aiError.value = true
+      console.error('AI generation error:', err)
+    }
+  } finally {
+    generating.value = false
+    abortController.value = null
+  }
+}
+
+function stopGeneration() {
+  abortController.value?.abort()
+}
 
 async function handleSaveDraft() {
   const ok = await composeStore.saveDraft()

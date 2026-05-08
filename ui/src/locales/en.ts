@@ -63,6 +63,28 @@ export default {
     updateDraft: 'Update Draft',
     savingDraft: 'Saving…',
     draftSaved: 'Draft saved.',
+
+    aiButton: 'AI',
+    aiPanelTitle: 'Generate with AI',
+    aiTopic: 'Topic',
+    aiTopicPlaceholder: 'What should this post be about?',
+    aiGoal: 'Goal',
+    aiGoals: {
+      promote: 'Promote',
+      engage: 'Engage',
+      inform: 'Inform',
+      entertain: 'Entertain',
+      announce: 'Announce',
+    },
+    aiTone: 'Tone',
+    aiToneDefault: 'From profile',
+    aiGenerate: 'Generate',
+    aiGenerating: 'Generating…',
+    aiStop: 'Stop',
+    aiContextFrom: 'Context: {account}',
+    aiNoContext: 'No profile — set one in Settings',
+    aiNotConfigured: 'AI not configured — check Settings → AI Integration',
+    aiError: 'Generation failed',
   },
 
   scheduler: {

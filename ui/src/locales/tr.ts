@@ -63,6 +63,28 @@ export default {
     updateDraft: 'Taslağı Güncelle',
     savingDraft: 'Kaydediliyor…',
     draftSaved: 'Taslak kaydedildi.',
+
+    aiButton: 'YZ',
+    aiPanelTitle: 'YZ ile Oluştur',
+    aiTopic: 'Konu',
+    aiTopicPlaceholder: 'Bu gönderi ne hakkında olmalı?',
+    aiGoal: 'Hedef',
+    aiGoals: {
+      promote: 'Tanıt',
+      engage: 'Etkileşim',
+      inform: 'Bilgilendir',
+      entertain: 'Eğlendir',
+      announce: 'Duyur',
+    },
+    aiTone: 'Ton',
+    aiToneDefault: 'Profilden',
+    aiGenerate: 'Oluştur',
+    aiGenerating: 'Oluşturuluyor…',
+    aiStop: 'Durdur',
+    aiContextFrom: 'Bağlam: {account}',
+    aiNoContext: 'Profil yok — Ayarlar\'dan ekle',
+    aiNotConfigured: 'YZ yapılandırılmamış — Ayarlar → YZ Entegrasyonu',
+    aiError: 'Oluşturma başarısız',
   },
 
   scheduler: {

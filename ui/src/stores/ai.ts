@@ -82,11 +82,13 @@ export const useAiStore = defineStore('ai', () => {
     prompt: string,
     system?: string,
     model?: string,
+    signal?: AbortSignal,
   ): AsyncGenerator<string> {
     const response = await fetch('/api/ai/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, system, model }),
+      signal,
     })
 
     if (!response.ok || !response.body) {
