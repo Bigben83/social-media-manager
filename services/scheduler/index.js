@@ -3,6 +3,7 @@ const Fastify = require('fastify');
 const { Queue, Worker, QueueEvents } = require('bullmq');
 const IORedis = require('ioredis');
 const axios = require('axios');
+const { randomUUID } = require('crypto');
 const { getDb, connect } = require('./utils/MongoDBConnector');
 const { createLogger } = require('./utils/logger');
 
@@ -29,6 +30,8 @@ async function processPostJob(job) {
   // destinations: [{ platform, accountId?, imageUrl?, videoUrl?, link? }]
   // Falls back to legacy { platforms: string[] } format
   const { postId, content, destinations, platforms, media = [] } = job.data;
+  // Ensure every post has a stable ID for analytics tracking
+  const effectivePostId = postId || randomUUID();
 
   const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
   log.info({ action: 'job_process', jobId: job.id, attempt: job.attemptsMade + 1, destinations: destList.map((d) => d.accountId ? `${d.platform}:${d.accountId}` : d.platform) });
@@ -37,7 +40,7 @@ async function processPostJob(job) {
 
   // Load any results already recorded from previous attempts so we can skip
   // destinations that already succeeded — preventing duplicate posts on retry.
-  const existingPost = postId ? await db.collection('posts').findOne({ _id: postId }, { projection: { platformResults: 1 } }) : null;
+  const existingPost = await db.collection('posts').findOne({ _id: effectivePostId }, { projection: { platformResults: 1 } });
   const results = { ...(existingPost?.platformResults || {}) };
 
   for (const dest of destList) {
@@ -62,16 +65,24 @@ async function processPostJob(job) {
     }
   }
 
-  // MongoDB güncelle
+  const allOk  = Object.values(results).every((r) => r.success);
+  const anyOk  = Object.values(results).some((r) => r.success);
+  const postStatus = allOk ? 'published' : anyOk ? 'partial' : 'failed';
+
   await db.collection('posts').updateOne(
-    { _id: postId },
+    { _id: effectivePostId },
     {
       $set: {
-        status: Object.values(results).every((r) => r.success) ? 'published' : 'failed',
+        content,
+        destinations: destList,
+        type: 'scheduled',
+        status: postStatus,
         publishedAt: new Date(),
         platformResults: results,
       },
-    }
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
   );
 
   await db.collection('scheduled_jobs').updateOne(

@@ -4,7 +4,47 @@ export default {
     compose: 'New Post',
     media: 'Media',
     scheduler: 'Scheduler',
+    analytics: 'Analytics',
     settings: 'Settings',
+  },
+
+  analytics: {
+    title: 'Analytics',
+    subtitle: 'Publishing activity across all connected platforms',
+    refresh: 'Refresh',
+    loading: 'Loading analytics…',
+    empty: 'No posts yet.',
+    emptyHint: 'Start publishing to see analytics here.',
+
+    totalPosts: 'Total Posts',
+    last7Days: 'Last 7 Days',
+    platformsReached: 'Platforms Reached',
+    successRate: 'Success Rate',
+
+    postsPerDay: 'Posts per Day',
+    postsPerDaySubtitle: 'Last 30 days',
+    noActivity: 'No activity in the last 30 days.',
+
+    platformBreakdown: 'Platform Breakdown',
+    successfulPosts: 'successful posts',
+
+    statusBreakdown: 'Status Breakdown',
+    published: 'Published',
+    partial: 'Partial',
+    failed: 'Failed',
+
+    recentPosts: 'Recent Posts',
+    colContent: 'Content',
+    colPlatforms: 'Platforms',
+    colDate: 'Date',
+    colStatus: 'Status',
+    statusPublished: 'Published',
+    statusPartial: 'Partial',
+    statusFailed: 'Failed',
+    typeScheduled: 'Scheduled',
+    typeImmediate: 'Immediate',
+    noRecentPosts: 'No posts to show.',
+    loadMore: 'Load more',
   },
 
   media: {

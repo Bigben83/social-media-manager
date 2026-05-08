@@ -4,7 +4,47 @@ export default {
     compose: 'Yeni Gönderi',
     media: 'Medya',
     scheduler: 'Zamanlama',
+    analytics: 'Analitik',
     settings: 'Ayarlar',
+  },
+
+  analytics: {
+    title: 'Analitik',
+    subtitle: 'Bağlı tüm platformlardaki yayın aktivitesi',
+    refresh: 'Yenile',
+    loading: 'Analitik yükleniyor…',
+    empty: 'Henüz gönderi yok.',
+    emptyHint: 'Analitikleri görmek için yayın yapmaya başla.',
+
+    totalPosts: 'Toplam Gönderi',
+    last7Days: 'Son 7 Gün',
+    platformsReached: 'Ulaşılan Platform',
+    successRate: 'Başarı Oranı',
+
+    postsPerDay: 'Günlük Gönderi',
+    postsPerDaySubtitle: 'Son 30 gün',
+    noActivity: 'Son 30 günde aktivite yok.',
+
+    platformBreakdown: 'Platform Dağılımı',
+    successfulPosts: 'başarılı gönderi',
+
+    statusBreakdown: 'Durum Dağılımı',
+    published: 'Yayınlandı',
+    partial: 'Kısmi',
+    failed: 'Başarısız',
+
+    recentPosts: 'Son Gönderiler',
+    colContent: 'İçerik',
+    colPlatforms: 'Platformlar',
+    colDate: 'Tarih',
+    colStatus: 'Durum',
+    statusPublished: 'Yayınlandı',
+    statusPartial: 'Kısmi',
+    statusFailed: 'Başarısız',
+    typeScheduled: 'Zamanlanmış',
+    typeImmediate: 'Anlık',
+    noRecentPosts: 'Gösterilecek gönderi yok.',
+    loadMore: 'Daha fazla yükle',
   },
 
   media: {

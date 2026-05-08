@@ -521,6 +521,31 @@ app.post('/post', async (request, reply) => {
   );
 
   const anyFailed = output.some((r) => !r.success);
+  const anySucceeded = output.some((r) => r.success);
+  const postStatus = anyFailed && anySucceeded ? 'partial' : anyFailed ? 'failed' : 'published';
+
+  // Record the post for analytics
+  try {
+    const db = await getDb();
+    await db.collection('posts').insertOne({
+      _id: crypto.randomUUID(),
+      type: 'immediate',
+      content,
+      destinations,
+      platformResults: Object.fromEntries(
+        output.map((r) => [
+          r.accountId ? `${r.platform}:${r.accountId}` : r.platform,
+          { success: r.success, ...(r.error && { error: r.error }) },
+        ])
+      ),
+      status: postStatus,
+      publishedAt: new Date(),
+      createdAt: new Date(),
+    });
+  } catch (err) {
+    app.log.warn({ action: 'post_record', outcome: 'failure', err: err.message });
+  }
+
   return reply.code(anyFailed ? 207 : 200).send({ results: output });
 });
 
@@ -744,6 +769,60 @@ app.get('/credentials', async () => {
       accounts: igAccounts.map(({ id, username, avatar }) => ({ id, username, avatar })),
     },
   };
+});
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+app.get('/analytics/summary', async () => {
+  const db = await getDb();
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
+
+  const [published, failed, partial, recentCount, byPlatformRaw, byDayRaw] = await Promise.all([
+    db.collection('posts').countDocuments({ status: 'published' }),
+    db.collection('posts').countDocuments({ status: 'failed' }),
+    db.collection('posts').countDocuments({ status: 'partial' }),
+    db.collection('posts').countDocuments({ publishedAt: { $gte: sevenDaysAgo } }),
+    db.collection('posts').aggregate([
+      { $project: { results: { $objectToArray: { $ifNull: ['$platformResults', {}] } } } },
+      { $unwind: '$results' },
+      { $match: { 'results.v.success': true } },
+      { $project: { platform: { $arrayElemAt: [{ $split: ['$results.k', ':'] }, 0] } } },
+      { $group: { _id: '$platform', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+    db.collection('posts').aggregate([
+      { $match: { publishedAt: { $gte: thirtyDaysAgo } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$publishedAt' } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+  ]);
+
+  const total = published + failed + partial;
+  const successRate = total > 0 ? Math.round(((published + partial) / total) * 100) : 0;
+  const byPlatform = Object.fromEntries(byPlatformRaw.map((p) => [p._id, p.count]));
+  const byDay = byDayRaw.map((d) => ({ date: d._id, count: d.count }));
+
+  return { total, published, failed, partial, successRate, byPlatform, byDay, recentCount };
+});
+
+app.get('/analytics/posts', async (request) => {
+  const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+  const skip  = parseInt(request.query.skip || '0', 10);
+  const db = await getDb();
+
+  const [posts, total] = await Promise.all([
+    db.collection('posts')
+      .find({})
+      .sort({ publishedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .project({ content: 1, destinations: 1, platformResults: 1, status: 1, publishedAt: 1, type: 1 })
+      .toArray(),
+    db.collection('posts').countDocuments({}),
+  ]);
+
+  return { posts, total };
 });
 
 module.exports = app;

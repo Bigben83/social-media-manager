@@ -28,6 +28,11 @@ const router = createRouter({
       component: () => import('../views/Media.vue'),
     },
     {
+      path: '/analytics',
+      name: 'analytics',
+      component: () => import('../views/Analytics.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),
