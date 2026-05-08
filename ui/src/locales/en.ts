@@ -195,7 +195,11 @@ export default {
 
       expiryWarningTitle: 'Instagram token expiring soon',
       expiryWarningBody: '{username} expires in {days} day | {username} expires in {days} days',
-      expiryReconnect: 'Reconnect now',
+      expiryRefreshToken: 'Refresh Token',
+      expiryRefreshing: 'Refreshing…',
+      expiryRefreshDone: 'Token refreshed',
+      expiryAutoNote: 'Tokens are refreshed automatically when ≤ 7 days remain.',
+      expiryReconnect: 'Reconnect',
       expiryDismiss: 'Dismiss',
     },
   },

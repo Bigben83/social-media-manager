@@ -95,6 +95,13 @@ export const usePlatformsStore = defineStore('platforms', () => {
     tokenExpiryDismissed.value = true
   }
 
+  async function refreshMetaTokens() {
+    const res = await axios.post('/api/meta/token-refresh', {})
+    // Re-fetch expiry so the banner updates immediately
+    await fetchTokenExpiry()
+    return res.data
+  }
+
   async function fetchMetaConnections() {
     try {
       const res = await fetch('/api/credentials')
@@ -207,6 +214,6 @@ export const usePlatformsStore = defineStore('platforms', () => {
     fetchMetaCredentials, saveMetaApp, startMetaOAuth,
     fetchMetaDiscovery, saveMetaSelection, disconnectMeta,
     tokenExpiry, expiringAccounts, hasExpiryWarning,
-    fetchTokenExpiry, dismissTokenWarning,
+    fetchTokenExpiry, dismissTokenWarning, refreshMetaTokens,
   }
 })

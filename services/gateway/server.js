@@ -186,11 +186,12 @@ app.delete('/drafts/:id', async (request, reply) => {
   return { success: true };
 });
 
-// ─── Meta Token Expiry ───────────────────────────────────────────────────────
+// ─── Meta Token Expiry & Auto-Refresh ────────────────────────────────────────
 
 let _tokenExpiryCache = null;
 let _tokenExpiryCacheAt = 0;
 const TOKEN_EXPIRY_TTL = 60 * 60 * 1000; // 1 hour
+const TOKEN_REFRESH_THRESHOLD_DAYS = 7;  // refresh when ≤ this many days remain
 
 app.get('/meta/token-expiry', async (request, reply) => {
   if (_tokenExpiryCache && Date.now() - _tokenExpiryCacheAt < TOKEN_EXPIRY_TTL) {
@@ -231,6 +232,96 @@ app.get('/meta/token-expiry', async (request, reply) => {
   _tokenExpiryCache = { accounts, checkedAt: new Date().toISOString() };
   _tokenExpiryCacheAt = Date.now();
   return _tokenExpiryCache;
+});
+
+// Refresh Instagram long-lived tokens that are within TOKEN_REFRESH_THRESHOLD_DAYS of expiry.
+// Called by the scheduler's daily BullMQ job; can also be triggered manually from Settings.
+app.post('/meta/token-refresh', async (request, reply) => {
+  const appCred = await getCredentials('meta_app');
+  if (!appCred?.appId || !appCred?.appSecret) {
+    return reply.code(400).send({ success: false, error: 'Meta app credentials not configured' });
+  }
+  const plainAppSecret = decryptToken(appCred.appSecret);
+  if (!plainAppSecret) {
+    return reply.code(500).send({ success: false, error: 'Failed to decrypt app secret' });
+  }
+
+  const ig = await getCredentials('instagram');
+  const allAccounts = ig?.accounts || [];
+  const selectedAccounts = allAccounts.filter((a) => a.selected && a.accessToken);
+  if (!selectedAccounts.length) {
+    return { success: true, refreshed: 0, skipped: 0, errors: 0 };
+  }
+
+  const appToken = `${appCred.appId}|${plainAppSecret}`;
+  const refreshed = [];
+  const skipped = [];
+  const errors = [];
+
+  for (const account of selectedAccounts) {
+    const plainToken = decryptToken(account.accessToken);
+    if (!plainToken) {
+      errors.push({ username: account.username, error: 'decrypt_failed' });
+      continue;
+    }
+
+    // Check current token expiry via debug_token
+    let daysLeft = null;
+    try {
+      const debugRes = await axios.get(`${GRAPH_API}/debug_token`, {
+        params: { input_token: plainToken, access_token: appToken },
+        timeout: 10000,
+      });
+      const data = debugRes.data.data;
+      if (!data.is_valid) {
+        app.log.warn({ action: 'token_refresh', platform: 'instagram', username: account.username, outcome: 'skip', reason: 'invalid_token' });
+        errors.push({ username: account.username, error: 'token_invalid' });
+        continue;
+      }
+      // expires_at is a Unix timestamp; null means never-expiring (page token etc.)
+      daysLeft = data.expires_at
+        ? Math.ceil((data.expires_at * 1000 - Date.now()) / (1000 * 60 * 60 * 24))
+        : null;
+    } catch (err) {
+      app.log.warn({ action: 'token_refresh', platform: 'instagram', username: account.username, step: 'debug_token', outcome: 'failure', err: err.message });
+      errors.push({ username: account.username, error: err.message });
+      continue;
+    }
+
+    // Token never expires or has plenty of time — skip
+    if (daysLeft !== null && daysLeft > TOKEN_REFRESH_THRESHOLD_DAYS) {
+      skipped.push({ username: account.username, daysLeft });
+      continue;
+    }
+
+    // Refresh: exchange current long-lived token for a new one
+    try {
+      const refreshRes = await axios.get(`${GRAPH_API}/oauth/access_token`, {
+        params: {
+          grant_type: 'fb_exchange_token',
+          client_id: appCred.appId,
+          client_secret: plainAppSecret,
+          fb_exchange_token: plainToken,
+        },
+        timeout: 15000,
+      });
+      // Mutates the element inside allAccounts (same object reference)
+      account.accessToken = encryptToken(refreshRes.data.access_token);
+      refreshed.push({ username: account.username, previousDaysLeft: daysLeft });
+      app.log.info({ action: 'token_refresh', platform: 'instagram', username: account.username, outcome: 'success', previousDaysLeft: daysLeft });
+    } catch (err) {
+      app.log.error({ action: 'token_refresh', platform: 'instagram', username: account.username, outcome: 'failure', err: err.message });
+      errors.push({ username: account.username, error: err.message });
+    }
+  }
+
+  if (refreshed.length > 0) {
+    await setCredentials('instagram', { accounts: allAccounts });
+    _tokenExpiryCache = null; // force fresh expiry check on next poll
+  }
+
+  app.log.info({ action: 'token_refresh', platform: 'meta', outcome: 'complete', refreshed: refreshed.length, skipped: skipped.length, errors: errors.length });
+  return { success: true, refreshed: refreshed.length, skipped: skipped.length, errors: errors.length };
 });
 
 // ─── Account Profiles ────────────────────────────────────────────────────────

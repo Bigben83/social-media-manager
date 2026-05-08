@@ -195,7 +195,11 @@ export default {
 
       expiryWarningTitle: 'Instagram token\'ı yakında sona eriyor',
       expiryWarningBody: '{username} {days} gün içinde sona eriyor | {username} {days} gün içinde sona eriyor',
-      expiryReconnect: 'Şimdi yeniden bağlan',
+      expiryRefreshToken: 'Token\'ı Yenile',
+      expiryRefreshing: 'Yenileniyor…',
+      expiryRefreshDone: 'Token yenilendi',
+      expiryAutoNote: 'Token\'lar, sona ermesine ≤ 7 gün kaldığında otomatik olarak yenilenir.',
+      expiryReconnect: 'Yeniden Bağlan',
       expiryDismiss: 'Kapat',
     },
   },

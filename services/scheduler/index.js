@@ -7,6 +7,7 @@ const { getDb, connect } = require('./utils/MongoDBConnector');
 const { createLogger } = require('./utils/logger');
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
+const GATEWAY_URL = process.env.GATEWAY_URL || 'http://gateway:8084';
 
 const PLATFORM_SERVICES = {
   twitter:   process.env.TWITTER_SERVICE_URL   || 'http://twitter:3001',
@@ -84,6 +85,17 @@ async function processPostJob(job) {
   );
 
   return results;
+}
+
+// ─── System Job Worker ────────────────────────────────────────────────────────
+
+async function processSystemJob(job) {
+  if (job.name === 'meta-token-refresh') {
+    log.info({ action: 'token_refresh', trigger: 'scheduled', outcome: 'start' });
+    const res = await axios.post(`${GATEWAY_URL}/meta/token-refresh`, {}, { timeout: 60000 });
+    log.info({ action: 'token_refresh', trigger: 'scheduled', outcome: 'success', refreshed: res.data.refreshed, skipped: res.data.skipped, errors: res.data.errors });
+    return res.data;
+  }
 }
 
 // ─── HTTP Endpoints ──────────────────────────────────────────────────────────
@@ -171,6 +183,21 @@ async function start() {
   worker.on('failed', (job, err) => {
     log.error({ action: 'job_process', jobId: job?.id, outcome: 'failure', err: err.message });
   });
+
+  // Daily system jobs (housekeeping, token refresh, etc.)
+  const systemQueue = new Queue('system-queue', { connection: redis });
+  const systemWorker = new Worker('system-queue', processSystemJob, { connection: redis });
+  systemWorker.on('failed', (job, err) => {
+    log.error({ action: 'system_job', jobId: job?.id, jobName: job?.name, outcome: 'failure', err: err.message });
+  });
+
+  // Register daily Meta token auto-refresh — BullMQ deduplicates by repeat key on restart
+  await systemQueue.add(
+    'meta-token-refresh',
+    {},
+    { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 5, removeOnFail: 5 }
+  );
+  log.info({ action: 'system_job_register', job: 'meta-token-refresh', interval: '24h', outcome: 'success' });
 
   await app.listen({ port: process.env.PORT || 3011, host: '0.0.0.0' });
   log.info({ action: 'service_start', port: 3011, outcome: 'success' }, 'Scheduler started');

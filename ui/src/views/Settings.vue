@@ -105,6 +105,37 @@
                 <span class="ml-auto w-2 h-2 rounded-full bg-green-400"></span>
               </div>
             </div>
+            <!-- Token expiry warning banner -->
+            <div
+              v-if="platformsStore.hasExpiryWarning"
+              class="rounded-lg bg-yellow-900/30 border border-yellow-700/50 p-3 space-y-2"
+            >
+              <p class="text-xs font-semibold text-yellow-400">{{ $t('settings.meta.expiryWarningTitle') }}</p>
+              <p
+                v-for="account in platformsStore.expiringAccounts"
+                :key="account.id"
+                class="text-xs text-yellow-300"
+              >
+                {{ $tc('settings.meta.expiryWarningBody', account.daysLeft ?? 0, { username: '@' + account.username, days: account.daysLeft }) }}
+              </p>
+              <p class="text-xs text-gray-500">{{ $t('settings.meta.expiryAutoNote') }}</p>
+              <div class="flex gap-2 pt-1">
+                <button
+                  @click="handleTokenRefresh"
+                  :disabled="tokenRefreshing"
+                  class="px-3 py-1.5 bg-yellow-700 hover:bg-yellow-600 disabled:opacity-40 rounded-md text-xs font-medium transition-colors"
+                >
+                  {{ tokenRefreshing ? $t('settings.meta.expiryRefreshing') : tokenRefreshDone ? $t('settings.meta.expiryRefreshDone') : $t('settings.meta.expiryRefreshToken') }}
+                </button>
+                <button
+                  @click="platformsStore.dismissTokenWarning()"
+                  class="px-3 py-1.5 text-gray-400 hover:text-gray-300 text-xs font-medium transition-colors"
+                >
+                  {{ $t('settings.meta.expiryDismiss') }}
+                </button>
+              </div>
+            </div>
+
             <div class="flex gap-2 pt-2">
               <button
                 @click="platformsStore.startMetaOAuth()"
@@ -656,6 +687,23 @@ function confirmDisconnect() {
   }
 }
 
+// ─── Token auto-refresh ───────────────────────────────────────────────────────
+
+const tokenRefreshing = ref(false)
+const tokenRefreshDone = ref(false)
+
+async function handleTokenRefresh() {
+  tokenRefreshing.value = true
+  tokenRefreshDone.value = false
+  try {
+    await platformsStore.refreshMetaTokens()
+    tokenRefreshDone.value = true
+    setTimeout(() => { tokenRefreshDone.value = false }, 3000)
+  } finally {
+    tokenRefreshing.value = false
+  }
+}
+
 // ─── Account Profiles ────────────────────────────────────────────────────────
 
 const TONE_OPTIONS = [
@@ -797,6 +845,7 @@ onMounted(async () => {
     platformsStore.fetchStatuses(),
     platformsStore.fetchMetaCredentials(),
     loadMetaConnections(),
+    platformsStore.fetchTokenExpiry(),
     aiStore.fetchConfig(),
   ])
 
