@@ -186,6 +186,13 @@
             >✕</button>
           </div>
           <button
+            @click="handleSaveDraft"
+            :disabled="composeStore.savingDraft || !composeStore.content.trim()"
+            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 flex-shrink-0 bg-gray-700 hover:bg-gray-600 text-gray-200"
+          >
+            {{ composeStore.savingDraft ? $t('compose.savingDraft') : (composeStore.draftId ? $t('compose.updateDraft') : $t('compose.saveDraft')) }}
+          </button>
+          <button
             @click="handlePost"
             :disabled="composeStore.sending || !canPost"
             class="px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 flex-shrink-0"
@@ -198,6 +205,11 @@
         <!-- Success message -->
         <div v-if="composeStore.lastResult" class="bg-green-900/30 border border-green-700/60 rounded-xl px-4 py-3 text-sm text-green-300">
           {{ $t('compose.successMessage') }}
+        </div>
+
+        <!-- Draft saved message -->
+        <div v-if="draftSavedBanner" class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-300">
+          {{ $t('compose.draftSaved') }}
         </div>
 
       </div>
@@ -245,6 +257,7 @@ const uploading = ref(false)
 const uploadError = ref('')
 const mediaLoadError = ref(false)
 const activePreviewKey = ref('')
+const draftSavedBanner = ref(false)
 
 onMounted(async () => {
   await Promise.all([
@@ -257,6 +270,17 @@ onMounted(async () => {
   if (route.query.media) {
     composeStore.mediaUrl = String(route.query.media)
     mediaLoadError.value = false
+  }
+
+  // Load draft when arriving via ?draft=ID
+  if (route.query.draft) {
+    try {
+      const res = await axios.get(`/api/drafts/${route.query.draft}`)
+      composeStore.loadDraft(res.data)
+      mediaLoadError.value = false
+    } catch (err) {
+      console.error('Failed to load draft:', err)
+    }
   }
 })
 
@@ -358,6 +382,14 @@ const canPost = computed(() =>
 const postButtonLabel = computed(() =>
   composeStore.scheduledAt ? `⏰ ${t('compose.schedule')}` : t('compose.send')
 )
+
+async function handleSaveDraft() {
+  const ok = await composeStore.saveDraft()
+  if (ok) {
+    draftSavedBanner.value = true
+    setTimeout(() => { draftSavedBanner.value = false }, 2500)
+  }
+}
 
 async function handlePost() {
   await composeStore.post()

@@ -59,11 +59,15 @@ export default {
     igImageRequired: 'Instagram için görsel veya video zorunludur.',
     noDestinations: 'Hiçbir platform yapılandırılmamış.',
     goToSettings: 'Ayarlara git →',
+    saveDraft: 'Taslak Kaydet',
+    updateDraft: 'Taslağı Güncelle',
+    savingDraft: 'Kaydediliyor…',
+    draftSaved: 'Taslak kaydedildi.',
   },
 
   scheduler: {
     title: 'Zamanlama',
-    newSchedule: '+ Yeni Zamanla',
+    newSchedule: '+ Yeni Gönderi',
     noJobs: 'Zamanlanmış gönderi yok.',
     statuses: {
       pending: 'Bekleyen',
@@ -72,6 +76,11 @@ export default {
       cancelled: 'İptal',
     },
     cancel: 'İptal',
+    scheduledTab: 'Zamanlanmış',
+    draftsTab: 'Taslaklar',
+    noDrafts: 'Kayıtlı taslak yok.',
+    editDraft: 'Düzenle',
+    deleteDraft: 'Sil',
   },
 
   settings: {

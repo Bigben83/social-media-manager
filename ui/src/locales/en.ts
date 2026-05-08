@@ -59,11 +59,15 @@ export default {
     igImageRequired: 'Instagram requires an image or video.',
     noDestinations: 'No platforms configured.',
     goToSettings: 'Go to Settings →',
+    saveDraft: 'Save Draft',
+    updateDraft: 'Update Draft',
+    savingDraft: 'Saving…',
+    draftSaved: 'Draft saved.',
   },
 
   scheduler: {
     title: 'Scheduler',
-    newSchedule: '+ New Schedule',
+    newSchedule: '+ New Post',
     noJobs: 'No scheduled posts.',
     statuses: {
       pending: 'Pending',
@@ -72,6 +76,11 @@ export default {
       cancelled: 'Cancelled',
     },
     cancel: 'Cancel',
+    scheduledTab: 'Scheduled',
+    draftsTab: 'Drafts',
+    noDrafts: 'No saved drafts.',
+    editDraft: 'Edit',
+    deleteDraft: 'Delete',
   },
 
   settings: {

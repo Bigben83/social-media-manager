@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { pipeline } = require('stream/promises');
+const { ObjectId } = require('mongodb');
 const { getDb } = require('./utils/MongoDBConnector');
 const RabbitMQProducer = require('./utils/RabbitMQProducer');
 
@@ -26,7 +27,7 @@ const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:8081';
 
 app.addHook('onSend', async (request, reply) => {
   reply.header('Access-Control-Allow-Origin', '*');
-  reply.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   reply.header('Access-Control-Allow-Headers', 'Content-Type');
 });
 
@@ -127,6 +128,58 @@ app.delete('/media/:filename', async (request, reply) => {
   const db = await getDb();
   await db.collection('media_files').deleteOne({ filename });
 
+  return { success: true };
+});
+
+// ─── Drafts ──────────────────────────────────────────────────────────────────
+
+app.post('/drafts', async (request, reply) => {
+  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [] } = request.body || {};
+  const db = await getDb();
+  const now = new Date();
+  const result = await db.collection('drafts').insertOne({
+    content, mediaUrl, scheduledAt, destinations, createdAt: now, updatedAt: now,
+  });
+  const draft = await db.collection('drafts').findOne({ _id: result.insertedId });
+  return reply.code(201).send(draft);
+});
+
+app.get('/drafts', async () => {
+  const db = await getDb();
+  const drafts = await db.collection('drafts').find({}).sort({ updatedAt: -1 }).toArray();
+  return { drafts };
+});
+
+app.get('/drafts/:id', async (request, reply) => {
+  const { id } = request.params;
+  let oid;
+  try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
+  const db = await getDb();
+  const draft = await db.collection('drafts').findOne({ _id: oid });
+  if (!draft) return reply.code(404).send({ error: 'Draft not found' });
+  return draft;
+});
+
+app.put('/drafts/:id', async (request, reply) => {
+  const { id } = request.params;
+  let oid;
+  try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
+  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [] } = request.body || {};
+  const db = await getDb();
+  const result = await db.collection('drafts').updateOne(
+    { _id: oid },
+    { $set: { content, mediaUrl, scheduledAt, destinations, updatedAt: new Date() } }
+  );
+  if (!result.matchedCount) return reply.code(404).send({ error: 'Draft not found' });
+  return { success: true };
+});
+
+app.delete('/drafts/:id', async (request, reply) => {
+  const { id } = request.params;
+  let oid;
+  try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
+  const db = await getDb();
+  await db.collection('drafts').deleteOne({ _id: oid });
   return { success: true };
 });
 

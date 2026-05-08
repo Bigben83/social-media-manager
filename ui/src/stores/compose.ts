@@ -23,12 +23,24 @@ const CHAR_LIMITS: Record<string, number> = {
 
 const STANDARD_PLATFORMS = ['twitter', 'mastodon', 'bluesky', 'linkedin', 'reddit', 'youtube']
 
+export interface Draft {
+  _id: string
+  content: string
+  mediaUrl: string
+  scheduledAt: string
+  destinations: Destination[]
+  createdAt: string
+  updatedAt: string
+}
+
 export const useComposeStore = defineStore('compose', () => {
   const content = ref('')
   const mediaUrl = ref('')
   const scheduledAt = ref('')
   const destinations = ref<Destination[]>([])
   const sending = ref(false)
+  const savingDraft = ref(false)
+  const draftId = ref<string | null>(null)
   const lastResult = ref<Record<string, unknown> | null>(null)
 
   function charLimit(platform: string): number {
@@ -95,8 +107,48 @@ export const useComposeStore = defineStore('compose', () => {
     content.value = ''
     mediaUrl.value = ''
     scheduledAt.value = ''
+    draftId.value = null
     destinations.value.forEach((d) => { d.selected = false })
     lastResult.value = null
+  }
+
+  function loadDraft(draft: Draft) {
+    draftId.value = String(draft._id)
+    content.value = draft.content || ''
+    mediaUrl.value = draft.mediaUrl || ''
+    scheduledAt.value = draft.scheduledAt || ''
+    if (draft.destinations?.length) {
+      destinations.value.forEach((d) => {
+        const saved = draft.destinations.find((s) => s.key === d.key)
+        d.selected = saved?.selected ?? false
+      })
+    }
+  }
+
+  async function saveDraft() {
+    savingDraft.value = true
+    try {
+      const payload = {
+        content: content.value,
+        mediaUrl: mediaUrl.value,
+        scheduledAt: scheduledAt.value,
+        destinations: destinations.value.map(({ key, platform, accountId, label, color, picture, selected }) => ({
+          key, platform, accountId, label, color, picture, selected,
+        })),
+      }
+      if (draftId.value) {
+        await axios.put(`/api/drafts/${draftId.value}`, payload)
+      } else {
+        const res = await axios.post('/api/drafts', payload)
+        draftId.value = String(res.data._id)
+      }
+      return true
+    } catch (err) {
+      console.error('Save draft error:', err)
+      return false
+    } finally {
+      savingDraft.value = false
+    }
   }
 
   async function post() {
@@ -135,9 +187,9 @@ export const useComposeStore = defineStore('compose', () => {
   }
 
   return {
-    content, mediaUrl, scheduledAt, destinations, sending, lastResult,
+    content, mediaUrl, scheduledAt, destinations, sending, savingDraft, draftId, lastResult,
     selectedDestinations, activeCharLimit,
     charLimit, isOverLimit,
-    initDestinations, toggleDestination, reset, post,
+    initDestinations, toggleDestination, reset, loadDraft, saveDraft, post,
   }
 })
