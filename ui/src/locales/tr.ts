@@ -64,6 +64,10 @@ export default {
     savingDraft: 'Kaydediliyor…',
     draftSaved: 'Taslak kaydedildi.',
 
+    hashtagSuggestions: 'Önerilen hashtagler',
+    hashtagsLoading: 'Öneriliyor…',
+    hashtagsRefresh: 'Yenile',
+
     aiButton: 'YZ',
     aiPanelTitle: 'YZ ile Oluştur',
     aiTopic: 'Konu',

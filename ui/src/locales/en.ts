@@ -64,6 +64,10 @@ export default {
     savingDraft: 'Saving…',
     draftSaved: 'Draft saved.',
 
+    hashtagSuggestions: 'Suggested hashtags',
+    hashtagsLoading: 'Suggesting…',
+    hashtagsRefresh: 'Refresh',
+
     aiButton: 'AI',
     aiPanelTitle: 'Generate with AI',
     aiTopic: 'Topic',

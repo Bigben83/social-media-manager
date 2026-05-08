@@ -252,6 +252,35 @@
           </div>
         </div>
 
+        <!-- Hashtag suggestions -->
+        <div
+          v-if="suggestedHashtags.length || hashtagsLoading"
+          class="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3"
+        >
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs text-gray-500">{{ $t('compose.hashtagSuggestions') }}</span>
+            <span v-if="hashtagsLoading" class="text-xs text-gray-600 animate-pulse">{{ $t('compose.hashtagsLoading') }}</span>
+            <button
+              v-else
+              @click="suggestHashtags()"
+              class="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+              :title="$t('compose.hashtagsRefresh')"
+            >↻</button>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="tag in suggestedHashtags"
+              :key="tag"
+              @click="insertHashtag(tag)"
+              :disabled="contentHasTag(tag)"
+              class="text-xs px-2.5 py-0.5 rounded-full border transition-colors"
+              :class="contentHasTag(tag)
+                ? 'border-gray-700 text-gray-600 cursor-default'
+                : 'border-violet-700/60 text-violet-300 hover:bg-violet-900/30 hover:border-violet-600'"
+            >{{ tag }}</button>
+          </div>
+        </div>
+
         <!-- Instagram warning -->
         <div v-if="igSelectedWithoutMedia" class="flex items-center gap-2 bg-amber-900/30 border border-amber-700/50 rounded-xl px-4 py-2.5 text-xs text-amber-300">
           <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
@@ -577,6 +606,100 @@ async function generatePost() {
 function stopGeneration() {
   abortController.value?.abort()
 }
+
+// ─── Hashtag Suggestions ──────────────────────────────────────────────────────
+
+const suggestedHashtags = ref<string[]>([])
+const hashtagsLoading = ref(false)
+let hashtagDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// Stop words to filter out in keyword-extraction fallback
+const STOP_WORDS = new Set([
+  'the','and','for','are','but','not','you','all','can','her','was','one','our',
+  'out','about','have','from','they','this','that','with','will','been','were',
+  'when','what','your','more','also','than','then','into','its','just','like',
+  'some','their','there','these','those','which','would','could','should','after',
+  'very','well','here','where','does','each','both','such','even','most','said',
+  'over','only','same','much','before','through','while','under','first','last',
+])
+
+function extractKeywordHashtags(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .replace(/[^a-zA-Z\s]/g, ' ')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !STOP_WORDS.has(w))
+    ),
+  ]
+    .slice(0, 8)
+    .map((w) => `#${w}`)
+}
+
+function parseHashtagsFromResponse(text: string): string[] {
+  const tags = (text.match(/#[a-zA-Z]\w*/g) || [])
+    .map((t) => t.toLowerCase())
+  return [...new Set(tags)].slice(0, 10)
+}
+
+async function suggestHashtags() {
+  const content = composeStore.content.trim()
+  if (!content || content.length < 30) { suggestedHashtags.value = []; return }
+
+  hashtagsLoading.value = true
+  try {
+    if (aiConfigured.value) {
+      const firstDest = composeStore.selectedDestinations[0]
+      const profile = firstDest ? (profileCache[firstDest.key] || {}) : {}
+      const platforms = composeStore.selectedDestinations.map((d: { platform: string }) => d.platform).join(', ')
+
+      const system = 'You are a social media hashtag expert. Return ONLY hashtags, no explanation or extra text.'
+      const prompt = [
+        `Suggest 8 relevant hashtags for the following social media post.`,
+        platforms ? `Platform: ${platforms}` : '',
+        profile.industry ? `Industry: ${profile.industry}` : '',
+        profile.keywords ? `Keywords: ${profile.keywords}` : '',
+        ``,
+        `Post content:`,
+        content,
+        ``,
+        `Return exactly 8 hashtags as a space-separated list. Example: #marketing #growth #tips`,
+      ].filter(Boolean).join('\n')
+
+      const text = await aiStore.generate(prompt, system)
+      const parsed = parseHashtagsFromResponse(text)
+      suggestedHashtags.value = parsed.length ? parsed : extractKeywordHashtags(content)
+    } else {
+      suggestedHashtags.value = extractKeywordHashtags(content)
+    }
+  } catch {
+    suggestedHashtags.value = extractKeywordHashtags(content)
+  } finally {
+    hashtagsLoading.value = false
+  }
+}
+
+function contentHasTag(tag: string): boolean {
+  return composeStore.content.toLowerCase().includes(tag.toLowerCase())
+}
+
+function insertHashtag(tag: string) {
+  if (contentHasTag(tag)) return
+  const sep = composeStore.content.endsWith(' ') || !composeStore.content ? '' : ' '
+  composeStore.content += `${sep}${tag}`
+}
+
+// Debounced watcher — triggers suggestion after 1.5 s of no typing
+watch(
+  () => composeStore.content,
+  (val: string) => {
+    if (generating.value) return  // skip while AI is actively writing
+    if (hashtagDebounceTimer) clearTimeout(hashtagDebounceTimer)
+    if (val.trim().length < 30) { suggestedHashtags.value = []; return }
+    hashtagDebounceTimer = setTimeout(() => suggestHashtags(), 1500)
+  }
+)
 
 async function handleSaveDraft() {
   const ok = await composeStore.saveDraft()
