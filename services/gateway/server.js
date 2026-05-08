@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { pipeline } = require('stream/promises');
 const { ObjectId } = require('mongodb');
 const { getDb } = require('./utils/MongoDBConnector');
+const { encryptToken, decryptToken, warnIfNoKey } = require('./utils/crypto');
 const RabbitMQProducer = require('./utils/RabbitMQProducer');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
@@ -198,18 +199,22 @@ app.get('/meta/token-expiry', async (request, reply) => {
 
   const appCred = await getCredentials('meta_app');
   if (!appCred?.appId || !appCred?.appSecret) return { accounts: [] };
+  const plainAppSecret = decryptToken(appCred.appSecret);
+  if (!plainAppSecret) return { accounts: [] };
 
   const ig = await getCredentials('instagram');
   const selectedAccounts = (ig?.accounts || []).filter((a) => a.selected && a.accessToken);
   if (!selectedAccounts.length) return { accounts: [] };
 
-  const appToken = `${appCred.appId}|${appCred.appSecret}`;
+  const appToken = `${appCred.appId}|${plainAppSecret}`;
   const accounts = [];
 
   for (const account of selectedAccounts) {
+    const plainToken = decryptToken(account.accessToken);
+    if (!plainToken) continue;
     try {
       const res = await axios.get(`${GRAPH_API}/debug_token`, {
-        params: { input_token: account.accessToken, access_token: appToken },
+        params: { input_token: plainToken, access_token: appToken },
         timeout: 10000,
       });
       const data = res.data.data;
@@ -450,7 +455,7 @@ app.post('/credentials/meta-app', async (request, reply) => {
   if (!appId || !appSecret) {
     return reply.code(400).send({ error: 'appId and appSecret are required' });
   }
-  await setCredentials('meta_app', { appId, appSecret });
+  await setCredentials('meta_app', { appId, appSecret: encryptToken(appSecret) });
   return { success: true };
 });
 
@@ -458,7 +463,8 @@ app.post('/credentials/meta-app', async (request, reply) => {
 app.get('/credentials/meta-app', async () => {
   const cred = await getCredentials('meta_app');
   if (!cred) return { configured: false };
-  return { configured: true, appId: cred.appId, appSecretHint: `****${cred.appSecret.slice(-4)}` };
+  const plainSecret = decryptToken(cred.appSecret) || '';
+  return { configured: true, appId: cred.appId, appSecretHint: plainSecret ? `****${plainSecret.slice(-4)}` : '****' };
 });
 
 // ─── Meta OAuth Flow ──────────────────────────────────────────────────────────
@@ -498,6 +504,8 @@ app.get('/auth/meta/callback', async (request, reply) => {
   try {
     const appCred = await getCredentials('meta_app');
     if (!appCred?.appId) throw new Error('App credentials not configured');
+    const appSecret = decryptToken(appCred.appSecret);
+    if (!appSecret) throw new Error('Failed to decrypt app secret');
 
     const redirectUri = `${APP_BASE_URL}/api/auth/meta/callback`;
 
@@ -505,7 +513,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
     const shortRes = await axios.get(`${GRAPH_API}/oauth/access_token`, {
       params: {
         client_id: appCred.appId,
-        client_secret: appCred.appSecret,
+        client_secret: appSecret,
         redirect_uri: redirectUri,
         code,
       },
@@ -516,7 +524,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
       params: {
         grant_type: 'fb_exchange_token',
         client_id: appCred.appId,
-        client_secret: appCred.appSecret,
+        client_secret: appSecret,
         fb_exchange_token: shortRes.data.access_token,
       },
     });
@@ -534,7 +542,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
       pages.push({
         id: page.id,
         name: page.name,
-        accessToken: page.access_token,
+        accessToken: encryptToken(page.access_token),
         picture: page.picture?.data?.url || null,
         selected: false,
       });
@@ -561,7 +569,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
             username: igProfile.data.username || igProfile.data.name,
             name: igProfile.data.name,
             avatar: igProfile.data.profile_picture_url || null,
-            accessToken: userToken,
+            accessToken: encryptToken(userToken),
             pageId: page.id,
             selected: false,
           });

@@ -2,6 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
+const { decryptToken, warnIfNoKey } = require('./utils/crypto');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 
@@ -17,7 +18,9 @@ class FacebookService extends BasePlatformService {
       const db = await getDb();
       const cred = await db.collection('platform_credentials').findOne({ _id: 'facebook' });
       const dbPages = (cred?.pages || []).filter((p) => p.selected);
-      if (dbPages.length > 0) return dbPages;
+      if (dbPages.length > 0) {
+        return dbPages.map((p) => ({ ...p, accessToken: decryptToken(p.accessToken) })).filter((p) => p.accessToken);
+      }
     } catch (_) { /* fall through */ }
 
     // Env var fallback (legacy single-page mode)
@@ -133,4 +136,5 @@ class FacebookService extends BasePlatformService {
 }
 
 const service = new FacebookService();
+warnIfNoKey('facebook');
 service.start(process.env.PORT || 3006);

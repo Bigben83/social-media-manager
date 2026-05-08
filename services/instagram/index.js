@@ -2,6 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
+const { decryptToken, warnIfNoKey } = require('./utils/crypto');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 
@@ -17,7 +18,9 @@ class InstagramService extends BasePlatformService {
       const db = await getDb();
       const cred = await db.collection('platform_credentials').findOne({ _id: 'instagram' });
       const dbAccounts = (cred?.accounts || []).filter((a) => a.selected);
-      if (dbAccounts.length > 0) return dbAccounts;
+      if (dbAccounts.length > 0) {
+        return dbAccounts.map((a) => ({ ...a, accessToken: decryptToken(a.accessToken) })).filter((a) => a.accessToken);
+      }
     } catch (_) { /* fall through */ }
 
     // Env var fallback (legacy single-account mode)
@@ -159,4 +162,5 @@ class InstagramService extends BasePlatformService {
 }
 
 const service = new InstagramService();
+warnIfNoKey('instagram');
 service.start(process.env.PORT || 3005);
