@@ -11,8 +11,6 @@ export interface Destination {
   color: string
   picture?: string
   selected: boolean
-  scheduledAt: string  // empty string = post immediately
-  imageUrl?: string    // instagram only
 }
 
 const CHAR_LIMITS: Record<string, number> = {
@@ -27,6 +25,8 @@ const STANDARD_PLATFORMS = ['twitter', 'mastodon', 'bluesky', 'linkedin', 'reddi
 
 export const useComposeStore = defineStore('compose', () => {
   const content = ref('')
+  const mediaUrl = ref('')
+  const scheduledAt = ref('')
   const destinations = ref<Destination[]>([])
   const sending = ref(false)
   const lastResult = ref<Record<string, unknown> | null>(null)
@@ -35,43 +35,30 @@ export const useComposeStore = defineStore('compose', () => {
     return CHAR_LIMITS[platform] ?? 9999
   }
 
-  function charCount(): number {
-    return content.value.length
-  }
-
   function isOverLimit(platform: string): boolean {
     return content.value.length > charLimit(platform)
   }
 
   const selectedDestinations = computed(() => destinations.value.filter((d) => d.selected))
 
-  const hasImmediateDestinations = computed(() =>
-    selectedDestinations.value.some((d) => !d.scheduledAt)
-  )
-
-  const hasScheduledDestinations = computed(() =>
-    selectedDestinations.value.some((d) => !!d.scheduledAt)
-  )
+  // Most restrictive char limit among selected platforms that have a defined limit
+  const activeCharLimit = computed(() => {
+    const limits = selectedDestinations.value
+      .map((d) => CHAR_LIMITS[d.platform])
+      .filter((l): l is number => l !== undefined)
+    return limits.length ? Math.min(...limits) : null
+  })
 
   function initDestinations() {
     const platformsStore = usePlatformsStore()
     const next: Destination[] = []
 
-    // Standard platforms (one toggle per platform)
     for (const p of STANDARD_PLATFORMS) {
       const meta = PLATFORM_META[p]
       if (!meta) continue
-      next.push({
-        key: p,
-        platform: p,
-        label: meta.label,
-        color: meta.color,
-        selected: false,
-        scheduledAt: '',
-      })
+      next.push({ key: p, platform: p, label: meta.label, color: meta.color, selected: false })
     }
 
-    // Facebook pages
     for (const page of platformsStore.connectedPages) {
       next.push({
         key: `facebook:${page.id}`,
@@ -81,11 +68,9 @@ export const useComposeStore = defineStore('compose', () => {
         color: PLATFORM_META.facebook.color,
         picture: page.picture,
         selected: false,
-        scheduledAt: '',
       })
     }
 
-    // Instagram accounts
     for (const account of platformsStore.connectedIgAccounts) {
       next.push({
         key: `instagram:${account.id}`,
@@ -95,8 +80,6 @@ export const useComposeStore = defineStore('compose', () => {
         color: PLATFORM_META.instagram.color,
         picture: account.avatar,
         selected: false,
-        scheduledAt: '',
-        imageUrl: '',
       })
     }
 
@@ -108,60 +91,42 @@ export const useComposeStore = defineStore('compose', () => {
     if (dest) dest.selected = !dest.selected
   }
 
+  function reset() {
+    content.value = ''
+    mediaUrl.value = ''
+    scheduledAt.value = ''
+    destinations.value.forEach((d) => { d.selected = false })
+    lastResult.value = null
+  }
+
   async function post() {
-    if (!content.value.trim() || !selectedDestinations.value.length) return
+    const selected = selectedDestinations.value
+    if (!content.value.trim() || !selected.length) return
     sending.value = true
     lastResult.value = null
 
     try {
-      const immediate = selectedDestinations.value.filter((d) => !d.scheduledAt)
-      const scheduled = selectedDestinations.value.filter((d) => !!d.scheduledAt)
+      const destPayload = selected.map(({ platform, accountId }) => ({
+        platform,
+        ...(accountId && { accountId }),
+        ...(mediaUrl.value.trim() && { imageUrl: mediaUrl.value.trim() }),
+      }))
 
-      const calls: Promise<unknown>[] = []
-
-      if (immediate.length) {
-        calls.push(
-          axios.post('/api/post', {
-            content: content.value,
-            destinations: immediate.map(({ platform, accountId, imageUrl }) => ({
-              platform,
-              ...(accountId && { accountId }),
-              ...(imageUrl && { imageUrl }),
-            })),
-          })
-        )
+      if (scheduledAt.value) {
+        await axios.post('/scheduler/schedule', {
+          content: content.value,
+          scheduledAt: scheduledAt.value,
+          destinations: destPayload,
+        })
+      } else {
+        await axios.post('/api/post', {
+          content: content.value,
+          destinations: destPayload,
+        })
       }
 
-      // Each unique scheduledAt time gets its own scheduler call
-      const byTime = new Map<string, Destination[]>()
-      for (const dest of scheduled) {
-        const existing = byTime.get(dest.scheduledAt) || []
-        existing.push(dest)
-        byTime.set(dest.scheduledAt, existing)
-      }
-
-      for (const [scheduledAt, dests] of byTime) {
-        calls.push(
-          axios.post('/scheduler/schedule', {
-            content: content.value,
-            scheduledAt,
-            destinations: dests.map(({ platform, accountId, imageUrl }) => ({
-              platform,
-              ...(accountId && { accountId }),
-              ...(imageUrl && { imageUrl }),
-            })),
-          })
-        )
-      }
-
-      const results = await Promise.allSettled(calls)
-      lastResult.value = { ok: results.every((r) => r.status === 'fulfilled') }
-      content.value = ''
-      destinations.value.forEach((d) => {
-        d.selected = false
-        d.scheduledAt = ''
-        if (d.imageUrl !== undefined) d.imageUrl = ''
-      })
+      lastResult.value = { ok: true }
+      reset()
     } catch (err) {
       console.error('Compose post error:', err)
     } finally {
@@ -170,9 +135,9 @@ export const useComposeStore = defineStore('compose', () => {
   }
 
   return {
-    content, destinations, sending, lastResult,
-    selectedDestinations, hasImmediateDestinations, hasScheduledDestinations,
-    charLimit, charCount, isOverLimit,
-    initDestinations, toggleDestination, post,
+    content, mediaUrl, scheduledAt, destinations, sending, lastResult,
+    selectedDestinations, activeCharLimit,
+    charLimit, isOverLimit,
+    initDestinations, toggleDestination, reset, post,
   }
 })

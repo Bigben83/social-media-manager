@@ -1,215 +1,198 @@
 <template>
-  <div class="min-h-screen bg-gray-950 text-gray-100 p-6">
-    <div class="max-w-2xl mx-auto">
-      <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold">{{ $t('compose.title') }}</h1>
-        <router-link to="/dashboard" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">
-          {{ $t('compose.cancel') }}
-        </router-link>
-      </div>
+  <div class="flex h-screen overflow-hidden bg-gray-950 text-gray-100">
 
-      <!-- Content editor -->
-      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
-        <textarea
-          v-model="composeStore.content"
-          :placeholder="$t('compose.placeholder')"
-          rows="5"
-          class="w-full bg-transparent text-gray-100 placeholder-gray-600 resize-none focus:outline-none text-sm leading-relaxed"
-        ></textarea>
-      </div>
+    <!-- ── Left panel: editor ── -->
+    <div class="flex-1 flex flex-col min-w-0 overflow-y-auto p-6">
 
-      <!-- Destinations -->
-      <div class="bg-gray-900 border border-gray-800 rounded-xl mb-4 overflow-hidden">
-        <div class="px-4 py-3 border-b border-gray-800">
-          <p class="text-sm font-medium text-gray-300">{{ $t('compose.destinationsLabel') }}</p>
+      <div class="max-w-2xl w-full mx-auto flex flex-col gap-4">
+
+        <!-- Header -->
+        <div class="flex items-center justify-between">
+          <h1 class="text-xl font-bold">{{ $t('compose.title') }}</h1>
+          <router-link to="/dashboard" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">
+            {{ $t('compose.cancel') }}
+          </router-link>
         </div>
 
-        <!-- Standard platforms -->
-        <div v-if="standardDestinations.length" class="divide-y divide-gray-800/60">
-          <div
-            v-for="dest in standardDestinations"
-            :key="dest.key"
-            class="px-4 py-3"
-          >
-            <div class="flex items-center gap-3">
-              <!-- Toggle -->
-              <button
-                @click="composeStore.toggleDestination(dest.key)"
-                class="w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center transition-colors"
-                :style="dest.selected
-                  ? { backgroundColor: dest.color, borderColor: dest.color }
-                  : { borderColor: '#4b5563' }"
-              >
-                <svg v-if="dest.selected" class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </button>
+        <!-- Account selector -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">{{ $t('compose.destinationsLabel') }}</p>
 
-              <!-- Label + char count -->
-              <span
-                class="flex-1 text-sm font-medium"
-                :style="dest.selected ? { color: dest.color } : { color: '#9ca3af' }"
-              >{{ dest.label }}</span>
-              <span
-                v-if="dest.selected && composeStore.charLimit(dest.platform) < 9999"
-                class="text-xs flex-shrink-0"
-                :class="composeStore.isOverLimit(dest.platform) ? 'text-red-400' : 'text-gray-600'"
+          <div v-if="composeStore.destinations.length" class="flex flex-wrap gap-3">
+            <button
+              v-for="dest in composeStore.destinations"
+              :key="dest.key"
+              @click="toggle(dest.key)"
+              :title="dest.label"
+              class="relative focus:outline-none transition-all duration-150"
+              :class="dest.selected ? 'opacity-100' : 'opacity-40 hover:opacity-70 grayscale hover:grayscale-0'"
+            >
+              <!-- Avatar circle -->
+              <div
+                class="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center text-white font-bold text-base ring-2 ring-offset-2 ring-offset-gray-950 transition-all"
+                :style="dest.selected ? { ringColor: dest.color } : {}"
+                :class="dest.selected ? 'ring-white' : 'ring-transparent'"
               >
-                {{ composeStore.charCount() }}/{{ composeStore.charLimit(dest.platform) }}
+                <img v-if="dest.picture" :src="dest.picture" class="w-full h-full object-cover" />
+                <span v-else class="w-full h-full flex items-center justify-center font-bold text-sm" :style="{ backgroundColor: dest.color }">
+                  {{ dest.label[0] }}
+                </span>
+              </div>
+
+              <!-- Platform badge (only for page/account destinations) -->
+              <span
+                v-if="dest.accountId"
+                class="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-white font-bold border-2 border-gray-900"
+                style="font-size:8px"
+                :style="{ backgroundColor: dest.color }"
+              >
+                {{ dest.platform === 'facebook' ? 'f' : 'I' }}
               </span>
+            </button>
+          </div>
 
-              <!-- Per-destination schedule -->
-              <input
-                v-if="dest.selected"
-                v-model="dest.scheduledAt"
-                type="datetime-local"
-                class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500 flex-shrink-0"
-                :title="$t('compose.scheduleTitle')"
+          <p v-else class="text-sm text-gray-600">
+            {{ $t('compose.noDestinations') }}
+            <router-link to="/settings" class="text-blue-400 hover:text-blue-300 ml-1">{{ $t('compose.goToSettings') }}</router-link>
+          </p>
+        </div>
+
+        <!-- Textarea -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" :class="{ 'border-red-700': overLimit }">
+          <textarea
+            v-model="composeStore.content"
+            :placeholder="$t('compose.placeholder')"
+            rows="7"
+            class="w-full bg-transparent text-gray-100 placeholder-gray-600 resize-none focus:outline-none text-sm leading-relaxed p-4"
+          ></textarea>
+
+          <!-- Media preview -->
+          <div v-if="composeStore.mediaUrl.trim()" class="px-4 pb-3">
+            <div class="relative inline-block">
+              <img
+                :src="composeStore.mediaUrl"
+                class="rounded-lg max-h-48 max-w-full object-cover border border-gray-700"
+                @error="mediaError = true"
               />
+              <button
+                @click="composeStore.mediaUrl = ''; mediaError = false"
+                class="absolute -top-2 -right-2 w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-xs"
+              >✕</button>
             </div>
+            <p v-if="mediaError" class="text-xs text-red-400 mt-1">Could not load this image URL.</p>
+          </div>
+
+          <!-- Media URL input (shown when toolbar button clicked) -->
+          <div v-if="showMediaInput && !composeStore.mediaUrl.trim()" class="px-4 pb-3">
+            <input
+              v-model="mediaInputValue"
+              @keydown.enter="applyMedia"
+              @blur="applyMedia"
+              type="url"
+              :placeholder="$t('compose.mediaUrlPlaceholder')"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+              ref="mediaInputRef"
+            />
+          </div>
+
+          <!-- Toolbar -->
+          <div class="flex items-center gap-2 px-4 py-2.5 border-t border-gray-800">
+            <button
+              @click="toggleMediaInput"
+              class="text-gray-500 hover:text-gray-300 transition-colors p-1 rounded"
+              :class="showMediaInput || composeStore.mediaUrl ? 'text-blue-400' : ''"
+              :title="$t('compose.addMedia')"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </button>
+
+            <span class="ml-auto text-xs font-mono" :class="overLimit ? 'text-red-400' : charNearLimit ? 'text-amber-400' : 'text-gray-600'">
+              {{ composeStore.content.length }}<template v-if="composeStore.activeCharLimit">/{{ composeStore.activeCharLimit }}</template>
+            </span>
           </div>
         </div>
 
-        <!-- Facebook Pages section -->
-        <template v-if="facebookDestinations.length">
-          <div class="px-4 py-2 bg-gray-800/40 border-t border-gray-800/60">
-            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ $t('compose.facebookPages') }}</p>
-          </div>
-          <div class="divide-y divide-gray-800/60">
-            <div
-              v-for="dest in facebookDestinations"
-              :key="dest.key"
-              class="px-4 py-3"
-            >
-              <div class="flex items-center gap-3">
-                <button
-                  @click="composeStore.toggleDestination(dest.key)"
-                  class="w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center transition-colors"
-                  :style="dest.selected
-                    ? { backgroundColor: dest.color, borderColor: dest.color }
-                    : { borderColor: '#4b5563' }"
-                >
-                  <svg v-if="dest.selected" class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                </button>
-
-                <img v-if="dest.picture" :src="dest.picture" class="w-6 h-6 rounded-full flex-shrink-0 object-cover" />
-                <span v-else class="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold" style="background:#1877F2">f</span>
-
-                <span class="flex-1 text-sm" :class="dest.selected ? 'text-white' : 'text-gray-400'">{{ dest.label }}</span>
-
-                <input
-                  v-if="dest.selected"
-                  v-model="dest.scheduledAt"
-                  type="datetime-local"
-                  class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500 flex-shrink-0"
-                  :title="$t('compose.scheduleTitle')"
-                />
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- Instagram Accounts section -->
-        <template v-if="instagramDestinations.length">
-          <div class="px-4 py-2 bg-gray-800/40 border-t border-gray-800/60">
-            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ $t('compose.instagramAccounts') }}</p>
-          </div>
-          <div class="divide-y divide-gray-800/60">
-            <div
-              v-for="dest in instagramDestinations"
-              :key="dest.key"
-              class="px-4 py-3"
-            >
-              <div class="flex items-center gap-3">
-                <button
-                  @click="composeStore.toggleDestination(dest.key)"
-                  class="w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center transition-colors"
-                  :style="dest.selected
-                    ? { backgroundColor: dest.color, borderColor: dest.color }
-                    : { borderColor: '#4b5563' }"
-                >
-                  <svg v-if="dest.selected" class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                </button>
-
-                <img v-if="dest.picture" :src="dest.picture" class="w-6 h-6 rounded-full flex-shrink-0 object-cover" />
-                <span v-else class="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold" style="background:#E1306C">I</span>
-
-                <span class="flex-1 text-sm" :class="dest.selected ? 'text-white' : 'text-gray-400'">{{ dest.label }}</span>
-
-                <input
-                  v-if="dest.selected"
-                  v-model="dest.scheduledAt"
-                  type="datetime-local"
-                  class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500 flex-shrink-0"
-                  :title="$t('compose.scheduleTitle')"
-                />
-              </div>
-
-              <!-- Instagram image URL (required) -->
-              <div v-if="dest.selected" class="mt-2 ml-8">
-                <input
-                  v-model="dest.imageUrl"
-                  type="url"
-                  :placeholder="$t('compose.igImagePlaceholder')"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-pink-500"
-                />
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- Empty state: no destinations configured -->
-        <div
-          v-if="!standardDestinations.length && !facebookDestinations.length && !instagramDestinations.length"
-          class="px-4 py-6 text-center text-gray-600 text-sm"
-        >
-          {{ $t('compose.noDestinations') }}
-          <router-link to="/settings" class="text-blue-400 hover:text-blue-300 ml-1">{{ $t('compose.goToSettings') }}</router-link>
+        <!-- Instagram warning -->
+        <div v-if="igSelectedWithoutMedia" class="flex items-center gap-2 bg-amber-900/30 border border-amber-700/50 rounded-xl px-4 py-2.5 text-xs text-amber-300">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          {{ $t('compose.igImageRequired') }}
         </div>
-      </div>
 
-      <!-- Instagram warning: image required -->
-      <div
-        v-if="igWithoutImage.length"
-        class="mb-4 bg-amber-900/30 border border-amber-700/50 rounded-xl px-4 py-3 text-xs text-amber-300"
-      >
-        {{ $t('compose.igImageRequired', { accounts: igWithoutImage.map((d) => d.label).join(', ') }) }}
-      </div>
+        <!-- Schedule + Post -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 flex-wrap">
+          <div class="flex items-center gap-2 flex-1 min-w-0">
+            <svg class="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <input
+              v-model="composeStore.scheduledAt"
+              type="datetime-local"
+              class="flex-1 bg-transparent text-sm text-gray-300 focus:outline-none min-w-0"
+              :title="$t('compose.scheduleTitle')"
+            />
+            <button
+              v-if="composeStore.scheduledAt"
+              @click="composeStore.scheduledAt = ''"
+              class="text-gray-600 hover:text-gray-400 text-xs flex-shrink-0"
+            >✕</button>
+          </div>
+          <button
+            @click="handlePost"
+            :disabled="composeStore.sending || !canPost"
+            class="px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 flex-shrink-0"
+            :class="composeStore.scheduledAt ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'"
+          >
+            {{ composeStore.sending ? $t('compose.sending') : postButtonLabel }}
+          </button>
+        </div>
 
-      <!-- Action button -->
-      <div class="flex justify-end">
-        <button
-          @click="handlePost"
-          :disabled="composeStore.sending || !canPost"
-          class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
-        >
-          {{ composeStore.sending ? $t('compose.sending') : postButtonLabel }}
-        </button>
-      </div>
+        <!-- Success message -->
+        <div v-if="composeStore.lastResult" class="bg-green-900/30 border border-green-700/60 rounded-xl px-4 py-3 text-sm text-green-300">
+          {{ $t('compose.successMessage') }}
+        </div>
 
-      <!-- Success -->
-      <div v-if="composeStore.lastResult" class="mt-4 bg-green-900/30 border border-green-700 rounded-xl p-4 text-sm text-green-300">
-        {{ $t('compose.successMessage') }}
       </div>
     </div>
+
+    <!-- ── Right panel: preview ── -->
+    <div class="w-80 flex-shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800 flex-shrink-0">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-widest">{{ $t('compose.preview') }}</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4">
+        <PostPreview
+          :selectedDestinations="composeStore.selectedDestinations"
+          :activeKey="activePreviewKey"
+          :content="composeStore.content"
+          :mediaUrl="composeStore.mediaUrl"
+          @update:activeKey="activePreviewKey = $event"
+        />
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
+import PostPreview from '../components/compose/PostPreview.vue'
 
 const { t } = useI18n()
 const composeStore = useComposeStore()
 const platformsStore = usePlatformsStore()
 const router = useRouter()
+
+const showMediaInput = ref(false)
+const mediaInputValue = ref('')
+const mediaInputRef = ref<HTMLInputElement | null>(null)
+const mediaError = ref(false)
+const activePreviewKey = ref('')
 
 onMounted(async () => {
   await Promise.all([
@@ -219,33 +202,69 @@ onMounted(async () => {
   composeStore.initDestinations()
 })
 
-const standardDestinations = computed(() =>
-  composeStore.destinations.filter((d) => !d.accountId)
-)
-const facebookDestinations = computed(() =>
-  composeStore.destinations.filter((d) => d.platform === 'facebook' && d.accountId)
-)
-const instagramDestinations = computed(() =>
-  composeStore.destinations.filter((d) => d.platform === 'instagram' && d.accountId)
+// Keep activePreviewKey pointed at a selected destination
+watch(
+  () => composeStore.selectedDestinations,
+  (selected) => {
+    if (!selected.find((d) => d.key === activePreviewKey.value)) {
+      activePreviewKey.value = selected[0]?.key ?? ''
+    }
+  },
+  { deep: true }
 )
 
-// Instagram accounts that are selected but missing an imageUrl
-const igWithoutImage = computed(() =>
-  instagramDestinations.value.filter((d) => d.selected && !d.imageUrl?.trim())
+function toggle(key: string) {
+  composeStore.toggleDestination(key)
+  // Set preview to the newly selected destination
+  const dest = composeStore.destinations.find((d) => d.key === key)
+  if (dest?.selected) activePreviewKey.value = key
+}
+
+async function toggleMediaInput() {
+  if (composeStore.mediaUrl.trim()) {
+    composeStore.mediaUrl = ''
+    mediaError.value = false
+    return
+  }
+  showMediaInput.value = !showMediaInput.value
+  if (showMediaInput.value) {
+    await nextTick()
+    mediaInputRef.value?.focus()
+  }
+}
+
+function applyMedia() {
+  if (mediaInputValue.value.trim()) {
+    composeStore.mediaUrl = mediaInputValue.value.trim()
+    mediaInputValue.value = ''
+    showMediaInput.value = false
+    mediaError.value = false
+  }
+}
+
+const igSelectedWithoutMedia = computed(() =>
+  composeStore.selectedDestinations.some((d) => d.platform === 'instagram') &&
+  !composeStore.mediaUrl.trim()
+)
+
+const overLimit = computed(() =>
+  !!composeStore.activeCharLimit && composeStore.content.length > composeStore.activeCharLimit
+)
+
+const charNearLimit = computed(() =>
+  !!composeStore.activeCharLimit && composeStore.content.length > composeStore.activeCharLimit * 0.9
 )
 
 const canPost = computed(() =>
   !!composeStore.content.trim() &&
   composeStore.selectedDestinations.length > 0 &&
-  igWithoutImage.value.length === 0
+  !overLimit.value &&
+  !igSelectedWithoutMedia.value
 )
 
-const postButtonLabel = computed(() => {
-  const { hasImmediateDestinations, hasScheduledDestinations } = composeStore
-  if (hasImmediateDestinations && hasScheduledDestinations) return t('compose.postAndSchedule')
-  if (hasScheduledDestinations) return `⏰ ${t('compose.schedule')}`
-  return t('compose.send')
-})
+const postButtonLabel = computed(() =>
+  composeStore.scheduledAt ? `⏰ ${t('compose.schedule')}` : t('compose.send')
+)
 
 async function handlePost() {
   await composeStore.post()
