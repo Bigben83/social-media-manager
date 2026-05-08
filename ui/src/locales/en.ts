@@ -77,10 +77,15 @@ export default {
     },
     cancel: 'Cancel',
     scheduledTab: 'Scheduled',
+    calendarTab: 'Calendar',
     draftsTab: 'Drafts',
     noDrafts: 'No saved drafts.',
     editDraft: 'Edit',
     deleteDraft: 'Delete',
+    goToToday: 'Today',
+    noJobsDay: 'No posts scheduled for this day.',
+    weekDaysShort: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
   },
 
   settings: {

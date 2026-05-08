@@ -77,10 +77,15 @@ export default {
     },
     cancel: 'İptal',
     scheduledTab: 'Zamanlanmış',
+    calendarTab: 'Takvim',
     draftsTab: 'Taslaklar',
     noDrafts: 'Kayıtlı taslak yok.',
     editDraft: 'Düzenle',
     deleteDraft: 'Sil',
+    goToToday: 'Bugün',
+    noJobsDay: 'Bu gün için zamanlanmış gönderi yok.',
+    weekDaysShort: ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'],
+    months: ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'],
   },
 
   settings: {
