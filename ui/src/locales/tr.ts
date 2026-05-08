@@ -136,6 +136,11 @@ export default {
     savingDraft: 'Kaydediliyor…',
     draftSaved: 'Taslak kaydedildi.',
 
+    suggestedTimes: 'Önerilen zamanlar',
+    suggestionsFromHistory: 'geçmişinize göre',
+    suggestionsFromDefaults: 'sektör en iyi uygulamaları',
+    suggestionsLoading: 'Öneriler yükleniyor…',
+
     hashtagSuggestions: 'Önerilen hashtagler',
     hashtagsLoading: 'Öneriliyor…',
     hashtagsRefresh: 'Yenile',

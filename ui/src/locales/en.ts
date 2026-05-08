@@ -136,6 +136,11 @@ export default {
     savingDraft: 'Saving…',
     draftSaved: 'Draft saved.',
 
+    suggestedTimes: 'Suggested times',
+    suggestionsFromHistory: 'based on your history',
+    suggestionsFromDefaults: 'industry best practices',
+    suggestionsLoading: 'Loading suggestions…',
+
     hashtagSuggestions: 'Suggested hashtags',
     hashtagsLoading: 'Suggesting…',
     hashtagsRefresh: 'Refresh',

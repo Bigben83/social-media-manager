@@ -334,6 +334,22 @@
               class="text-gray-600 hover:text-gray-400 text-xs flex-shrink-0"
             >✕</button>
           </div>
+          <!-- Suggested times strip -->
+          <div v-if="suggestionsLoading || suggestions.length" class="flex items-start gap-2 flex-wrap">
+            <span class="text-xs text-gray-500 shrink-0 mt-0.5">{{ $t('compose.suggestedTimes') }}</span>
+            <span v-if="suggestionsLoading" class="text-xs text-gray-600 animate-pulse">{{ $t('compose.suggestionsLoading') }}</span>
+            <template v-else>
+              <button
+                v-for="s in suggestions"
+                :key="s.utc"
+                @click="applySuggestion(s)"
+                class="text-xs px-2.5 py-0.5 rounded-full border border-amber-700/60 text-amber-300 hover:bg-amber-900/30 transition-colors"
+                :class="{ 'opacity-50 ring-1 ring-amber-500': composeStore.scheduledAt === utcToNaiveDatetimeString(s.utc, scheduleTimezone) }"
+              >{{ formatSuggestionChip(s) }}</button>
+              <span class="text-xs text-gray-600 self-center">— {{ $t(suggestionsSource === 'history' ? 'compose.suggestionsFromHistory' : 'compose.suggestionsFromDefaults') }}</span>
+            </template>
+          </div>
+
           <!-- Row 2: actions -->
           <div class="flex items-center justify-end gap-2">
             <button
@@ -395,7 +411,7 @@ import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore } from '../stores/ai'
 import PostPreview from '../components/compose/PostPreview.vue'
-import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr } from '../utils/timezone'
+import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr, utcToNaiveDatetimeString } from '../utils/timezone'
 
 const { t } = useI18n()
 const composeStore = useComposeStore()
@@ -511,6 +527,56 @@ function removeMedia() {
 
 const scheduleTimezone = ref(getBrowserTimezone())
 const timezoneAbbr = computed(() => getTimezoneAbbr(scheduleTimezone.value))
+
+// ─── Schedule Suggestions ────────────────────────────────────────────────────
+
+interface Suggestion { utc: string; dayOfWeek: number; hour: number; label: string }
+
+const suggestions     = ref<Suggestion[]>([])
+const suggestionsSource = ref<'history' | 'default' | ''>('')
+const suggestionsLoading = ref(false)
+
+async function loadSuggestions() {
+  const first = composeStore.selectedDestinations[0]
+  if (!first) { suggestions.value = []; return }
+
+  suggestionsLoading.value = true
+  try {
+    const params: Record<string, string> = { platform: first.platform }
+    if (first.accountId) params.accountId = first.accountId
+    const res = await axios.get('/api/schedule/suggestions', { params })
+    suggestions.value = res.data.suggestions ?? []
+    suggestionsSource.value = res.data.source ?? ''
+  } catch {
+    suggestions.value = []
+  } finally {
+    suggestionsLoading.value = false
+  }
+}
+
+function applySuggestion(s: Suggestion) {
+  composeStore.scheduledAt = utcToNaiveDatetimeString(s.utc, scheduleTimezone.value)
+}
+
+function formatSuggestionChip(s: Suggestion): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+    timeZone: scheduleTimezone.value,
+    hour12: true,
+  }).format(new Date(s.utc))
+}
+
+// Reload suggestions when the selected platform changes (debounced to avoid
+// multiple requests when selecting several destinations quickly)
+let suggestionTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => composeStore.selectedDestinations[0]?.key,
+  () => {
+    if (suggestionTimer) clearTimeout(suggestionTimer)
+    suggestionTimer = setTimeout(loadSuggestions, 300)
+  }
+)
 
 // Auto-populate timezone from the first selected destination's profile.
 watch(

@@ -113,6 +113,22 @@ export function naiveDatetimeToUtc(localStr: string, timezone: string): string {
   return guess.toISOString()
 }
 
+// Convert a UTC ISO string to a naive "YYYY-MM-DDTHH:MM" string in the given timezone.
+// This is the inverse of naiveDatetimeToUtc — used to fill datetime-local inputs from UTC suggestions.
+export function utcToNaiveDatetimeString(utcIso: string, timezone: string): string {
+  const date = new Date(utcIso)
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone || 'UTC',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false,
+  })
+  const parts = fmt.formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
+  const hour = get('hour') === '24' ? '00' : get('hour')
+  return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}`
+}
+
 // Return the short timezone abbreviation shown in the UI badge.
 export function getTimezoneAbbr(timezone: string): string {
   try {

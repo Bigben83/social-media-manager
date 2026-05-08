@@ -771,6 +771,88 @@ app.get('/credentials', async () => {
   };
 });
 
+// ─── Schedule Suggestions ────────────────────────────────────────────────────
+
+// [dayOfWeek (0=Sun), hourUTC] pairs — research-based best-practice defaults
+const INDUSTRY_DEFAULTS = {
+  facebook:  [[2,9],[3,9],[4,9],[2,12],[4,10]],
+  instagram: [[1,11],[2,11],[3,11],[2,14],[3,14]],
+  twitter:   [[2,9],[3,9],[4,9],[2,12],[3,12]],
+  linkedin:  [[2,8],[3,8],[4,8],[3,12],[4,12]],
+  mastodon:  [[2,10],[3,10],[4,10],[1,11],[2,11]],
+  bluesky:   [[1,10],[2,10],[3,10],[1,11],[2,11]],
+  reddit:    [[1,7],[2,7],[3,7],[4,7],[0,9]],
+  youtube:   [[4,12],[5,12],[6,12],[4,15],[5,15]],
+};
+const DEFAULT_SLOTS = [[2,9],[3,9],[4,9],[2,12],[3,12]];
+
+// Returns the next UTC Date that falls on `dayOfWeek` at `hourUTC`:00,
+// at least `afterMs` milliseconds in the future.
+function nextOccurrence(dayOfWeek, hourUTC, afterMs) {
+  const candidate = new Date(afterMs);
+  candidate.setUTCHours(hourUTC, 0, 0, 0);
+
+  const daysAhead = (dayOfWeek - candidate.getUTCDay() + 7) % 7;
+  if (daysAhead === 0 && candidate.getTime() <= afterMs) {
+    candidate.setUTCDate(candidate.getUTCDate() + 7);
+  } else {
+    candidate.setUTCDate(candidate.getUTCDate() + daysAhead);
+  }
+  return candidate;
+}
+
+const DAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+app.get('/schedule/suggestions', async (request, reply) => {
+  const { platform, accountId } = request.query;
+  if (!platform) return reply.code(400).send({ error: 'platform is required' });
+
+  const db = await getDb();
+  const query = { platform, ...(accountId && { accountId }) };
+  const dataPoints = await db.collection('post_metrics').countDocuments(query);
+
+  let slots;
+  let source;
+
+  if (dataPoints >= 10) {
+    const agg = await db.collection('post_metrics').aggregate([
+      { $match: query },
+      { $group: {
+        _id: { day: '$dayOfWeek', hour: '$hourOfDay' },
+        avgEngagement: { $avg: '$metrics.engagementTotal' },
+        count: { $sum: 1 },
+      }},
+      { $sort: { avgEngagement: -1 } },
+      { $limit: 5 },
+    ]).toArray();
+    slots = agg.map((r) => [r._id.day, r._id.hour]);
+    source = 'history';
+  } else {
+    slots = INDUSTRY_DEFAULTS[platform] || DEFAULT_SLOTS;
+    source = 'default';
+  }
+
+  // 30-minute lead time so the user has time to finish writing
+  const afterMs = Date.now() + 30 * 60 * 1000;
+  const suggestions = slots
+    .map(([day, hour]) => {
+      const dt = nextOccurrence(day, hour, afterMs);
+      const h12 = hour % 12 || 12;
+      const ampm = hour < 12 ? 'am' : 'pm';
+      return {
+        utc: dt.toISOString(),
+        dayOfWeek: day,
+        hour,
+        label: `${DAY_ABBR[day]} ${h12}${ampm}`,
+      };
+    })
+    .sort((a, b) => new Date(a.utc) - new Date(b.utc))
+    .slice(0, 4);
+
+  app.log.info({ action: 'schedule_suggestions', platform, source, count: suggestions.length });
+  return { source, suggestions };
+});
+
 // ─── Analytics Metrics Crawl ─────────────────────────────────────────────────
 
 async function crawlFacebookMetrics(db) {
