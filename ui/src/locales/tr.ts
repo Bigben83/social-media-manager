@@ -89,6 +89,10 @@ export default {
     aiNoContext: 'Profil yok — Ayarlar\'dan ekle',
     aiNotConfigured: 'YZ yapılandırılmamış — Ayarlar → YZ Entegrasyonu',
     aiError: 'Oluşturma başarısız',
+
+    captionGenerate: '✨ Açıklama oluştur',
+    captionGenerating: 'Açıklama oluşturuluyor…',
+    captionError: 'Açıklama oluşturma başarısız',
   },
 
   scheduler: {
@@ -208,6 +212,9 @@ export default {
     connected: 'Bağlandı',
     connectionFailed: 'Bağlantı başarısız',
     modelsAvailable: '{count} model mevcut',
+    visionModelLabel: 'Görsel Model',
+    visionModelPlaceholder: 'örn. llava, llama3.2-vision',
+    visionModelHint: 'Görsel açıklama için kullanılır. Yükle: ollama pull llava',
   },
 
   feed: {

@@ -506,6 +506,18 @@
             </p>
           </div>
 
+          <!-- Vision model -->
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.visionModelLabel') }}</label>
+            <input
+              v-model="aiVisionModel"
+              type="text"
+              :placeholder="$t('ai.visionModelPlaceholder')"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+            />
+            <p class="text-xs text-gray-600 mt-1">{{ $t('ai.visionModelHint') }}</p>
+          </div>
+
           <!-- Save -->
           <div class="flex items-center justify-end gap-3">
             <span v-if="aiSaved" class="text-xs text-green-400">{{ $t('ai.saved') }}</span>
@@ -731,6 +743,7 @@ async function saveProfile(key: string) {
 
 const aiEndpoint = ref('')
 const aiModel = ref('')
+const aiVisionModel = ref('')
 const aiModels = computed(() => aiStore.models)
 const aiConnected = ref<boolean | null>(null)
 const aiSaved = ref(false)
@@ -744,7 +757,7 @@ async function testAiConnection() {
 }
 
 async function saveAiConfig() {
-  const ok = await aiStore.saveConfig({ endpoint: aiEndpoint.value, model: aiModel.value })
+  const ok = await aiStore.saveConfig({ endpoint: aiEndpoint.value, model: aiModel.value, visionModel: aiVisionModel.value })
   if (ok) {
     aiSaved.value = true
     setTimeout(() => { aiSaved.value = false }, 2500)
@@ -775,5 +788,6 @@ onMounted(async () => {
   // Seed local form from fetched config
   aiEndpoint.value = aiStore.config.endpoint
   aiModel.value = aiStore.config.model
+  aiVisionModel.value = aiStore.config.visionModel
 })
 </script>

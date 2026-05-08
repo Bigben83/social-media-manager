@@ -93,6 +93,25 @@
               >✕</button>
             </div>
             <p v-if="mediaLoadError" class="text-xs text-red-400 mt-1">{{ $t('compose.mediaLoadError') }}</p>
+
+            <!-- Caption generation button — only for images when AI is configured -->
+            <div v-if="isImage(composeStore.mediaUrl) && aiConfigured && !mediaLoadError" class="mt-2">
+              <button
+                @click="generateCaption"
+                :disabled="captionGenerating"
+                class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50"
+                :class="captionGenerating
+                  ? 'border-violet-700/40 text-violet-400 bg-violet-900/20'
+                  : 'border-violet-700/60 text-violet-300 hover:bg-violet-900/30 hover:border-violet-600'"
+              >
+                <svg v-if="captionGenerating" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                {{ captionGenerating ? $t('compose.captionGenerating') : $t('compose.captionGenerate') }}
+              </button>
+              <p v-if="captionError" class="text-xs text-red-400 mt-1">{{ $t('compose.captionError') }}</p>
+            </div>
           </div>
 
           <!-- Upload progress -->
@@ -605,6 +624,25 @@ async function generatePost() {
 
 function stopGeneration() {
   abortController.value?.abort()
+}
+
+// ─── Image Caption (Vision) ───────────────────────────────────────────────────
+
+const captionGenerating = ref(false)
+const captionError = ref(false)
+
+async function generateCaption() {
+  captionError.value = false
+  captionGenerating.value = true
+  try {
+    const caption = await aiStore.generateCaption(composeStore.mediaUrl)
+    const sep = composeStore.content.trim() ? '\n\n' : ''
+    composeStore.content = composeStore.content.trim() + sep + caption
+  } catch {
+    captionError.value = true
+  } finally {
+    captionGenerating.value = false
+  }
 }
 
 // ─── Hashtag Suggestions ──────────────────────────────────────────────────────

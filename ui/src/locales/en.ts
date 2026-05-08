@@ -89,6 +89,10 @@ export default {
     aiNoContext: 'No profile — set one in Settings',
     aiNotConfigured: 'AI not configured — check Settings → AI Integration',
     aiError: 'Generation failed',
+
+    captionGenerate: '✨ Generate caption',
+    captionGenerating: 'Generating caption…',
+    captionError: 'Caption generation failed',
   },
 
   scheduler: {
@@ -208,6 +212,9 @@ export default {
     connected: 'Connected',
     connectionFailed: 'Connection failed',
     modelsAvailable: '{count} model available | {count} models available',
+    visionModelLabel: 'Vision Model',
+    visionModelPlaceholder: 'e.g. llava, llama3.2-vision',
+    visionModelHint: 'Used for image captioning. Pull with: ollama pull llava',
   },
 
   feed: {

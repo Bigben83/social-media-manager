@@ -6,6 +6,7 @@ export interface AiConfig {
   provider: string
   endpoint: string
   model: string
+  visionModel: string
   enabled: boolean
 }
 
@@ -14,6 +15,7 @@ export const useAiStore = defineStore('ai', () => {
     provider: 'ollama',
     endpoint: 'http://ollama:11434',
     model: 'llama3.2',
+    visionModel: 'llava',
     enabled: true,
   })
   const models = ref<string[]>([])
@@ -78,6 +80,23 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
+  async function generateCaption(imageUrl: string): Promise<string> {
+    loading.value = true
+    error.value = null
+    try {
+      const res = await axios.post('/api/ai/caption', {
+        imageUrl,
+        model: config.value.visionModel,
+      })
+      return res.data.caption as string
+    } catch (err: any) {
+      error.value = err.response?.data?.error || 'Caption generation failed'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function* streamGenerate(
     prompt: string,
     system?: string,
@@ -123,6 +142,6 @@ export const useAiStore = defineStore('ai', () => {
 
   return {
     config, models, loading, saving, modelsLoading, error,
-    fetchConfig, saveConfig, fetchModels, generate, streamGenerate,
+    fetchConfig, saveConfig, fetchModels, generate, generateCaption, streamGenerate,
   }
 })

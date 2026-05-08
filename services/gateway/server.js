@@ -265,17 +265,18 @@ const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 app.get('/ai/config', async () => {
   const config = await getCredentials('ai_config');
   return {
-    provider: config?.provider || 'ollama',
-    endpoint: config?.endpoint || DEFAULT_OLLAMA_ENDPOINT,
-    model:    config?.model    || DEFAULT_OLLAMA_MODEL,
-    enabled:  config?.enabled  ?? true,
+    provider:     config?.provider     || 'ollama',
+    endpoint:     config?.endpoint     || DEFAULT_OLLAMA_ENDPOINT,
+    model:        config?.model        || DEFAULT_OLLAMA_MODEL,
+    visionModel:  config?.visionModel  || 'llava',
+    enabled:      config?.enabled      ?? true,
   };
 });
 
 app.put('/ai/config', async (request, reply) => {
-  const { provider = 'ollama', endpoint, model, enabled = true } = request.body || {};
+  const { provider = 'ollama', endpoint, model, visionModel = 'llava', enabled = true } = request.body || {};
   if (!endpoint) return reply.code(400).send({ error: 'endpoint is required' });
-  await setCredentials('ai_config', { provider, endpoint, model, enabled });
+  await setCredentials('ai_config', { provider, endpoint, model, visionModel, enabled });
   return { success: true };
 });
 
@@ -306,6 +307,46 @@ app.post('/ai/generate', async (request, reply) => {
   } catch (err) {
     const status = err.response?.status || 503;
     return reply.code(status).send({ error: 'AI generation failed', detail: err.message });
+  }
+});
+
+// Vision caption — fetches image, passes base64 to Ollama vision model
+app.post('/ai/caption', async (request, reply) => {
+  const { imageUrl, model: reqModel } = request.body || {};
+  if (!imageUrl) return reply.code(400).send({ error: 'imageUrl is required' });
+
+  const config = await getCredentials('ai_config');
+  const endpoint = config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
+  const model = reqModel || config?.visionModel || 'llava';
+
+  // Fetch image → base64
+  let imageBase64;
+  try {
+    let imageBuffer;
+    if (imageUrl.startsWith('/media/')) {
+      const filename = path.basename(imageUrl);
+      const filepath = path.join(UPLOAD_DIR, filename);
+      imageBuffer = fs.readFileSync(filepath);
+    } else {
+      const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 15000 });
+      imageBuffer = Buffer.from(imgRes.data);
+    }
+    imageBase64 = imageBuffer.toString('base64');
+  } catch (err) {
+    return reply.code(400).send({ error: 'Could not load image', detail: err.message });
+  }
+
+  try {
+    const res = await axios.post(`${endpoint}/api/generate`, {
+      model,
+      prompt: 'Generate an engaging, concise social media caption for this image. Write only the caption text with relevant hashtags. No explanations or preamble.',
+      images: [imageBase64],
+      stream: false,
+    }, { timeout: 90000 });
+    return { caption: res.data.response, model };
+  } catch (err) {
+    const status = err.response?.status || 503;
+    return reply.code(status).send({ error: 'Caption generation failed', detail: err.message });
   }
 });
 
