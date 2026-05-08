@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import axios from 'axios'
 
 export interface PlatformStatus {
@@ -37,6 +37,14 @@ export interface MetaCredentials {
   appSecretHint?: string
 }
 
+export interface TokenExpiryAccount {
+  id: string
+  username: string
+  expiresAt: string | null
+  daysLeft: number | null
+  isValid: boolean
+}
+
 export const PLATFORM_META: Record<string, { label: string; color: string; icon: string }> = {
   twitter:   { label: 'Twitter/X',  color: '#000000', icon: 'fa-brands fa-x-twitter' },
   linkedin:  { label: 'LinkedIn',   color: '#0077B5', icon: 'fa-brands fa-linkedin' },
@@ -61,6 +69,31 @@ export const usePlatformsStore = defineStore('platforms', () => {
   // Connected pages/accounts (fetched from gateway)
   const connectedPages = ref<MetaPage[]>([])
   const connectedIgAccounts = ref<MetaIgAccount[]>([])
+
+  // Token expiry
+  const tokenExpiry = ref<TokenExpiryAccount[]>([])
+  const tokenExpiryDismissed = ref(false)
+
+  const expiringAccounts = computed(() =>
+    tokenExpiry.value.filter((a: TokenExpiryAccount) => a.daysLeft !== null && a.daysLeft < 7)
+  )
+
+  const hasExpiryWarning = computed(() =>
+    !tokenExpiryDismissed.value && expiringAccounts.value.length > 0
+  )
+
+  async function fetchTokenExpiry() {
+    try {
+      const res = await axios.get('/api/meta/token-expiry')
+      tokenExpiry.value = res.data.accounts || []
+    } catch (err) {
+      console.error('Token expiry check error:', err)
+    }
+  }
+
+  function dismissTokenWarning() {
+    tokenExpiryDismissed.value = true
+  }
 
   async function fetchMetaConnections() {
     try {
@@ -173,5 +206,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
     connectedPages, connectedIgAccounts, fetchMetaConnections,
     fetchMetaCredentials, saveMetaApp, startMetaOAuth,
     fetchMetaDiscovery, saveMetaSelection, disconnectMeta,
+    tokenExpiry, expiringAccounts, hasExpiryWarning,
+    fetchTokenExpiry, dismissTokenWarning,
   }
 })

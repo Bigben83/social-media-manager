@@ -183,6 +183,49 @@ app.delete('/drafts/:id', async (request, reply) => {
   return { success: true };
 });
 
+// ─── Meta Token Expiry ───────────────────────────────────────────────────────
+
+let _tokenExpiryCache = null;
+let _tokenExpiryCacheAt = 0;
+const TOKEN_EXPIRY_TTL = 60 * 60 * 1000; // 1 hour
+
+app.get('/meta/token-expiry', async (request, reply) => {
+  if (_tokenExpiryCache && Date.now() - _tokenExpiryCacheAt < TOKEN_EXPIRY_TTL) {
+    return _tokenExpiryCache;
+  }
+
+  const appCred = await getCredentials('meta_app');
+  if (!appCred?.appId || !appCred?.appSecret) return { accounts: [] };
+
+  const ig = await getCredentials('instagram');
+  const selectedAccounts = (ig?.accounts || []).filter((a) => a.selected && a.accessToken);
+  if (!selectedAccounts.length) return { accounts: [] };
+
+  const appToken = `${appCred.appId}|${appCred.appSecret}`;
+  const accounts = [];
+
+  for (const account of selectedAccounts) {
+    try {
+      const res = await axios.get(`${GRAPH_API}/debug_token`, {
+        params: { input_token: account.accessToken, access_token: appToken },
+        timeout: 10000,
+      });
+      const data = res.data.data;
+      const expiresAt = data.expires_at ? new Date(data.expires_at * 1000).toISOString() : null;
+      const daysLeft = expiresAt
+        ? Math.ceil((new Date(expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+        : null;
+      accounts.push({ id: account.id, username: account.username, expiresAt, daysLeft, isValid: !!data.is_valid });
+    } catch (err) {
+      console.error(`[Gateway] Token expiry check failed for ${account.username}:`, err.message);
+    }
+  }
+
+  _tokenExpiryCache = { accounts, checkedAt: new Date().toISOString() };
+  _tokenExpiryCacheAt = Date.now();
+  return _tokenExpiryCache;
+});
+
 // ─── Account Profiles ────────────────────────────────────────────────────────
 
 app.get('/profiles', async () => {
@@ -431,6 +474,7 @@ app.post('/auth/meta/save', async (request, reply) => {
   await setCredentials('facebook', { pages: fbPages });
   await setCredentials('instagram', { accounts: igAccounts });
   await deleteCredentials('meta_discovery');
+  _tokenExpiryCache = null; // invalidate cache after reconnect
 
   return { success: true, facebookPages: fbPages.filter((p) => p.selected).length, instagramAccounts: igAccounts.filter((a) => a.selected).length };
 });
