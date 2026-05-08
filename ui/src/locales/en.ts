@@ -47,6 +47,8 @@ export default {
     sending: 'Posting...',
     successMessage: 'Post sent successfully.',
     scheduleTitle: 'Schedule post (leave empty to post now)',
+    timezoneLabel: 'Timezone',
+    timezoneAutoFrom: 'Auto from account',
     preview: 'Preview',
     addMedia: 'Photo / Video',
     uploadFile: 'Upload a photo or video from your device',
@@ -152,6 +154,9 @@ export default {
       hashtagsHint: 'e.g. #specialtycoffee #coffeelovers',
       postingGuidelines: 'Posting Guidelines',
       postingGuidelinesHint: 'Any specific rules, e.g. always mention opening hours on Fridays',
+      timezone: 'Timezone',
+      timezoneHint: 'Used to schedule posts at the correct local time for this account.',
+      timezoneAuto: 'Use browser timezone',
     },
 
     meta: {

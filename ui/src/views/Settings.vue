@@ -379,6 +379,19 @@
                 </div>
               </div>
 
+              <!-- Timezone -->
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.timezone') }}</label>
+                <select
+                  v-model="editingProfiles[account.key].timezone"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">{{ $t('settings.profiles.timezoneAuto') }}</option>
+                  <option v-for="tz in COMMON_TIMEZONES" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+                </select>
+                <p class="text-xs text-gray-600 mt-1">{{ $t('settings.profiles.timezoneHint') }}</p>
+              </div>
+
               <!-- Target Audience -->
               <div>
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.targetAudience') }}</label>
@@ -552,6 +565,7 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
 import { useAiStore } from '../stores/ai'
+import { COMMON_TIMEZONES } from '../utils/timezone'
 
 const { t } = useI18n()
 
@@ -664,6 +678,7 @@ interface AccountProfile {
   keywords: string
   hashtags: string
   postingGuidelines: string
+  timezone: string
 }
 
 interface ProfileAccount {
@@ -675,7 +690,7 @@ interface ProfileAccount {
 }
 
 function emptyProfile(): AccountProfile {
-  return { businessName: '', description: '', websiteUrl: '', industry: '', targetAudience: '', toneOfVoice: '', keywords: '', hashtags: '', postingGuidelines: '' }
+  return { businessName: '', description: '', websiteUrl: '', industry: '', targetAudience: '', toneOfVoice: '', keywords: '', hashtags: '', postingGuidelines: '', timezone: '' }
 }
 
 const expandedProfileKey = ref<string | null>(null)

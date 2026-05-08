@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from './platforms'
+import { naiveDatetimeToUtc } from '../utils/timezone'
 
 export interface Destination {
   key: string        // 'twitter', 'facebook:PAGE_ID', 'instagram:ACCOUNT_ID'
@@ -151,7 +152,7 @@ export const useComposeStore = defineStore('compose', () => {
     }
   }
 
-  async function post() {
+  async function post(timezone?: string) {
     const selected = selectedDestinations.value
     if (!content.value.trim() || !selected.length) return
     sending.value = true
@@ -165,9 +166,12 @@ export const useComposeStore = defineStore('compose', () => {
       }))
 
       if (scheduledAt.value) {
+        const utcScheduledAt = timezone
+          ? naiveDatetimeToUtc(scheduledAt.value, timezone)
+          : new Date(scheduledAt.value).toISOString()
         await axios.post('/scheduler/schedule', {
           content: content.value,
-          scheduledAt: scheduledAt.value,
+          scheduledAt: utcScheduledAt,
           destinations: destPayload,
         })
       } else {

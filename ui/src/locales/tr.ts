@@ -47,6 +47,8 @@ export default {
     sending: 'Gönderiliyor...',
     successMessage: 'Gönderi başarıyla gönderildi.',
     scheduleTitle: 'Zamanlama (boş bırakırsan hemen gönderilir)',
+    timezoneLabel: 'Saat Dilimi',
+    timezoneAutoFrom: 'Hesaptan otomatik',
     preview: 'Önizleme',
     addMedia: 'Fotoğraf / Video',
     uploadFile: 'Cihazından bir fotoğraf veya video yükle',
@@ -152,6 +154,9 @@ export default {
       hashtagsHint: 'örn. #kahveseverler #özelkahve',
       postingGuidelines: 'Yayın Kuralları',
       postingGuidelinesHint: 'Özel kurallar, örn. Cuma günleri açılış saatlerini belirt',
+      timezone: 'Saat Dilimi',
+      timezoneHint: 'Bu hesap için gönderilerin doğru yerel saatte zamanlanması için kullanılır.',
+      timezoneAuto: 'Tarayıcı saat dilimini kullan',
     },
 
     meta: {

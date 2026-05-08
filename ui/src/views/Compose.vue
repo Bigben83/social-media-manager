@@ -307,8 +307,9 @@
         </div>
 
         <!-- Schedule + Post -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 flex-wrap">
-          <div class="flex items-center gap-2 flex-1 min-w-0">
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <!-- Row 1: datetime + timezone -->
+          <div class="flex items-center gap-2">
             <svg class="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -318,27 +319,39 @@
               class="flex-1 bg-transparent text-sm text-gray-300 focus:outline-none min-w-0"
               :title="$t('compose.scheduleTitle')"
             />
+            <!-- Timezone selector -->
+            <select
+              v-model="scheduleTimezone"
+              :title="$t('compose.timezoneLabel')"
+              class="text-xs bg-gray-800 border border-gray-700 rounded-md px-2 py-1 text-gray-400 focus:outline-none focus:border-amber-500 flex-shrink-0 max-w-[130px]"
+            >
+              <option v-for="tz in COMMON_TIMEZONES" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+            </select>
+            <span class="text-xs text-gray-600 flex-shrink-0 hidden sm:block">{{ timezoneAbbr }}</span>
             <button
               v-if="composeStore.scheduledAt"
               @click="composeStore.scheduledAt = ''"
               class="text-gray-600 hover:text-gray-400 text-xs flex-shrink-0"
             >✕</button>
           </div>
-          <button
-            @click="handleSaveDraft"
-            :disabled="composeStore.savingDraft || !composeStore.content.trim()"
-            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 flex-shrink-0 bg-gray-700 hover:bg-gray-600 text-gray-200"
-          >
-            {{ composeStore.savingDraft ? $t('compose.savingDraft') : (composeStore.draftId ? $t('compose.updateDraft') : $t('compose.saveDraft')) }}
-          </button>
-          <button
-            @click="handlePost"
-            :disabled="composeStore.sending || !canPost"
-            class="px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 flex-shrink-0"
-            :class="composeStore.scheduledAt ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'"
-          >
-            {{ composeStore.sending ? $t('compose.sending') : postButtonLabel }}
-          </button>
+          <!-- Row 2: actions -->
+          <div class="flex items-center justify-end gap-2">
+            <button
+              @click="handleSaveDraft"
+              :disabled="composeStore.savingDraft || !composeStore.content.trim()"
+              class="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 bg-gray-700 hover:bg-gray-600 text-gray-200"
+            >
+              {{ composeStore.savingDraft ? $t('compose.savingDraft') : (composeStore.draftId ? $t('compose.updateDraft') : $t('compose.saveDraft')) }}
+            </button>
+            <button
+              @click="handlePost"
+              :disabled="composeStore.sending || !canPost"
+              class="px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+              :class="composeStore.scheduledAt ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'"
+            >
+              {{ composeStore.sending ? $t('compose.sending') : postButtonLabel }}
+            </button>
+          </div>
         </div>
 
         <!-- Success message -->
@@ -382,6 +395,7 @@ import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore } from '../stores/ai'
 import PostPreview from '../components/compose/PostPreview.vue'
+import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr } from '../utils/timezone'
 
 const { t } = useI18n()
 const composeStore = useComposeStore()
@@ -492,6 +506,26 @@ function removeMedia() {
   uploadError.value = ''
   showUrlInput.value = false
 }
+
+// ─── Schedule Timezone ────────────────────────────────────────────────────────
+
+const scheduleTimezone = ref(getBrowserTimezone())
+const timezoneAbbr = computed(() => getTimezoneAbbr(scheduleTimezone.value))
+
+// Auto-populate timezone from the first selected destination's profile.
+watch(
+  () => composeStore.selectedDestinations[0]?.key,
+  async (key: string | undefined) => {
+    if (!key) return
+    try {
+      const cached = profileCache[key]
+      const profile = cached ?? (await axios.get(`/api/profiles/${encodeURIComponent(key)}`)).data
+      if (!cached) profileCache[key] = profile
+      if (profile?.timezone) scheduleTimezone.value = profile.timezone
+    } catch { /* leave current timezone */ }
+  },
+  { immediate: true }
+)
 
 function isImage(url: string) {
   return /\.(jpe?g|png|gif|webp)(\?.*)?$/i.test(url)
@@ -748,7 +782,7 @@ async function handleSaveDraft() {
 }
 
 async function handlePost() {
-  await composeStore.post()
+  await composeStore.post(scheduleTimezone.value)
   if (composeStore.lastResult) setTimeout(() => router.push('/dashboard'), 1500)
 }
 </script>
