@@ -8,14 +8,24 @@
           <h1 class="text-2xl font-bold text-white">{{ $t('analytics.title') }}</h1>
           <p class="text-sm text-gray-500 mt-1">{{ $t('analytics.subtitle') }}</p>
         </div>
-        <button
-          @click="load"
-          :disabled="loading"
-          class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
-        >
-          <span :class="{ 'animate-spin': loading }">↻</span>
-          {{ $t('analytics.refresh') }}
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            @click="crawlMetrics"
+            :disabled="crawling"
+            class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
+          >
+            <span :class="{ 'animate-spin': crawling }">⟳</span>
+            {{ crawling ? $t('analytics.crawling') : (crawlResult !== null ? $t('analytics.crawlDone', { count: crawlResult }) : $t('analytics.crawlMetrics')) }}
+          </button>
+          <button
+            @click="load"
+            :disabled="loading"
+            class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
+          >
+            <span :class="{ 'animate-spin': loading }">↻</span>
+            {{ $t('analytics.refresh') }}
+          </button>
+        </div>
       </div>
 
       <!-- Loading -->
@@ -173,7 +183,9 @@
               class="flex items-start gap-4 py-3 border-b border-gray-800 last:border-0"
             >
               <!-- Content preview -->
-              <p class="flex-1 text-sm text-gray-300 line-clamp-2 min-w-0">{{ post.content }}</p>
+              <p class="flex-1 text-sm line-clamp-2 min-w-0" :class="post.content ? 'text-gray-300' : 'text-gray-600 italic'">
+                {{ post.content || $t('analytics.noContent') }}
+              </p>
 
               <!-- Platforms chips -->
               <div class="flex flex-wrap gap-1 shrink-0">
@@ -218,6 +230,176 @@
         </div>
 
       </template>
+
+      <!-- ── Advanced Insights ─────────────────────────────────── -->
+      <div v-if="!loading || summary" class="mt-8 space-y-6">
+        <div>
+          <h2 class="text-lg font-semibold text-white">{{ $t('analytics.insightsTitle') }}</h2>
+          <p class="text-sm text-gray-500 mt-0.5">{{ $t('analytics.insightsSubtitle') }}</p>
+        </div>
+
+        <div v-if="insightsLoading" class="flex items-center justify-center h-24 text-gray-500 text-sm">
+          {{ $t('analytics.loading') }}
+        </div>
+
+        <div v-else-if="!insights || insights.empty" class="bg-gray-900 border border-gray-800 rounded-2xl p-10 text-center">
+          <p class="text-gray-400 font-medium">{{ $t('analytics.insightsEmpty') }}</p>
+          <p class="text-sm text-gray-600 mt-1">{{ $t('analytics.insightsEmptyHint') }}</p>
+        </div>
+
+        <template v-else>
+
+          <!-- Platform Comparison -->
+          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 overflow-x-auto">
+            <h3 class="text-sm font-semibold text-white mb-4">{{ $t('analytics.platformCompTitle') }}</h3>
+            <table class="w-full text-sm min-w-[540px]">
+              <thead>
+                <tr class="text-xs text-gray-500 border-b border-gray-800">
+                  <th class="text-left pb-2 font-normal">Platform</th>
+                  <th class="text-right pb-2 font-normal">{{ $t('analytics.colAvgEngagement') }}</th>
+                  <th class="text-right pb-2 font-normal">{{ $t('analytics.colAvgLikes') }}</th>
+                  <th class="text-right pb-2 font-normal">{{ $t('analytics.colAvgComments') }}</th>
+                  <th class="text-right pb-2 font-normal">{{ $t('analytics.colAvgShares') }}</th>
+                  <th class="text-right pb-2 font-normal">{{ $t('analytics.colTracked') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in insights.platformComparison" :key="row.platform" class="border-b border-gray-800/40 last:border-0">
+                  <td class="py-2.5">
+                    <span class="flex items-center gap-2">
+                      <span class="w-2 h-2 rounded-full shrink-0" :style="{ background: platformColor(row.platform) }"></span>
+                      <span class="capitalize text-gray-300">{{ platformLabel(row.platform) }}</span>
+                    </span>
+                  </td>
+                  <td class="py-2.5 text-right font-semibold text-blue-400">{{ row.avgEngagement }}</td>
+                  <td class="py-2.5 text-right text-gray-400">{{ row.avgLikes }}</td>
+                  <td class="py-2.5 text-right text-gray-400">{{ row.avgComments }}</td>
+                  <td class="py-2.5 text-right text-gray-400">{{ row.avgShares }}</td>
+                  <td class="py-2.5 text-right text-gray-500">{{ row.totalPosts }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Best Time: By Hour + By Day -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <!-- By Hour -->
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+              <div class="flex items-baseline justify-between mb-4">
+                <h3 class="text-sm font-semibold text-white">{{ $t('analytics.byHourTitle') }}</h3>
+                <span class="text-xs text-gray-500">{{ $t('analytics.bestTimeSubtitle') }}</span>
+              </div>
+              <svg viewBox="0 0 480 60" preserveAspectRatio="none" class="w-full h-20">
+                <g v-for="bar in insights.byHour" :key="bar.hour">
+                  <rect
+                    :x="bar.hour * 20 + 2"
+                    :y="60 - byHourBarH(bar.avgEngagement)"
+                    :width="16"
+                    :height="byHourBarH(bar.avgEngagement) || 1"
+                    :class="bar.avgEngagement === maxByHourAvg && bar.avgEngagement > 0 ? 'fill-green-400' : 'fill-blue-500 opacity-70'"
+                    rx="1"
+                  >
+                    <title>{{ bar.hour }}:00 — avg {{ bar.avgEngagement }}</title>
+                  </rect>
+                </g>
+              </svg>
+              <div class="flex justify-between mt-1 text-xs text-gray-600 px-0.5">
+                <span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>23h</span>
+              </div>
+            </div>
+
+            <!-- By Day -->
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+              <div class="flex items-baseline justify-between mb-4">
+                <h3 class="text-sm font-semibold text-white">{{ $t('analytics.byDayTitle') }}</h3>
+                <span class="text-xs text-gray-500">{{ $t('analytics.bestTimeSubtitle') }}</span>
+              </div>
+              <svg viewBox="0 0 280 60" preserveAspectRatio="none" class="w-full h-20">
+                <g v-for="bar in insights.byDay" :key="bar.day">
+                  <rect
+                    :x="bar.day * 40 + 4"
+                    :y="60 - byDayBarH(bar.avgEngagement)"
+                    :width="32"
+                    :height="byDayBarH(bar.avgEngagement) || 1"
+                    :class="bar.avgEngagement === maxByDayAvg && bar.avgEngagement > 0 ? 'fill-green-400' : 'fill-blue-500 opacity-70'"
+                    rx="2"
+                  >
+                    <title>{{ ($t('analytics.dayNamesShort') as string[])[bar.day] }} — avg {{ bar.avgEngagement }}</title>
+                  </rect>
+                </g>
+              </svg>
+              <div class="flex justify-between mt-1 text-xs text-gray-600 px-1">
+                <span v-for="name in ($t('analytics.dayNamesShort') as string[])" :key="name">{{ name }}</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Engagement Heatmap -->
+          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+            <div class="flex items-baseline justify-between mb-4">
+              <h3 class="text-sm font-semibold text-white">{{ $t('analytics.heatmapTitle') }}</h3>
+              <span class="text-xs text-gray-500">{{ $t('analytics.heatmapSubtitle') }}</span>
+            </div>
+            <div class="overflow-x-auto">
+              <div class="inline-block min-w-full">
+                <!-- Hour axis labels -->
+                <div class="flex items-center mb-1" style="padding-left: 28px">
+                  <div
+                    v-for="h in 24"
+                    :key="h"
+                    class="shrink-0 text-center text-xs text-gray-600"
+                    style="width: 18px"
+                  >{{ (h - 1) % 6 === 0 ? String(h - 1) : '' }}</div>
+                </div>
+                <!-- Day rows -->
+                <div v-for="(row, d) in heatmapGrid" :key="d" class="flex items-center gap-px mb-px">
+                  <span class="text-xs text-gray-600 shrink-0 text-right pr-1" style="width: 28px">
+                    {{ ($t('analytics.dayNamesShort') as string[])[d] }}
+                  </span>
+                  <div
+                    v-for="cell in row"
+                    :key="cell.hour"
+                    class="shrink-0 rounded-sm"
+                    :style="{ width: '18px', height: '14px', background: heatmapCellBg(cell.avg) }"
+                    :title="`${($t('analytics.dayNamesShort') as string[])[d]} ${cell.hour}:00 — avg ${cell.avg}`"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top Performing Posts -->
+          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+            <h3 class="text-sm font-semibold text-white mb-4">{{ $t('analytics.topPostsTitle') }}</h3>
+            <div v-if="insights.topPosts.length === 0" class="text-sm text-gray-600">{{ $t('analytics.noTopPosts') }}</div>
+            <div v-else class="space-y-0">
+              <div
+                v-for="post in insights.topPosts"
+                :key="post.postId"
+                class="flex items-start gap-3 py-3 border-b border-gray-800 last:border-0"
+              >
+                <span class="shrink-0 w-2 h-2 rounded-full mt-1.5" :style="{ background: platformColor(post.platform) }"></span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-gray-500 mb-0.5">{{ platformLabel(post.platform) }} · {{ formatDate(post.publishedAt) }}</p>
+                  <p class="text-sm line-clamp-2" :class="post.content ? 'text-gray-300' : 'text-gray-600 italic'">
+                    {{ post.content || $t('analytics.noContent') }}
+                  </p>
+                </div>
+                <div class="shrink-0 text-right space-y-0.5">
+                  <p class="text-sm font-semibold text-blue-400">{{ post.metrics.engagementTotal }}</p>
+                  <p class="text-xs text-gray-600">
+                    ❤ {{ post.metrics.likes }} · 💬 {{ post.metrics.comments }}<template v-if="post.metrics.shares"> · ↗ {{ post.metrics.shares }}</template>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </template>
+      </div>
+
     </div>
   </div>
 </template>
@@ -249,6 +431,26 @@ interface Post {
   publishedAt: string
   type: string
 }
+interface HourStat  { hour: number; avgEngagement: number; count: number }
+interface DayEngStat { day: number; avgEngagement: number; count: number }
+interface HeatCell  { day: number; hour: number; avg: number; count: number }
+interface TopPost {
+  platform: string; accountName: string; postId: string
+  content: string | null; publishedAt: string
+  metrics: { likes: number; comments: number; shares: number; views: number; saves: number; engagementTotal: number }
+}
+interface PlatformComp {
+  platform: string; avgEngagement: number; avgLikes: number; avgComments: number; avgShares: number; totalPosts: number
+}
+interface Insights {
+  empty: boolean
+  total?: number
+  byHour?: HourStat[]
+  byDay?: DayEngStat[]
+  heatmap?: HeatCell[]
+  topPosts?: TopPost[]
+  platformComparison?: PlatformComp[]
+}
 
 // ── Chart constants ───────────────────────────────────────────────────────────
 
@@ -258,11 +460,16 @@ const DAY_COUNT = 30
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-const loading    = ref(false)
+const loading     = ref(false)
 const loadingMore = ref(false)
-const summary    = ref<Summary | null>(null)
-const posts      = ref<Post[]>([])
-const postsTotal = ref(0)
+const summary     = ref<Summary | null>(null)
+const posts       = ref<Post[]>([])
+const postsTotal  = ref(0)
+
+const insightsLoading = ref(false)
+const insights        = ref<Insights | null>(null)
+const crawling        = ref(false)
+const crawlResult     = ref<number | null>(null)
 
 // ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -291,7 +498,29 @@ async function loadMorePosts() {
   }
 }
 
-onMounted(load)
+async function loadInsights() {
+  insightsLoading.value = true
+  try {
+    const res = await axios.get('/api/analytics/insights')
+    insights.value = res.data
+  } finally {
+    insightsLoading.value = false
+  }
+}
+
+async function crawlMetrics() {
+  crawling.value = true
+  crawlResult.value = null
+  try {
+    const res = await axios.post('/api/analytics/crawl')
+    crawlResult.value = res.data.total
+    await loadInsights()
+  } finally {
+    crawling.value = false
+  }
+}
+
+onMounted(() => { load(); loadInsights() })
 
 // ── Chart helpers ─────────────────────────────────────────────────────────────
 
@@ -339,6 +568,43 @@ function platformColor(platform: string): string {
 function platformLabel(platform: string): string {
   return (PLATFORM_META as Record<string, { label: string }>)[platform]?.label ?? platform
 }
+
+// ── Insights helpers ──────────────────────────────────────────────────────────
+
+const INSIGHT_CHART_H = 57 // SVG height for by-hour / by-day charts
+
+const maxByHourAvg = computed(() =>
+  Math.max(...(insights.value?.byHour ?? []).map((b) => b.avgEngagement), 1)
+)
+const maxByDayAvg = computed(() =>
+  Math.max(...(insights.value?.byDay ?? []).map((b) => b.avgEngagement), 1)
+)
+
+function byHourBarH(avg: number): number {
+  if (!avg) return 0
+  return Math.max(3, (avg / maxByHourAvg.value) * INSIGHT_CHART_H * 0.95)
+}
+function byDayBarH(avg: number): number {
+  if (!avg) return 0
+  return Math.max(3, (avg / maxByDayAvg.value) * INSIGHT_CHART_H * 0.95)
+}
+
+const maxHeatmapAvg = computed(() =>
+  Math.max(...(insights.value?.heatmap ?? []).map((c) => c.avg), 1)
+)
+
+function heatmapCellBg(avg: number): string {
+  if (!avg) return 'rgba(59,130,246,0.05)'
+  const intensity = avg / maxHeatmapAvg.value
+  return `rgba(59,130,246,${(0.1 + intensity * 0.9).toFixed(2)})`
+}
+
+const heatmapGrid = computed<HeatCell[][]>(() => {
+  const cells = insights.value?.heatmap ?? []
+  return Array.from({ length: 7 }, (_, d) =>
+    Array.from({ length: 24 }, (_, h) => cells[d * 24 + h] ?? { day: d, hour: h, avg: 0, count: 0 })
+  )
+})
 
 // ── Post helpers ──────────────────────────────────────────────────────────────
 

@@ -771,6 +771,202 @@ app.get('/credentials', async () => {
   };
 });
 
+// ─── Analytics Metrics Crawl ─────────────────────────────────────────────────
+
+async function crawlFacebookMetrics(db) {
+  const fb = await getCredentials('facebook');
+  const pages = (fb?.pages || []).filter((p) => p.selected && p.accessToken);
+  if (!pages.length) return { count: 0 };
+
+  let count = 0;
+  for (const page of pages) {
+    const token = decryptToken(page.accessToken);
+    if (!token) continue;
+    try {
+      const res = await axios.get(`${GRAPH_API}/${page.id}/posts`, {
+        params: {
+          fields: 'id,message,created_time,reactions.summary(total_count),comments.summary(total_count),shares',
+          limit: 100,
+          access_token: token,
+        },
+        timeout: 30000,
+      });
+      for (const post of res.data.data || []) {
+        const likes    = post.reactions?.summary?.total_count || 0;
+        const comments = post.comments?.summary?.total_count || 0;
+        const shares   = post.shares?.count || 0;
+        const publishedAt = new Date(post.created_time);
+        await db.collection('post_metrics').updateOne(
+          { platform: 'facebook', postId: post.id },
+          {
+            $set: {
+              platform: 'facebook',
+              accountId: page.id,
+              accountName: page.name,
+              postId: post.id,
+              content: post.message || null,
+              publishedAt,
+              metrics: { likes, comments, shares, views: 0, saves: 0, engagementTotal: likes + comments + shares },
+              hourOfDay: publishedAt.getUTCHours(),
+              dayOfWeek: publishedAt.getUTCDay(),
+              fetchedAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+        count++;
+      }
+    } catch (err) {
+      app.log.warn({ action: 'metrics_crawl', platform: 'facebook', pageId: page.id, outcome: 'failure', err: err.message });
+    }
+  }
+  return { count };
+}
+
+async function crawlInstagramMetrics(db) {
+  const ig = await getCredentials('instagram');
+  const accounts = (ig?.accounts || []).filter((a) => a.selected && a.accessToken);
+  if (!accounts.length) return { count: 0 };
+
+  let count = 0;
+  for (const account of accounts) {
+    const token = decryptToken(account.accessToken);
+    if (!token) continue;
+    try {
+      const mediaRes = await axios.get(`${GRAPH_API}/${account.id}/media`, {
+        params: { fields: 'id,caption,timestamp,like_count,comments_count', limit: 100, access_token: token },
+        timeout: 30000,
+      });
+      for (const media of mediaRes.data.data || []) {
+        const likes    = media.like_count    || 0;
+        const comments = media.comments_count || 0;
+        const publishedAt = new Date(media.timestamp);
+        let views = 0;
+        let saves = 0;
+        try {
+          const insRes = await axios.get(`${GRAPH_API}/${media.id}/insights`, {
+            params: { metric: 'reach,saved', access_token: token },
+            timeout: 10000,
+          });
+          for (const ins of insRes.data.data || []) {
+            if (ins.name === 'reach') views = ins.values?.[0]?.value || 0;
+            if (ins.name === 'saved') saves = ins.values?.[0]?.value || 0;
+          }
+        } catch (_) {}
+        await db.collection('post_metrics').updateOne(
+          { platform: 'instagram', postId: media.id },
+          {
+            $set: {
+              platform: 'instagram',
+              accountId: account.id,
+              accountName: account.username,
+              postId: media.id,
+              content: media.caption || null,
+              publishedAt,
+              metrics: { likes, comments, shares: 0, views, saves, engagementTotal: likes + comments },
+              hourOfDay: publishedAt.getUTCHours(),
+              dayOfWeek: publishedAt.getUTCDay(),
+              fetchedAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+        count++;
+      }
+    } catch (err) {
+      app.log.warn({ action: 'metrics_crawl', platform: 'instagram', accountId: account.id, outcome: 'failure', err: err.message });
+    }
+  }
+  return { count };
+}
+
+app.post('/analytics/crawl', async () => {
+  const db = await getDb();
+  const results = {};
+  for (const [platform, crawler] of [['facebook', crawlFacebookMetrics], ['instagram', crawlInstagramMetrics]]) {
+    try {
+      results[platform] = await crawler(db);
+    } catch (err) {
+      app.log.error({ action: 'metrics_crawl', platform, outcome: 'failure', err: err.message });
+      results[platform] = { count: 0, error: err.message };
+    }
+  }
+  const total = Object.values(results).reduce((sum, r) => sum + (r.count || 0), 0);
+  app.log.info({ action: 'metrics_crawl', outcome: 'complete', total });
+  return { success: true, total, byPlatform: results };
+});
+
+app.get('/analytics/insights', async () => {
+  const db = await getDb();
+  const total = await db.collection('post_metrics').countDocuments({});
+  if (total === 0) return { empty: true };
+
+  const [byHourRaw, byDayRaw, topPosts, platformComparison, heatmapRaw] = await Promise.all([
+    db.collection('post_metrics').aggregate([
+      { $group: { _id: '$hourOfDay', avgEngagement: { $avg: '$metrics.engagementTotal' }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection('post_metrics').aggregate([
+      { $group: { _id: '$dayOfWeek', avgEngagement: { $avg: '$metrics.engagementTotal' }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection('post_metrics').find({}).sort({ 'metrics.engagementTotal': -1 }).limit(5).toArray(),
+    db.collection('post_metrics').aggregate([
+      { $group: {
+        _id: '$platform',
+        avgEngagement: { $avg: '$metrics.engagementTotal' },
+        avgLikes:      { $avg: '$metrics.likes' },
+        avgComments:   { $avg: '$metrics.comments' },
+        avgShares:     { $avg: '$metrics.shares' },
+        totalPosts:    { $sum: 1 },
+      }},
+      { $sort: { avgEngagement: -1 } },
+    ]).toArray(),
+    db.collection('post_metrics').aggregate([
+      { $group: {
+        _id: { day: '$dayOfWeek', hour: '$hourOfDay' },
+        avgEngagement: { $avg: '$metrics.engagementTotal' },
+        count: { $sum: 1 },
+      }},
+    ]).toArray(),
+  ]);
+
+  const byHour = Array.from({ length: 24 }, (_, h) => {
+    const e = byHourRaw.find((r) => r._id === h);
+    return { hour: h, avgEngagement: Math.round(e?.avgEngagement || 0), count: e?.count || 0 };
+  });
+  const byDay = Array.from({ length: 7 }, (_, d) => {
+    const e = byDayRaw.find((r) => r._id === d);
+    return { day: d, avgEngagement: Math.round(e?.avgEngagement || 0), count: e?.count || 0 };
+  });
+  const heatmap = Array.from({ length: 7 * 24 }, (_, i) => {
+    const day  = Math.floor(i / 24);
+    const hour = i % 24;
+    const e = heatmapRaw.find((r) => r._id.day === day && r._id.hour === hour);
+    return { day, hour, avg: Math.round(e?.avgEngagement || 0), count: e?.count || 0 };
+  });
+
+  return {
+    empty: false,
+    total,
+    byHour,
+    byDay,
+    heatmap,
+    topPosts: topPosts.map((p) => ({
+      platform: p.platform, accountName: p.accountName, postId: p.postId,
+      content: p.content, publishedAt: p.publishedAt, metrics: p.metrics,
+    })),
+    platformComparison: platformComparison.map((p) => ({
+      platform: p._id,
+      avgEngagement: Math.round(p.avgEngagement),
+      avgLikes:      Math.round(p.avgLikes),
+      avgComments:   Math.round(p.avgComments),
+      avgShares:     Math.round(p.avgShares),
+      totalPosts:    p.totalPosts,
+    })),
+  };
+});
+
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
 app.get('/analytics/summary', async () => {
@@ -778,32 +974,71 @@ app.get('/analytics/summary', async () => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
 
-  const [published, failed, partial, recentCount, byPlatformRaw, byDayRaw] = await Promise.all([
-    db.collection('posts').countDocuments({ status: 'published' }),
-    db.collection('posts').countDocuments({ status: 'failed' }),
-    db.collection('posts').countDocuments({ status: 'partial' }),
-    db.collection('posts').countDocuments({ publishedAt: { $gte: sevenDaysAgo } }),
+  // scheduled_jobs is the primary source — it holds the full history of all
+  // scheduled posts. posts (type: immediate) supplements it for direct dispatches.
+  const [
+    schedCompleted, schedFailed,
+    immPublished, immFailed,
+    recentSched, recentImm,
+    schedPlatformRaw, immPlatformRaw,
+    schedDayRaw, immDayRaw,
+  ] = await Promise.all([
+    db.collection('scheduled_jobs').countDocuments({ status: 'completed' }),
+    db.collection('scheduled_jobs').countDocuments({ status: 'failed' }),
+    db.collection('posts').countDocuments({ type: 'immediate', status: { $in: ['published', 'partial'] } }),
+    db.collection('posts').countDocuments({ type: 'immediate', status: 'failed' }),
+    db.collection('scheduled_jobs').countDocuments({ status: 'completed', completedAt: { $gte: sevenDaysAgo } }),
+    db.collection('posts').countDocuments({ type: 'immediate', publishedAt: { $gte: sevenDaysAgo } }),
+    // Platform breakdown from scheduled_jobs destinations
+    db.collection('scheduled_jobs').aggregate([
+      { $match: { status: 'completed' } },
+      { $unwind: '$destinations' },
+      { $group: { _id: '$destinations.platform', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+    // Platform breakdown from immediate posts platformResults
     db.collection('posts').aggregate([
+      { $match: { type: 'immediate' } },
       { $project: { results: { $objectToArray: { $ifNull: ['$platformResults', {}] } } } },
       { $unwind: '$results' },
       { $match: { 'results.v.success': true } },
       { $project: { platform: { $arrayElemAt: [{ $split: ['$results.k', ':'] }, 0] } } },
       { $group: { _id: '$platform', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
     ]).toArray(),
+    // Activity by day from scheduled_jobs (using completedAt)
+    db.collection('scheduled_jobs').aggregate([
+      { $match: { status: 'completed', completedAt: { $gte: thirtyDaysAgo } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$completedAt' } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    // Activity by day from immediate posts
     db.collection('posts').aggregate([
-      { $match: { publishedAt: { $gte: thirtyDaysAgo } } },
+      { $match: { type: 'immediate', publishedAt: { $gte: thirtyDaysAgo } } },
       { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$publishedAt' } }, count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]).toArray(),
   ]);
 
-  const total = published + failed + partial;
-  const successRate = total > 0 ? Math.round(((published + partial) / total) * 100) : 0;
-  const byPlatform = Object.fromEntries(byPlatformRaw.map((p) => [p._id, p.count]));
-  const byDay = byDayRaw.map((d) => ({ date: d._id, count: d.count }));
+  // Merge byDay from both sources
+  const dayMap = {};
+  for (const { _id, count } of [...schedDayRaw, ...immDayRaw]) {
+    dayMap[_id] = (dayMap[_id] || 0) + count;
+  }
+  const byDay = Object.entries(dayMap).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
 
-  return { total, published, failed, partial, successRate, byPlatform, byDay, recentCount };
+  // Merge byPlatform from both sources
+  const platformMap = {};
+  for (const { _id, count } of [...schedPlatformRaw, ...immPlatformRaw]) {
+    if (_id) platformMap[_id] = (platformMap[_id] || 0) + count;
+  }
+
+  const published = schedCompleted + immPublished;
+  const failed    = schedFailed    + immFailed;
+  const total     = published + failed;
+  const successRate = total > 0 ? Math.round((published / total) * 100) : 0;
+  const recentCount = recentSched + recentImm;
+
+  return { total, published, failed, partial: 0, successRate, byPlatform: platformMap, byDay, recentCount };
 });
 
 app.get('/analytics/posts', async (request) => {
@@ -811,18 +1046,49 @@ app.get('/analytics/posts', async (request) => {
   const skip  = parseInt(request.query.skip || '0', 10);
   const db = await getDb();
 
-  const [posts, total] = await Promise.all([
-    db.collection('posts')
-      .find({})
-      .sort({ publishedAt: -1 })
+  // scheduled_jobs holds all scheduled-post history (content stored from now on;
+  // older records have content: undefined). Immediate posts come from the posts collection.
+  const [scheduledJobs, immediatePosts, schedTotal, immTotal] = await Promise.all([
+    db.collection('scheduled_jobs')
+      .find({ status: { $in: ['completed', 'failed'] } })
+      .sort({ completedAt: -1, scheduledAt: -1 })
       .skip(skip)
       .limit(limit)
-      .project({ content: 1, destinations: 1, platformResults: 1, status: 1, publishedAt: 1, type: 1 })
+      .project({ content: 1, destinations: 1, status: 1, completedAt: 1, scheduledAt: 1 })
       .toArray(),
-    db.collection('posts').countDocuments({}),
+    db.collection('posts')
+      .find({ type: 'immediate' })
+      .sort({ publishedAt: -1 })
+      .project({ content: 1, destinations: 1, platformResults: 1, status: 1, publishedAt: 1 })
+      .toArray(),
+    db.collection('scheduled_jobs').countDocuments({ status: { $in: ['completed', 'failed'] } }),
+    db.collection('posts').countDocuments({ type: 'immediate' }),
   ]);
 
-  return { posts, total };
+  // Normalise to a single shape expected by the frontend
+  const normalised = [
+    ...scheduledJobs.map((j) => ({
+      _id: String(j._id),
+      type: 'scheduled',
+      content: j.content || null,
+      destinations: j.destinations || [],
+      platformResults: null,
+      status: j.status === 'completed' ? 'published' : 'failed',
+      publishedAt: j.completedAt || j.scheduledAt,
+    })),
+    ...immediatePosts.map((p) => ({
+      _id: String(p._id),
+      type: 'immediate',
+      content: p.content || null,
+      destinations: p.destinations || [],
+      platformResults: p.platformResults || null,
+      status: p.status,
+      publishedAt: p.publishedAt,
+    })),
+  ].sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+   .slice(0, limit);
+
+  return { posts: normalised, total: schedTotal + immTotal };
 });
 
 module.exports = app;

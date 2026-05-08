@@ -45,6 +45,36 @@ export default {
     typeImmediate: 'Immediate',
     noRecentPosts: 'No posts to show.',
     loadMore: 'Load more',
+    noContent: 'Content not available for older posts',
+
+    crawlMetrics: 'Crawl Metrics',
+    crawling: 'Crawling…',
+    crawlDone: 'Crawled {count} posts',
+
+    insightsTitle: 'Advanced Insights',
+    insightsSubtitle: 'Engagement metrics from connected platforms',
+    insightsEmpty: 'No engagement data yet.',
+    insightsEmptyHint: 'Click "Crawl Metrics" to fetch engagement data from your connected platforms.',
+
+    bestTimeTitle: 'Best Posting Times',
+    bestTimeSubtitle: 'Average engagement score by time (UTC)',
+    byHourTitle: 'By Hour of Day',
+    byDayTitle: 'By Day of Week',
+
+    heatmapTitle: 'Engagement Heatmap',
+    heatmapSubtitle: 'Day × hour (UTC) — darker = higher avg engagement',
+
+    topPostsTitle: 'Top Performing Posts',
+    noTopPosts: 'No top posts yet.',
+
+    platformCompTitle: 'Platform Comparison',
+    colAvgEngagement: 'Avg Engagement',
+    colAvgLikes: 'Avg Likes',
+    colAvgComments: 'Avg Comments',
+    colAvgShares: 'Avg Shares',
+    colTracked: 'Posts Tracked',
+
+    dayNamesShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
   },
 
   media: {

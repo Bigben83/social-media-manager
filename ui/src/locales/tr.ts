@@ -45,6 +45,36 @@ export default {
     typeImmediate: 'Anlık',
     noRecentPosts: 'Gösterilecek gönderi yok.',
     loadMore: 'Daha fazla yükle',
+    noContent: 'Eski gönderiler için içerik mevcut değil',
+
+    crawlMetrics: 'Metrikleri Getir',
+    crawling: 'Getiriliyor…',
+    crawlDone: '{count} gönderi getirildi',
+
+    insightsTitle: 'Gelişmiş İçgörüler',
+    insightsSubtitle: 'Bağlı platformlardan etkileşim metrikleri',
+    insightsEmpty: 'Henüz etkileşim verisi yok.',
+    insightsEmptyHint: '"Metrikleri Getir" butonuna tıklayarak bağlı platformlardan etkileşim verisi çek.',
+
+    bestTimeTitle: 'En İyi Paylaşım Zamanları',
+    bestTimeSubtitle: 'Zamana göre ortalama etkileşim puanı (UTC)',
+    byHourTitle: 'Günün Saatine Göre',
+    byDayTitle: 'Haftanın Gününe Göre',
+
+    heatmapTitle: 'Etkileşim Isı Haritası',
+    heatmapSubtitle: 'Gün × saat (UTC) — koyu = yüksek ortalama etkileşim',
+
+    topPostsTitle: 'En İyi Performanslı Gönderiler',
+    noTopPosts: 'Henüz gönderi yok.',
+
+    platformCompTitle: 'Platform Karşılaştırması',
+    colAvgEngagement: 'Ort. Etkileşim',
+    colAvgLikes: 'Ort. Beğeni',
+    colAvgComments: 'Ort. Yorum',
+    colAvgShares: 'Ort. Paylaşım',
+    colTracked: 'Takip Edilen',
+
+    dayNamesShort: ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'],
   },
 
   media: {

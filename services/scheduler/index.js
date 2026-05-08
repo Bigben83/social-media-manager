@@ -107,6 +107,12 @@ async function processSystemJob(job) {
     log.info({ action: 'token_refresh', trigger: 'scheduled', outcome: 'success', refreshed: res.data.refreshed, skipped: res.data.skipped, errors: res.data.errors });
     return res.data;
   }
+  if (job.name === 'metrics-crawl') {
+    log.info({ action: 'metrics_crawl', trigger: 'scheduled', outcome: 'start' });
+    const res = await axios.post(`${GATEWAY_URL}/analytics/crawl`, {}, { timeout: 120000 });
+    log.info({ action: 'metrics_crawl', trigger: 'scheduled', outcome: 'success', total: res.data.total });
+    return res.data;
+  }
 }
 
 // ─── HTTP Endpoints ──────────────────────────────────────────────────────────
@@ -140,6 +146,7 @@ app.post('/schedule', async (request, reply) => {
   await db.collection('scheduled_jobs').insertOne({
     postId,
     type: 'one-time',
+    content,
     scheduledAt: new Date(scheduledAt),
     destinations: destList,
     status: 'pending',
@@ -202,13 +209,20 @@ async function start() {
     log.error({ action: 'system_job', jobId: job?.id, jobName: job?.name, outcome: 'failure', err: err.message });
   });
 
-  // Register daily Meta token auto-refresh — BullMQ deduplicates by repeat key on restart
+  // Register daily system jobs — BullMQ deduplicates by repeat key on restart
   await systemQueue.add(
     'meta-token-refresh',
     {},
     { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 5, removeOnFail: 5 }
   );
   log.info({ action: 'system_job_register', job: 'meta-token-refresh', interval: '24h', outcome: 'success' });
+
+  await systemQueue.add(
+    'metrics-crawl',
+    {},
+    { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 5, removeOnFail: 5 }
+  );
+  log.info({ action: 'system_job_register', job: 'metrics-crawl', interval: '24h', outcome: 'success' });
 
   await app.listen({ port: process.env.PORT || 3011, host: '0.0.0.0' });
   log.info({ action: 'service_start', port: 3011, outcome: 'success' }, 'Scheduler started');
