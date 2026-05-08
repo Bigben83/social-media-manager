@@ -66,10 +66,12 @@ services:
       - ./services/utils:/services/gateway/utils
       - ./services/gateway:/services/gateway
       - gateway_modules:/services/gateway/node_modules
+    env_file: .env
     networks:
       - socialMediaManagerNetwork
     depends_on:
       - messageBroker
+      - mongodb
 
   socket:
     build: ./services/socket
@@ -150,6 +152,34 @@ services:
       - messageBroker
       - mongodb
 
+  instagram:
+    build:
+      context: ./services
+      dockerfile: instagram/Dockerfile
+    volumes:
+      - instagram_modules:/services/instagram/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - messageBroker
+      - mongodb
+
+  facebook:
+    build:
+      context: ./services
+      dockerfile: facebook/Dockerfile
+    volumes:
+      - facebook_modules:/services/facebook/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - messageBroker
+      - mongodb
+
   feed-aggregator:
     build:
       context: ./services
@@ -167,6 +197,8 @@ services:
       - linkedin
       - mastodon
       - bluesky
+      - instagram
+      - facebook
 
   scheduler:
     build:
@@ -206,6 +238,8 @@ volumes:
   linkedin_modules:
   mastodon_modules:
   bluesky_modules:
+  instagram_modules:
+  facebook_modules:
   feed_aggregator_modules:
   scheduler_modules:
   ui_modules:

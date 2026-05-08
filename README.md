@@ -101,8 +101,87 @@ Open **http://localhost:8081** in your browser.
 | Reddit | Free | ✅ | ✅ | Register an app at reddit.com/prefs/apps |
 | Twitter/X | Paid ($100/mo Basic) | ⚠️ | ✅ | Free tier very limited |
 | LinkedIn | Free | ⚠️ | ✅ | Personal feed read not available via API |
-| Instagram | Free | ⚠️ | ⚠️ | Business/Creator account required |
+| Instagram | Free | ✅ | ✅ | Business/Creator account + Facebook Page required |
+| Facebook | Free | ✅ | ✅ | Facebook Page required (personal timelines not supported) |
 | YouTube | Free | ✅ | ❌ | Subscription feed read-only |
+
+---
+
+## Instagram & Facebook Setup (Facebook Developer App)
+
+Both Instagram and Facebook share **one Facebook Developer App**. You set it up once, then connect everything from the Settings UI — no token copying required.
+
+### Prerequisites
+
+- A [Facebook Developer account](https://developers.facebook.com/)
+- A **Facebook Page** (personal timelines are not supported by the Graph API)
+- For Instagram: a **Business or Creator Instagram account** linked to that Facebook Page
+
+---
+
+### Step 1 — Create a Facebook App
+
+1. Go to [developers.facebook.com/apps](https://developers.facebook.com/apps/) and click **Create App**
+2. Choose **Business** as the app type and give it a name (e.g. `SocialManager Local`)
+3. In **Settings > Basic**, note down your **App ID** and **App Secret**
+
+---
+
+### Step 2 — Add Products & Permissions
+
+In your app dashboard:
+
+#### Facebook Login for Business
+
+- Products > **Facebook Login for Business** > Set Up
+- Under **Client OAuth Settings**, add to **Valid OAuth Redirect URIs**:
+
+  ```text
+  http://localhost:8081/api/auth/meta/callback
+  ```
+
+  (If hosting remotely, replace `http://localhost:8081` with your `APP_BASE_URL`)
+
+#### Instagram Graph API
+
+- Products > **Instagram Graph API** > Set Up
+
+#### Required Permissions
+
+Enable in Development mode — no App Review needed for your own accounts:
+
+| Permission | Used for |
+|------------|----------|
+| `pages_manage_posts` | Post to Facebook Page |
+| `pages_read_engagement` | Read Facebook Page feed |
+| `instagram_basic` | Read Instagram media |
+| `instagram_content_publish` | Publish Instagram posts |
+| `instagram_manage_insights` | Required alongside content_publish |
+
+---
+
+### Step 3 — Connect from the Settings UI
+
+1. Open <http://localhost:8081/settings>
+2. In the **Facebook & Instagram** card, enter your App ID and App Secret → **Save**
+3. Click **Connect with Facebook & Instagram** — this redirects you to Facebook's OAuth page
+4. Authorise the app
+5. You are returned to Settings with a **page picker** listing all your Facebook Pages and linked Instagram accounts
+6. Check the ones you want to manage → **Connect Selected**
+
+That's it. Tokens are stored in MongoDB — no `.env` editing required. You can connect multiple Pages and Instagram accounts simultaneously.
+
+---
+
+### Token Notes
+
+| Token | Expiry | How it is handled |
+| --- | --- | --- |
+| Short-lived user token | 1–2 hours | Exchanged automatically during OAuth |
+| Long-lived user token | ~60 days | Stored in MongoDB; reconnect via Settings when it expires |
+| Page access token | Never expires | Fetched during OAuth and stored; does not need refreshing |
+
+> **Instagram publishing:** Instagram does not support text-only posts via the Graph API. Every post requires at least one image URL (`imageUrl`) or video URL (`videoUrl`) in addition to the caption. The compose view will need these fields when targeting Instagram.
 
 ---
 

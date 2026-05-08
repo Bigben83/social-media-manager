@@ -8,10 +8,12 @@ const { getDb, connect } = require('./utils/MongoDBConnector');
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
 
 const PLATFORM_SERVICES = {
-  twitter:  process.env.TWITTER_SERVICE_URL  || 'http://twitter:3001',
-  linkedin: process.env.LINKEDIN_SERVICE_URL || 'http://linkedin:3002',
-  mastodon: process.env.MASTODON_SERVICE_URL || 'http://mastodon:3003',
-  bluesky:  process.env.BLUESKY_SERVICE_URL  || 'http://bluesky:3004',
+  twitter:   process.env.TWITTER_SERVICE_URL   || 'http://twitter:3001',
+  linkedin:  process.env.LINKEDIN_SERVICE_URL  || 'http://linkedin:3002',
+  mastodon:  process.env.MASTODON_SERVICE_URL  || 'http://mastodon:3003',
+  bluesky:   process.env.BLUESKY_SERVICE_URL   || 'http://bluesky:3004',
+  instagram: process.env.INSTAGRAM_SERVICE_URL || 'http://instagram:3005',
+  facebook:  process.env.FACEBOOK_SERVICE_URL  || 'http://facebook:3006',
 };
 
 const app = Fastify({ logger: false });

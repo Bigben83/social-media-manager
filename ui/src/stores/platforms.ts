@@ -9,21 +9,56 @@ export interface PlatformStatus {
   displayName?: string
   avatar?: string
   error?: string
+  pageCount?: number
+  accountCount?: number
+}
+
+export interface MetaPage {
+  id: string
+  name: string
+  picture?: string
+}
+
+export interface MetaIgAccount {
+  id: string
+  username: string
+  avatar?: string
+  pageId: string
+}
+
+export interface MetaDiscovery {
+  pages: MetaPage[]
+  igAccounts: MetaIgAccount[]
+}
+
+export interface MetaCredentials {
+  configured: boolean
+  appId?: string
+  appSecretHint?: string
 }
 
 export const PLATFORM_META: Record<string, { label: string; color: string; icon: string }> = {
-  twitter:  { label: 'Twitter/X',  color: '#000000', icon: 'fa-brands fa-x-twitter' },
-  linkedin: { label: 'LinkedIn',   color: '#0077B5', icon: 'fa-brands fa-linkedin' },
-  mastodon: { label: 'Mastodon',   color: '#6364FF', icon: 'fa-brands fa-mastodon' },
-  bluesky:  { label: 'Bluesky',    color: '#0085FF', icon: 'fa-solid fa-cloud' },
-  instagram:{ label: 'Instagram',  color: '#E1306C', icon: 'fa-brands fa-instagram' },
-  reddit:   { label: 'Reddit',     color: '#FF4500', icon: 'fa-brands fa-reddit' },
-  youtube:  { label: 'YouTube',    color: '#FF0000', icon: 'fa-brands fa-youtube' },
+  twitter:   { label: 'Twitter/X',  color: '#000000', icon: 'fa-brands fa-x-twitter' },
+  linkedin:  { label: 'LinkedIn',   color: '#0077B5', icon: 'fa-brands fa-linkedin' },
+  mastodon:  { label: 'Mastodon',   color: '#6364FF', icon: 'fa-brands fa-mastodon' },
+  bluesky:   { label: 'Bluesky',    color: '#0085FF', icon: 'fa-solid fa-cloud' },
+  instagram: { label: 'Instagram',  color: '#E1306C', icon: 'fa-brands fa-instagram' },
+  facebook:  { label: 'Facebook',   color: '#1877F2', icon: 'fa-brands fa-facebook' },
+  reddit:    { label: 'Reddit',     color: '#FF4500', icon: 'fa-brands fa-reddit' },
+  youtube:   { label: 'YouTube',    color: '#FF0000', icon: 'fa-brands fa-youtube' },
 }
 
 export const usePlatformsStore = defineStore('platforms', () => {
   const statuses = ref<PlatformStatus[]>([])
   const loading = ref(false)
+
+  // Meta-specific state
+  const metaCredentials = ref<MetaCredentials>({ configured: false })
+  const metaDiscovery = ref<MetaDiscovery | null>(null)
+  const metaLoading = ref(false)
+  const metaError = ref<string | null>(null)
+
+  // ─── Platform status ──────────────────────────────────────────────────────
 
   async function fetchStatuses() {
     loading.value = true
@@ -45,5 +80,84 @@ export const usePlatformsStore = defineStore('platforms', () => {
     return getStatus(platform)?.connected ?? false
   }
 
-  return { statuses, loading, fetchStatuses, getStatus, isConnected }
+  // ─── Meta App credentials ─────────────────────────────────────────────────
+
+  async function fetchMetaCredentials() {
+    try {
+      const res = await axios.get('/api/credentials/meta-app')
+      metaCredentials.value = res.data
+    } catch (err) {
+      console.error('Meta credentials fetch error:', err)
+    }
+  }
+
+  async function saveMetaApp(appId: string, appSecret: string) {
+    metaLoading.value = true
+    metaError.value = null
+    try {
+      await axios.post('/api/credentials/meta-app', { appId, appSecret })
+      metaCredentials.value = { configured: true, appId, appSecretHint: `****${appSecret.slice(-4)}` }
+    } catch (err: any) {
+      metaError.value = err.response?.data?.error || 'Failed to save app credentials'
+    } finally {
+      metaLoading.value = false
+    }
+  }
+
+  // ─── OAuth flow ───────────────────────────────────────────────────────────
+
+  async function startMetaOAuth() {
+    metaLoading.value = true
+    metaError.value = null
+    try {
+      const res = await axios.get('/api/auth/meta/init')
+      // Redirect the browser to Facebook OAuth
+      window.location.href = res.data.url
+    } catch (err: any) {
+      metaError.value = err.response?.data?.error || 'Failed to start OAuth'
+      metaLoading.value = false
+    }
+  }
+
+  async function fetchMetaDiscovery() {
+    try {
+      const res = await axios.get('/api/auth/meta/discovered')
+      metaDiscovery.value = res.data
+    } catch (err) {
+      console.error('Meta discovery fetch error:', err)
+    }
+  }
+
+  async function saveMetaSelection(selectedPageIds: string[], selectedIgAccountIds: string[]) {
+    metaLoading.value = true
+    metaError.value = null
+    try {
+      await axios.post('/api/auth/meta/save', { selectedPageIds, selectedIgAccountIds })
+      metaDiscovery.value = null
+      await fetchStatuses()
+    } catch (err: any) {
+      metaError.value = err.response?.data?.error || 'Failed to save selection'
+    } finally {
+      metaLoading.value = false
+    }
+  }
+
+  async function disconnectMeta() {
+    metaLoading.value = true
+    try {
+      await axios.delete('/api/credentials/meta')
+      await fetchStatuses()
+    } catch (err) {
+      console.error('Meta disconnect error:', err)
+    } finally {
+      metaLoading.value = false
+    }
+  }
+
+  return {
+    statuses, loading, fetchStatuses, getStatus, isConnected,
+    metaCredentials, metaDiscovery, metaLoading, metaError,
+    fetchMetaCredentials, saveMetaApp, startMetaOAuth,
+    fetchMetaDiscovery, saveMetaSelection, disconnectMeta,
+  }
 })
