@@ -978,22 +978,29 @@ app.post('/analytics/crawl', async () => {
   return { success: true, total, byPlatform: results };
 });
 
-app.get('/analytics/insights', async () => {
+app.get('/analytics/insights', async (request) => {
+  const filter = parseAccountFilter(request.query.account);
+  const metricsMatch = filter
+    ? { platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }
+    : {};
   const db = await getDb();
-  const total = await db.collection('post_metrics').countDocuments({});
+  const total = await db.collection('post_metrics').countDocuments(metricsMatch);
   if (total === 0) return { empty: true };
 
   const [byHourRaw, byDayRaw, topPosts, platformComparison, heatmapRaw] = await Promise.all([
     db.collection('post_metrics').aggregate([
+      { $match: metricsMatch },
       { $group: { _id: '$hourOfDay', avgEngagement: { $avg: '$metrics.engagementTotal' }, count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]).toArray(),
     db.collection('post_metrics').aggregate([
+      { $match: metricsMatch },
       { $group: { _id: '$dayOfWeek', avgEngagement: { $avg: '$metrics.engagementTotal' }, count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]).toArray(),
-    db.collection('post_metrics').find({}).sort({ 'metrics.engagementTotal': -1 }).limit(5).toArray(),
+    db.collection('post_metrics').find(metricsMatch).sort({ 'metrics.engagementTotal': -1 }).limit(5).toArray(),
     db.collection('post_metrics').aggregate([
+      { $match: metricsMatch },
       { $group: {
         _id: '$platform',
         avgEngagement: { $avg: '$metrics.engagementTotal' },
@@ -1005,6 +1012,7 @@ app.get('/analytics/insights', async () => {
       { $sort: { avgEngagement: -1 } },
     ]).toArray(),
     db.collection('post_metrics').aggregate([
+      { $match: metricsMatch },
       { $group: {
         _id: { day: '$dayOfWeek', hour: '$hourOfDay' },
         avgEngagement: { $avg: '$metrics.engagementTotal' },
@@ -1051,13 +1059,43 @@ app.get('/analytics/insights', async () => {
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
-app.get('/analytics/summary', async () => {
+// Parse "platform" or "platform:accountId" filter strings from the account query param.
+function parseAccountFilter(account) {
+  if (!account) return null;
+  const idx = account.indexOf(':');
+  if (idx === -1) return { platform: account };
+  return { platform: account.slice(0, idx), accountId: account.slice(idx + 1) };
+}
+
+// Build a MongoDB match fragment for scheduled_jobs given an account filter.
+function sjFilter(filter) {
+  if (!filter) return {};
+  return {
+    'destinations.platform': filter.platform,
+    ...(filter.accountId && { 'destinations.accountId': filter.accountId }),
+  };
+}
+
+// Build a MongoDB match fragment for posts (type:immediate) given an account filter.
+function ipFilter(filter) {
+  if (!filter) return {};
+  return {
+    'destinations.platform': filter.platform,
+    ...(filter.accountId && { 'destinations.accountId': filter.accountId }),
+  };
+}
+
+app.get('/analytics/summary', async (request) => {
+  const filter = parseAccountFilter(request.query.account);
   const db = await getDb();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
 
-  // scheduled_jobs is the primary source — it holds the full history of all
-  // scheduled posts. posts (type: immediate) supplements it for direct dispatches.
+  // Post-unwind filter for scheduled_jobs platform breakdown — re-applies the
+  // account filter after $unwind so a job targeting multiple platforms only
+  // counts the platform(s) that match the filter.
+  const unwindFilter = filter ? [{ $match: sjFilter(filter) }] : [];
+
   const [
     schedCompleted, schedFailed,
     immPublished, immFailed,
@@ -1065,22 +1103,23 @@ app.get('/analytics/summary', async () => {
     schedPlatformRaw, immPlatformRaw,
     schedDayRaw, immDayRaw,
   ] = await Promise.all([
-    db.collection('scheduled_jobs').countDocuments({ status: 'completed' }),
-    db.collection('scheduled_jobs').countDocuments({ status: 'failed' }),
-    db.collection('posts').countDocuments({ type: 'immediate', status: { $in: ['published', 'partial'] } }),
-    db.collection('posts').countDocuments({ type: 'immediate', status: 'failed' }),
-    db.collection('scheduled_jobs').countDocuments({ status: 'completed', completedAt: { $gte: sevenDaysAgo } }),
-    db.collection('posts').countDocuments({ type: 'immediate', publishedAt: { $gte: sevenDaysAgo } }),
+    db.collection('scheduled_jobs').countDocuments({ status: 'completed', ...sjFilter(filter) }),
+    db.collection('scheduled_jobs').countDocuments({ status: 'failed', ...sjFilter(filter) }),
+    db.collection('posts').countDocuments({ type: 'immediate', status: { $in: ['published', 'partial'] }, ...ipFilter(filter) }),
+    db.collection('posts').countDocuments({ type: 'immediate', status: 'failed', ...ipFilter(filter) }),
+    db.collection('scheduled_jobs').countDocuments({ status: 'completed', completedAt: { $gte: sevenDaysAgo }, ...sjFilter(filter) }),
+    db.collection('posts').countDocuments({ type: 'immediate', publishedAt: { $gte: sevenDaysAgo }, ...ipFilter(filter) }),
     // Platform breakdown from scheduled_jobs destinations
     db.collection('scheduled_jobs').aggregate([
-      { $match: { status: 'completed' } },
+      { $match: { status: 'completed', ...sjFilter(filter) } },
       { $unwind: '$destinations' },
+      ...unwindFilter,
       { $group: { _id: '$destinations.platform', count: { $sum: 1 } } },
       { $sort: { count: -1 } },
     ]).toArray(),
     // Platform breakdown from immediate posts platformResults
     db.collection('posts').aggregate([
-      { $match: { type: 'immediate' } },
+      { $match: { type: 'immediate', ...ipFilter(filter) } },
       { $project: { results: { $objectToArray: { $ifNull: ['$platformResults', {}] } } } },
       { $unwind: '$results' },
       { $match: { 'results.v.success': true } },
@@ -1089,26 +1128,24 @@ app.get('/analytics/summary', async () => {
     ]).toArray(),
     // Activity by day from scheduled_jobs (using completedAt)
     db.collection('scheduled_jobs').aggregate([
-      { $match: { status: 'completed', completedAt: { $gte: thirtyDaysAgo } } },
+      { $match: { status: 'completed', completedAt: { $gte: thirtyDaysAgo }, ...sjFilter(filter) } },
       { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$completedAt' } }, count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]).toArray(),
     // Activity by day from immediate posts
     db.collection('posts').aggregate([
-      { $match: { type: 'immediate', publishedAt: { $gte: thirtyDaysAgo } } },
+      { $match: { type: 'immediate', publishedAt: { $gte: thirtyDaysAgo }, ...ipFilter(filter) } },
       { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$publishedAt' } }, count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]).toArray(),
   ]);
 
-  // Merge byDay from both sources
   const dayMap = {};
   for (const { _id, count } of [...schedDayRaw, ...immDayRaw]) {
     dayMap[_id] = (dayMap[_id] || 0) + count;
   }
   const byDay = Object.entries(dayMap).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
 
-  // Merge byPlatform from both sources
   const platformMap = {};
   for (const { _id, count } of [...schedPlatformRaw, ...immPlatformRaw]) {
     if (_id) platformMap[_id] = (platformMap[_id] || 0) + count;
@@ -1124,30 +1161,31 @@ app.get('/analytics/summary', async () => {
 });
 
 app.get('/analytics/posts', async (request) => {
-  const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
-  const skip  = parseInt(request.query.skip || '0', 10);
+  const limit  = Math.min(parseInt(request.query.limit || '20', 10), 100);
+  const skip   = parseInt(request.query.skip || '0', 10);
+  const filter = parseAccountFilter(request.query.account);
   const db = await getDb();
 
-  // scheduled_jobs holds all scheduled-post history (content stored from now on;
-  // older records have content: undefined). Immediate posts come from the posts collection.
+  const sjMatch = { status: { $in: ['completed', 'failed'] }, ...sjFilter(filter) };
+  const ipMatch = { type: 'immediate', ...ipFilter(filter) };
+
   const [scheduledJobs, immediatePosts, schedTotal, immTotal] = await Promise.all([
     db.collection('scheduled_jobs')
-      .find({ status: { $in: ['completed', 'failed'] } })
+      .find(sjMatch)
       .sort({ completedAt: -1, scheduledAt: -1 })
       .skip(skip)
       .limit(limit)
       .project({ content: 1, destinations: 1, status: 1, completedAt: 1, scheduledAt: 1 })
       .toArray(),
     db.collection('posts')
-      .find({ type: 'immediate' })
+      .find(ipMatch)
       .sort({ publishedAt: -1 })
       .project({ content: 1, destinations: 1, platformResults: 1, status: 1, publishedAt: 1 })
       .toArray(),
-    db.collection('scheduled_jobs').countDocuments({ status: { $in: ['completed', 'failed'] } }),
-    db.collection('posts').countDocuments({ type: 'immediate' }),
+    db.collection('scheduled_jobs').countDocuments(sjMatch),
+    db.collection('posts').countDocuments(ipMatch),
   ]);
 
-  // Normalise to a single shape expected by the frontend
   const normalised = [
     ...scheduledJobs.map((j) => ({
       _id: String(j._id),

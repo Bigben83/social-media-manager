@@ -47,6 +47,9 @@ export default {
     loadMore: 'Daha fazla yükle',
     noContent: 'Eski gönderiler için içerik mevcut değil',
 
+    filterBy: 'Filtrele:',
+    filterAll: 'Tümü',
+
     crawlMetrics: 'Metrikleri Getir',
     crawling: 'Getiriliyor…',
     crawlDone: '{count} gönderi getirildi',

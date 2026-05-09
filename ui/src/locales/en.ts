@@ -47,6 +47,9 @@ export default {
     loadMore: 'Load more',
     noContent: 'Content not available for older posts',
 
+    filterBy: 'Filter:',
+    filterAll: 'All',
+
     crawlMetrics: 'Crawl Metrics',
     crawling: 'Crawling…',
     crawlDone: 'Crawled {count} posts',

@@ -28,6 +28,31 @@
         </div>
       </div>
 
+      <!-- Account filter chips -->
+      <div v-if="filterAccounts.length > 1" class="flex items-center gap-2 flex-wrap mb-6">
+        <span class="text-xs text-gray-500 shrink-0">{{ $t('analytics.filterBy') }}</span>
+        <button
+          @click="selectedAccount = null"
+          class="px-3 py-1 rounded-full text-xs border transition-colors"
+          :class="selectedAccount === null
+            ? 'border-white/40 bg-white/10 text-white'
+            : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300'"
+        >{{ $t('analytics.filterAll') }}</button>
+        <button
+          v-for="acc in filterAccounts"
+          :key="acc.key"
+          @click="selectedAccount = selectedAccount === acc.key ? null : acc.key"
+          class="px-3 py-1 rounded-full text-xs border transition-colors flex items-center gap-1.5"
+          :style="selectedAccount === acc.key
+            ? { borderColor: platformColor(acc.platform), background: platformColor(acc.platform) + '33', color: '#fff' }
+            : {}"
+          :class="selectedAccount === acc.key ? '' : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300'"
+        >
+          <span class="w-1.5 h-1.5 rounded-full shrink-0" :style="{ background: platformColor(acc.platform) }"></span>
+          {{ acc.label }}
+        </button>
+      </div>
+
       <!-- Loading -->
       <div v-if="loading && !summary" class="flex items-center justify-center h-64 text-gray-500">
         {{ $t('analytics.loading') }}
@@ -405,9 +430,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import axios from 'axios'
-import { PLATFORM_META } from '../stores/platforms'
+import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -460,11 +485,15 @@ const DAY_COUNT = 30
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+const platformsStore = usePlatformsStore()
+
 const loading     = ref(false)
 const loadingMore = ref(false)
 const summary     = ref<Summary | null>(null)
 const posts       = ref<Post[]>([])
 const postsTotal  = ref(0)
+
+const selectedAccount = ref<string | null>(null)
 
 const insightsLoading = ref(false)
 const insights        = ref<Insights | null>(null)
@@ -473,12 +502,16 @@ const crawlResult     = ref<number | null>(null)
 
 // ── Data loading ──────────────────────────────────────────────────────────────
 
+function accountParams(extra: Record<string, unknown> = {}) {
+  return selectedAccount.value ? { account: selectedAccount.value, ...extra } : extra
+}
+
 async function load() {
   loading.value = true
   try {
     const [sRes, pRes] = await Promise.all([
-      axios.get('/api/analytics/summary'),
-      axios.get('/api/analytics/posts', { params: { limit: 20 } }),
+      axios.get('/api/analytics/summary', { params: accountParams() }),
+      axios.get('/api/analytics/posts', { params: accountParams({ limit: 20 }) }),
     ])
     summary.value = sRes.data
     posts.value = pRes.data.posts
@@ -491,7 +524,7 @@ async function load() {
 async function loadMorePosts() {
   loadingMore.value = true
   try {
-    const res = await axios.get('/api/analytics/posts', { params: { limit: 20, skip: posts.value.length } })
+    const res = await axios.get('/api/analytics/posts', { params: accountParams({ limit: 20, skip: posts.value.length }) })
     posts.value.push(...res.data.posts)
   } finally {
     loadingMore.value = false
@@ -501,7 +534,7 @@ async function loadMorePosts() {
 async function loadInsights() {
   insightsLoading.value = true
   try {
-    const res = await axios.get('/api/analytics/insights')
+    const res = await axios.get('/api/analytics/insights', { params: accountParams() })
     insights.value = res.data
   } finally {
     insightsLoading.value = false
@@ -520,7 +553,41 @@ async function crawlMetrics() {
   }
 }
 
-onMounted(() => { load(); loadInsights() })
+onMounted(() => {
+  platformsStore.fetchMetaConnections()
+  load()
+  loadInsights()
+})
+
+// Re-fetch everything when the account filter changes
+watch(selectedAccount, () => { load(); loadInsights() })
+
+// ── Account filter ────────────────────────────────────────────────────────────
+
+interface FilterAccount { key: string; platform: string; label: string }
+
+const filterAccounts = computed<FilterAccount[]>(() => {
+  const list: FilterAccount[] = []
+
+  for (const page of platformsStore.connectedPages) {
+    list.push({ key: `facebook:${page.id}`, platform: 'facebook', label: page.name })
+  }
+  for (const acc of platformsStore.connectedIgAccounts) {
+    list.push({ key: `instagram:${acc.id}`, platform: 'instagram', label: `@${acc.username}` })
+  }
+
+  // Non-Meta platforms that appear in the summary data
+  if (summary.value?.byPlatform) {
+    const metaPlats = new Set(['facebook', 'instagram'])
+    for (const platform of Object.keys(summary.value.byPlatform)) {
+      if (!metaPlats.has(platform)) {
+        list.push({ key: platform, platform, label: platformLabel(platform) })
+      }
+    }
+  }
+
+  return list
+})
 
 // ── Chart helpers ─────────────────────────────────────────────────────────────
 
