@@ -355,32 +355,208 @@ app.put('/profiles/:accountKey', async (request, reply) => {
   return { success: true };
 });
 
-// ─── AI / Ollama ──────────────────────────────────────────────────────────────
+// ─── AI / Multi-provider ─────────────────────────────────────────────────────
 
 const DEFAULT_OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://ollama:11434';
 const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 
+const PROVIDER_MODELS = {
+  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  groq:   ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
+  gemini: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+};
+
+const PROVIDER_BASE_URLS = {
+  openai: 'https://api.openai.com/v1',
+  groq:   'https://api.groq.com/openai/v1',
+};
+
+// Returns decrypted runtime config for the currently active provider
+async function getActiveProviderConfig() {
+  const aiConfig = await getCredentials('ai_config');
+  const provider = aiConfig?.provider || 'ollama';
+  if (provider === 'openai' || provider === 'groq') {
+    const doc = await getCredentials(`${provider}_config`);
+    return {
+      provider,
+      apiKey: doc?.apiKey ? decryptToken(doc.apiKey) : null,
+      model: doc?.model || PROVIDER_MODELS[provider][0],
+      baseUrl: PROVIDER_BASE_URLS[provider],
+    };
+  }
+  if (provider === 'gemini') {
+    const doc = await getCredentials('gemini_config');
+    return {
+      provider,
+      apiKey: doc?.apiKey ? decryptToken(doc.apiKey) : null,
+      model: doc?.model || PROVIDER_MODELS.gemini[0],
+    };
+  }
+  return {
+    provider: 'ollama',
+    endpoint: aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT,
+    model: aiConfig?.model || DEFAULT_OLLAMA_MODEL,
+    visionModel: aiConfig?.visionModel || 'llava',
+  };
+}
+
+function buildOpenAIMessages(prompt, system) {
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: prompt });
+  return messages;
+}
+
+// Gemini encodes system as a leading user/model conversation pair
+function buildGeminiContents(prompt, system) {
+  const contents = [];
+  if (system) {
+    contents.push({ role: 'user',  parts: [{ text: system }] });
+    contents.push({ role: 'model', parts: [{ text: 'Understood.' }] });
+  }
+  contents.push({ role: 'user', parts: [{ text: prompt }] });
+  return contents;
+}
+
 app.get('/ai/config', async () => {
   const config = await getCredentials('ai_config');
   return {
-    provider:     config?.provider     || 'ollama',
-    endpoint:     config?.endpoint     || DEFAULT_OLLAMA_ENDPOINT,
-    model:        config?.model        || DEFAULT_OLLAMA_MODEL,
-    visionModel:  config?.visionModel  || 'llava',
-    enabled:      config?.enabled      ?? true,
+    provider:    config?.provider    || 'ollama',
+    endpoint:    config?.endpoint    || DEFAULT_OLLAMA_ENDPOINT,
+    model:       config?.model       || DEFAULT_OLLAMA_MODEL,
+    visionModel: config?.visionModel || 'llava',
+    enabled:     config?.enabled     ?? true,
   };
 });
 
 app.put('/ai/config', async (request, reply) => {
   const { provider = 'ollama', endpoint, model, visionModel = 'llava', enabled = true } = request.body || {};
-  if (!endpoint) return reply.code(400).send({ error: 'endpoint is required' });
+  if (provider === 'ollama' && !endpoint) return reply.code(400).send({ error: 'endpoint is required for Ollama' });
   await setCredentials('ai_config', { provider, endpoint, model, visionModel, enabled });
   return { success: true };
 });
 
+// ─── Provider management routes ───────────────────────────────────────────────
+
+app.get('/ai/providers', async () => {
+  const aiConfig = await getCredentials('ai_config');
+  const active = aiConfig?.provider || 'ollama';
+  const [openaiDoc, groqDoc, geminiDoc] = await Promise.all([
+    getCredentials('openai_config'),
+    getCredentials('groq_config'),
+    getCredentials('gemini_config'),
+  ]);
+  return {
+    active,
+    providers: [
+      {
+        name: 'ollama',
+        configured: true,
+        active: active === 'ollama',
+        endpoint: aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT,
+        model: aiConfig?.model || DEFAULT_OLLAMA_MODEL,
+        visionModel: aiConfig?.visionModel || 'llava',
+      },
+      {
+        name: 'openai',
+        configured: !!openaiDoc?.apiKey,
+        active: active === 'openai',
+        model: openaiDoc?.model || PROVIDER_MODELS.openai[0],
+        apiKeyHint: openaiDoc?.apiKey ? `sk-...${decryptToken(openaiDoc.apiKey).slice(-4)}` : null,
+      },
+      {
+        name: 'groq',
+        configured: !!groqDoc?.apiKey,
+        active: active === 'groq',
+        model: groqDoc?.model || PROVIDER_MODELS.groq[0],
+        apiKeyHint: groqDoc?.apiKey ? `gsk_...${decryptToken(groqDoc.apiKey).slice(-4)}` : null,
+      },
+      {
+        name: 'gemini',
+        configured: !!geminiDoc?.apiKey,
+        active: active === 'gemini',
+        model: geminiDoc?.model || PROVIDER_MODELS.gemini[0],
+        apiKeyHint: geminiDoc?.apiKey ? `AIza...${decryptToken(geminiDoc.apiKey).slice(-4)}` : null,
+      },
+    ],
+  };
+});
+
+// PUT /ai/provider/:name — save credentials and optionally set as active
+// ollama body: { endpoint, model, visionModel, setActive? }
+// others body: { apiKey, model, setActive? }
+app.put('/ai/provider/:name', async (request, reply) => {
+  const { name } = request.params;
+  const { apiKey, model, endpoint, visionModel, setActive = false } = request.body || {};
+
+  if (name === 'ollama') {
+    if (!endpoint) return reply.code(400).send({ error: 'endpoint is required for Ollama' });
+    const existing = await getCredentials('ai_config') || {};
+    await setCredentials('ai_config', {
+      ...existing,
+      provider: setActive ? 'ollama' : (existing.provider || 'ollama'),
+      endpoint,
+      model: model || DEFAULT_OLLAMA_MODEL,
+      visionModel: visionModel || 'llava',
+    });
+  } else if (['openai', 'groq', 'gemini'].includes(name)) {
+    if (!apiKey) return reply.code(400).send({ error: 'apiKey is required' });
+    await setCredentials(`${name}_config`, {
+      apiKey: encryptToken(apiKey),
+      model: model || PROVIDER_MODELS[name][0],
+    });
+    if (setActive) {
+      const existing = await getCredentials('ai_config') || {};
+      await setCredentials('ai_config', { ...existing, provider: name });
+    }
+  } else {
+    return reply.code(404).send({ error: `Unknown provider: ${name}` });
+  }
+
+  return { success: true };
+});
+
+// DELETE /ai/provider/:name — remove provider credentials; falls back to ollama if it was active
+app.delete('/ai/provider/:name', async (request, reply) => {
+  const { name } = request.params;
+  if (name === 'ollama') return reply.code(400).send({ error: 'Cannot remove Ollama provider' });
+  if (!['openai', 'groq', 'gemini'].includes(name)) return reply.code(404).send({ error: `Unknown provider: ${name}` });
+  const db = await getDb();
+  await db.collection('platform_credentials').deleteOne({ _id: `${name}_config` });
+  const aiConfig = await getCredentials('ai_config') || {};
+  if (aiConfig.provider === name) {
+    await setCredentials('ai_config', { ...aiConfig, provider: 'ollama' });
+  }
+  return { success: true };
+});
+
+// POST /ai/provider/:name/models — list models for a provider (test without saving key)
+app.post('/ai/provider/:name/models', async (request, reply) => {
+  const { name } = request.params;
+  const { apiKey: bodyApiKey, endpoint: bodyEndpoint } = request.body || {};
+
+  if (name === 'ollama') {
+    const aiConfig = await getCredentials('ai_config');
+    const ep = bodyEndpoint || aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
+    try {
+      const res = await axios.get(`${ep}/api/tags`, { timeout: 5000 });
+      return { models: (res.data.models || []).map((m) => m.name) };
+    } catch (err) {
+      return reply.code(503).send({ error: 'Could not reach Ollama', detail: err.message });
+    }
+  }
+  if (['openai', 'groq', 'gemini'].includes(name)) {
+    return { models: PROVIDER_MODELS[name] };
+  }
+  return reply.code(404).send({ error: `Unknown provider: ${name}` });
+});
+
 app.get('/ai/models', async (request, reply) => {
   const config = await getCredentials('ai_config');
-  // Allow caller to override endpoint for test-without-save UX
+  const provider = config?.provider || 'ollama';
+  if (provider !== 'ollama') {
+    return { models: PROVIDER_MODELS[provider] || [], provider };
+  }
   const endpoint = request.query.endpoint || config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
   try {
     const res = await axios.get(`${endpoint}/api/tags`, { timeout: 5000 });
@@ -395,67 +571,117 @@ app.post('/ai/generate', async (request, reply) => {
   const { prompt, system, model: reqModel } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
-  const config = await getCredentials('ai_config');
-  const endpoint = config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
-  const model = reqModel || config?.model || DEFAULT_OLLAMA_MODEL;
+  const pconf = await getActiveProviderConfig();
+  const model = reqModel || pconf.model;
 
   try {
-    const res = await axios.post(`${endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
-    return { text: res.data.response, model, done: res.data.done };
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
+      return { text: res.data.response, model, done: res.data.done };
+    }
+
+    if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
+      return { text: res.data.choices[0]?.message?.content || '', model, done: true };
+    }
+
+    if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 90000 },
+      );
+      return { text: res.data.candidates?.[0]?.content?.parts?.[0]?.text || '', model, done: true };
+    }
+
+    return reply.code(400).send({ error: `Unknown provider: ${pconf.provider}` });
   } catch (err) {
     const status = err.response?.status || 503;
     return reply.code(status).send({ error: 'AI generation failed', detail: err.message });
   }
 });
 
-// Vision caption — fetches image, passes base64 to Ollama vision model
+const CAPTION_PROMPT = 'Generate an engaging, concise social media caption for this image. Write only the caption text with relevant hashtags. No explanations or preamble.';
+
+// Vision caption — supports ollama, openai, gemini (groq has no vision)
 app.post('/ai/caption', async (request, reply) => {
   const { imageUrl, model: reqModel } = request.body || {};
   if (!imageUrl) return reply.code(400).send({ error: 'imageUrl is required' });
 
-  const config = await getCredentials('ai_config');
-  const endpoint = config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
-  const model = reqModel || config?.visionModel || 'llava';
+  const pconf = await getActiveProviderConfig();
 
-  // Fetch image → base64
-  let imageBase64;
+  let imageBase64, imageMime;
   try {
     let imageBuffer;
     if (imageUrl.startsWith('/media/')) {
       const filename = path.basename(imageUrl);
-      const filepath = path.join(UPLOAD_DIR, filename);
-      imageBuffer = fs.readFileSync(filepath);
+      imageBuffer = fs.readFileSync(path.join(UPLOAD_DIR, filename));
     } else {
       const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 15000 });
       imageBuffer = Buffer.from(imgRes.data);
+      imageMime = imgRes.headers['content-type'] || 'image/jpeg';
     }
     imageBase64 = imageBuffer.toString('base64');
+    if (!imageMime) imageMime = 'image/jpeg';
   } catch (err) {
     return reply.code(400).send({ error: 'Could not load image', detail: err.message });
   }
 
   try {
-    const res = await axios.post(`${endpoint}/api/generate`, {
-      model,
-      prompt: 'Generate an engaging, concise social media caption for this image. Write only the caption text with relevant hashtags. No explanations or preamble.',
-      images: [imageBase64],
-      stream: false,
-    }, { timeout: 90000 });
-    return { caption: res.data.response, model };
+    const model = reqModel || pconf.visionModel || pconf.model;
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, {
+        model, prompt: CAPTION_PROMPT, images: [imageBase64], stream: false,
+      }, { timeout: 90000 });
+      return { caption: res.data.response, model };
+    }
+
+    if (pconf.provider === 'openai') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'OpenAI API key not configured' });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model: model || 'gpt-4o',
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: CAPTION_PROMPT },
+          { type: 'image_url', image_url: { url: `data:${imageMime};base64,${imageBase64}` } },
+        ]}],
+        stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
+      return { caption: res.data.choices[0]?.message?.content || '', model };
+    }
+
+    if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const geminiModel = model || 'gemini-1.5-flash';
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${pconf.apiKey}`,
+        { contents: [{ role: 'user', parts: [
+          { text: CAPTION_PROMPT },
+          { inlineData: { mimeType: imageMime, data: imageBase64 } },
+        ]}]},
+        { timeout: 90000 },
+      );
+      return { caption: res.data.candidates?.[0]?.content?.parts?.[0]?.text || '', model: geminiModel };
+    }
+
+    return reply.code(400).send({ error: `Provider ${pconf.provider} does not support vision captions` });
   } catch (err) {
     const status = err.response?.status || 503;
     return reply.code(status).send({ error: 'Caption generation failed', detail: err.message });
   }
 });
 
-// SSE streaming endpoint — sends token-by-token as text/event-stream
+// SSE streaming endpoint — normalized data: { token, done } format for all providers
 app.post('/ai/stream', async (request, reply) => {
   const { prompt, system, model: reqModel } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
-  const config = await getCredentials('ai_config');
-  const endpoint = config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
-  const model = reqModel || config?.model || DEFAULT_OLLAMA_MODEL;
+  const pconf = await getActiveProviderConfig();
+  const model = reqModel || pconf.model;
 
   reply.raw.setHeader('Content-Type', 'text/event-stream');
   reply.raw.setHeader('Cache-Control', 'no-cache');
@@ -463,27 +689,72 @@ app.post('/ai/stream', async (request, reply) => {
   reply.raw.setHeader('Connection', 'keep-alive');
   reply.raw.flushHeaders();
 
+  const writeToken = (token, done = false) => reply.raw.write(`data: ${JSON.stringify({ token, done })}\n\n`);
+  const writeError = (msg) => { reply.raw.write(`data: ${JSON.stringify({ error: msg, done: true })}\n\n`); reply.raw.end(); };
+
   try {
-    const ollamaRes = await axios.post(`${endpoint}/api/generate`, { model, prompt, system, stream: true }, { responseType: 'stream', timeout: 120000 });
+    if (pconf.provider === 'ollama') {
+      const ollamaRes = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: true }, { responseType: 'stream', timeout: 120000 });
+      ollamaRes.data.on('data', (chunk) => {
+        try {
+          for (const line of chunk.toString().split('\n').filter(Boolean)) {
+            const data = JSON.parse(line);
+            writeToken(data.response || '', !!data.done);
+          }
+        } catch (_) {}
+      });
+      ollamaRes.data.on('end', () => reply.raw.end());
+      ollamaRes.data.on('error', (err) => writeError(err.message));
+      return;
+    }
 
-    ollamaRes.data.on('data', (chunk) => {
-      try {
-        const lines = chunk.toString().split('\n').filter(Boolean);
-        for (const line of lines) {
-          const data = JSON.parse(line);
-          reply.raw.write(`data: ${JSON.stringify({ token: data.response || '', done: !!data.done })}\n\n`);
-        }
-      } catch (_) {}
-    });
+    if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return writeError(`${pconf.provider} API key not configured`);
+      const upstreamRes = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: true,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, responseType: 'stream', timeout: 120000 });
+      upstreamRes.data.on('data', (chunk) => {
+        try {
+          for (const line of chunk.toString().split('\n').filter(Boolean)) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6).trim();
+            if (payload === '[DONE]') { writeToken('', true); return; }
+            const data = JSON.parse(payload);
+            const token = data.choices?.[0]?.delta?.content || '';
+            if (token) writeToken(token);
+          }
+        } catch (_) {}
+      });
+      upstreamRes.data.on('end', () => reply.raw.end());
+      upstreamRes.data.on('error', (err) => writeError(err.message));
+      return;
+    }
 
-    ollamaRes.data.on('end', () => { reply.raw.end(); });
-    ollamaRes.data.on('error', (err) => {
-      reply.raw.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
-      reply.raw.end();
-    });
+    if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return writeError('Gemini API key not configured');
+      const geminiRes = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { responseType: 'stream', timeout: 120000 },
+      );
+      geminiRes.data.on('data', (chunk) => {
+        try {
+          for (const line of chunk.toString().split('\n').filter(Boolean)) {
+            if (!line.startsWith('data: ')) continue;
+            const data = JSON.parse(line.slice(6));
+            const token = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (token) writeToken(token);
+          }
+        } catch (_) {}
+      });
+      geminiRes.data.on('end', () => { writeToken('', true); reply.raw.end(); });
+      geminiRes.data.on('error', (err) => writeError(err.message));
+      return;
+    }
+
+    writeError(`Unknown provider: ${pconf.provider}`);
   } catch (err) {
-    reply.raw.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
-    reply.raw.end();
+    writeError(err.message);
   }
 });
 

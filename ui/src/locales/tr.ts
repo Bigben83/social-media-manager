@@ -327,6 +327,32 @@ export default {
     visionModelLabel: 'Görsel Model',
     visionModelPlaceholder: 'örn. llava, llama3.2-vision',
     visionModelHint: 'Görsel açıklama için kullanılır. Yükle: ollama pull llava',
+    activeProvider: 'Aktif Sağlayıcı',
+    setActive: 'Aktif Yap',
+    active: 'Aktif',
+    disconnect: 'Bağlantıyı Kes',
+    disconnectConfirm: 'Bu sağlayıcı ve API anahtarı kaldırılsın mı?',
+    apiKeyLabel: 'API Anahtarı',
+    apiKeyPlaceholder: 'API anahtarınızı yapıştırın…',
+    apiKeyConfigured: 'API anahtarı kaydedildi',
+    connectAndActivate: 'Bağlan & Aktif Yap',
+    saveProvider: 'Kaydet',
+    providerSaved: 'Kaydedildi!',
+    openai: {
+      sectionTitle: 'OpenAI',
+      sectionSubtitle: 'OpenAI API üzerinden GPT-4o ve GPT-4o-mini.',
+      getKeyHint: 'API anahtarı için: platform.openai.com',
+    },
+    groq: {
+      sectionTitle: 'Groq',
+      sectionSubtitle: 'Llama ve Mixtral modelleriyle ultra hızlı çıkarım.',
+      getKeyHint: 'API anahtarı için: console.groq.com',
+    },
+    gemini: {
+      sectionTitle: 'Google Gemini',
+      sectionSubtitle: 'Gemini 2.0 Flash ve 1.5 Pro, yerel görsel desteğiyle.',
+      getKeyHint: 'API anahtarı için: aistudio.google.com',
+    },
   },
 
   feed: {

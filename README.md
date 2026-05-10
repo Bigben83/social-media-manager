@@ -14,7 +14,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 - **Draft Saving** — Save posts and return to them later from the Drafts tab
 - **Content Calendar** — Month/week calendar view of scheduled posts in the Scheduler
 - **Account Profiles** — Store business context (name, industry, audience, tone, hashtags) per account for AI context injection
-- **AI Assistance** — Powered by local [Ollama](https://ollama.ai): draft generation, hashtag suggestions, image captions (via vision models); streams directly into the editor
+- **AI Assistance** — Multi-provider: local [Ollama](https://ollama.ai) (llama3.2, llava, etc.), OpenAI (GPT-4o), Groq (Llama, Mixtral), or Google Gemini; draft generation, hashtag suggestions, image captions; streams directly into the editor
 - **Analytics & Insights** — Publishing stats, 30-day activity chart, platform breakdown, per-account filtering, engagement heatmap, best posting times, and top posts (crawled from platform APIs)
 - **Scheduling Suggestions** — Optimal posting times suggested in Compose, based on your engagement history or industry defaults
 - **Token Expiry Warnings** — Dashboard banner when Meta tokens are within 7 days of expiry
@@ -35,7 +35,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 | Platform Services | Node.js / Fastify (one per platform) |
 | Database | MongoDB 6 |
 | Job Queue | Redis + BullMQ |
-| AI | [Ollama](https://ollama.ai) (local LLM — llama3.2, llava, etc.) |
+| AI | [Ollama](https://ollama.ai) (local) · OpenAI · Groq · Google Gemini |
 | Logging | Pino (structured JSON) |
 | Reverse Proxy | Nginx |
 | Containerization | Docker Compose |
@@ -105,7 +105,11 @@ docker compose up -d
 
 Open **<http://localhost:8081>** in your browser.
 
-### 4. (Optional) Connect AI via Ollama
+### 4. (Optional) Connect AI
+
+SocialManager supports four AI providers. Switch between them at any time in **Settings → AI Integration**.
+
+#### Ollama (local, free)
 
 Run Ollama on your host machine and pull a model:
 
@@ -114,7 +118,19 @@ ollama pull llama3.2      # text generation
 ollama pull llava         # image captioning (vision)
 ```
 
-Then go to **Settings → AI Integration**, set the endpoint to `http://host.docker.internal:11434`, test the connection, and save.
+In Settings, set the Ollama endpoint to `http://host.docker.internal:11434`, test the connection, and click **Save**.
+
+#### Cloud providers (OpenAI · Groq · Gemini)
+
+Go to **Settings → AI Integration** and open the card for the provider you want:
+
+| Provider | Where to get a key |
+| --- | --- |
+| OpenAI (GPT-4o, GPT-4o-mini) | [platform.openai.com](https://platform.openai.com) |
+| Groq (Llama 3, Mixtral) | [console.groq.com](https://console.groq.com) |
+| Google Gemini (2.0 Flash, 1.5 Pro) | [aistudio.google.com](https://aistudio.google.com) |
+
+Paste your API key and click **Connect & Set Active**. Keys are stored AES-256-GCM encrypted in MongoDB — no `.env` editing required. Only one provider is active at a time; switch with the **Set as Active** button on any configured card.
 
 ---
 

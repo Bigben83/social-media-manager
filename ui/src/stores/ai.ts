@@ -10,6 +10,24 @@ export interface AiConfig {
   enabled: boolean
 }
 
+export interface ProviderInfo {
+  name: string
+  configured: boolean
+  active: boolean
+  model: string
+  // ollama-specific
+  endpoint?: string
+  visionModel?: string
+  // cloud-specific
+  apiKeyHint?: string | null
+}
+
+export const PROVIDER_MODELS: Record<string, string[]> = {
+  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  groq:   ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
+  gemini: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+}
+
 export const useAiStore = defineStore('ai', () => {
   const config = ref<AiConfig>({
     provider: 'ollama',
@@ -18,6 +36,7 @@ export const useAiStore = defineStore('ai', () => {
     visionModel: 'llava',
     enabled: true,
   })
+  const providers = ref<ProviderInfo[]>([])
   const models = ref<string[]>([])
   const loading = ref(false)
   const saving = ref(false)
@@ -30,6 +49,58 @@ export const useAiStore = defineStore('ai', () => {
       config.value = res.data
     } catch (err) {
       console.error('AI config fetch error:', err)
+    }
+  }
+
+  async function fetchProviders() {
+    try {
+      const res = await axios.get('/api/ai/providers')
+      providers.value = res.data.providers || []
+      // Keep config.provider in sync with the active provider
+      const active = res.data.active
+      if (active) config.value.provider = active
+    } catch (err) {
+      console.error('AI providers fetch error:', err)
+    }
+  }
+
+  async function saveProvider(
+    name: string,
+    payload: { apiKey?: string; model?: string; endpoint?: string; visionModel?: string; setActive?: boolean },
+  ): Promise<boolean> {
+    saving.value = true
+    error.value = null
+    try {
+      await axios.put(`/api/ai/provider/${name}`, payload)
+      await fetchProviders()
+      if (payload.setActive) config.value.provider = name
+      return true
+    } catch (err: any) {
+      error.value = err.response?.data?.error || `Failed to save ${name} config`
+      return false
+    } finally {
+      saving.value = false
+    }
+  }
+
+  async function deleteProvider(name: string): Promise<boolean> {
+    try {
+      await axios.delete(`/api/ai/provider/${name}`)
+      await fetchProviders()
+      if (config.value.provider === name) config.value.provider = 'ollama'
+      return true
+    } catch (err: any) {
+      error.value = err.response?.data?.error || `Failed to disconnect ${name}`
+      return false
+    }
+  }
+
+  async function fetchProviderModels(name: string, payload?: { apiKey?: string; endpoint?: string }): Promise<string[]> {
+    try {
+      const res = await axios.post(`/api/ai/provider/${name}/models`, payload || {})
+      return res.data.models || []
+    } catch {
+      return []
     }
   }
 
@@ -141,7 +212,8 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   return {
-    config, models, loading, saving, modelsLoading, error,
-    fetchConfig, saveConfig, fetchModels, generate, generateCaption, streamGenerate,
+    config, providers, models, loading, saving, modelsLoading, error,
+    fetchConfig, fetchProviders, saveProvider, deleteProvider, fetchProviderModels,
+    saveConfig, fetchModels, generate, generateCaption, streamGenerate,
   }
 })

@@ -639,12 +639,11 @@
             <p class="font-semibold">{{ $t('ai.sectionTitle') }}</p>
             <p class="text-xs text-gray-500 mt-0.5">{{ $t('ai.sectionSubtitle') }}</p>
           </div>
-          <!-- Connection status pill -->
-          <div v-if="aiConnected !== null" class="ml-auto shrink-0">
-            <span
-              class="text-xs px-2 py-0.5 rounded-full font-medium"
-              :class="aiConnected ? 'bg-green-900/50 text-green-400 border border-green-700' : 'bg-red-900/40 text-red-400 border border-red-800'"
-            >
+          <div class="ml-auto flex items-center gap-2 shrink-0">
+            <span v-if="aiStore.config.provider === 'ollama'" class="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-900/50 text-violet-300 border border-violet-700">
+              {{ $t('ai.active') }}
+            </span>
+            <span v-if="aiConnected !== null" class="text-xs px-2 py-0.5 rounded-full font-medium" :class="aiConnected ? 'bg-green-900/50 text-green-400 border border-green-700' : 'bg-red-900/40 text-red-400 border border-red-800'">
               {{ aiConnected ? $t('ai.connected') : $t('ai.connectionFailed') }}
             </span>
           </div>
@@ -717,6 +716,130 @@
         </div>
       </div>
 
+      <!-- ═══════════════════════════════════════════════════════════════════
+           AI PROVIDERS — OpenAI, Groq, Gemini cards
+      ════════════════════════════════════════════════════════════════════ -->
+      <template v-for="providerName in ['openai', 'groq', 'gemini']" :key="providerName">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+          <!-- Header -->
+          <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+            <div
+              class="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+              :class="providerName === 'openai' ? 'bg-emerald-700' : providerName === 'groq' ? 'bg-orange-700' : 'bg-blue-700'"
+            >
+              {{ providerName === 'openai' ? 'OAI' : providerName === 'groq' ? 'GRQ' : 'GEM' }}
+            </div>
+            <div>
+              <p class="font-semibold">{{ $t(`ai.${providerName}.sectionTitle`) }}</p>
+              <p class="text-xs text-gray-500 mt-0.5">{{ $t(`ai.${providerName}.sectionSubtitle`) }}</p>
+            </div>
+            <div class="ml-auto flex items-center gap-2 shrink-0">
+              <span v-if="aiStore.config.provider === providerName" class="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-900/50 text-violet-300 border border-violet-700">
+                {{ $t('ai.active') }}
+              </span>
+              <span v-else-if="getProvider(providerName)?.configured" class="text-xs px-2 py-0.5 rounded-full font-medium bg-green-900/50 text-green-400 border border-green-700">
+                ✓ {{ $t('ai.apiKeyConfigured') }}
+              </span>
+            </div>
+          </div>
+
+          <div class="p-5 space-y-4">
+
+            <!-- Configured state -->
+            <div v-if="getProvider(providerName)?.configured && !providerForms[providerName].editing">
+              <div class="flex items-center justify-between text-sm">
+                <div class="space-y-1">
+                  <p class="text-xs text-gray-400">{{ $t('ai.apiKeyLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.apiKeyHint }}</span></p>
+                  <p v-if="providerForms[providerName].saved" class="text-xs text-green-400">{{ $t('ai.providerSaved') }}</p>
+                </div>
+                <div class="flex gap-2">
+                  <button @click="providerForms[providerName].editing = true" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+                    Edit
+                  </button>
+                  <button
+                    v-if="aiStore.config.provider !== providerName"
+                    @click="setActiveProvider(providerName)"
+                    :disabled="aiStore.saving"
+                    class="text-xs px-2.5 py-1 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-md text-white transition-colors"
+                  >
+                    {{ $t('ai.setActive') }}
+                  </button>
+                  <button @click="disconnectCloudProvider(providerName)" class="text-xs px-2.5 py-1 bg-red-900/40 hover:bg-red-900/60 border border-red-800 rounded-md text-red-400 hover:text-red-300 transition-colors">
+                    {{ $t('ai.disconnect') }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Model selector for configured provider -->
+              <div class="mt-3">
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
+                <select
+                  v-model="providerForms[providerName].model"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500"
+                >
+                  <option v-for="m in (PROVIDER_MODELS[providerName] || [])" :key="m" :value="m">{{ m }}</option>
+                </select>
+              </div>
+              <div class="flex justify-end mt-3">
+                <button
+                  @click="saveCloudProvider(providerName, aiStore.config.provider === providerName)"
+                  :disabled="providerForms[providerName].saving"
+                  class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.saveProvider') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Unconfigured / editing state -->
+            <div v-else class="space-y-3">
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.apiKeyLabel') }}</label>
+                <input
+                  v-model="providerForms[providerName].apiKey"
+                  type="password"
+                  :placeholder="$t('ai.apiKeyPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+                />
+                <p class="text-xs text-gray-600 mt-1">{{ $t(`ai.${providerName}.getKeyHint`) }}</p>
+              </div>
+
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
+                <select
+                  v-model="providerForms[providerName].model"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500"
+                >
+                  <option v-for="m in (PROVIDER_MODELS[providerName] || [])" :key="m" :value="m">{{ m }}</option>
+                </select>
+              </div>
+
+              <div class="flex items-center justify-end gap-2">
+                <button v-if="providerForms[providerName].editing" @click="providerForms[providerName].editing = false" class="text-xs px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 transition-colors">
+                  Cancel
+                </button>
+                <button
+                  @click="saveCloudProvider(providerName, false)"
+                  :disabled="providerForms[providerName].saving || !providerForms[providerName].apiKey"
+                  class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 border border-gray-600 rounded-lg text-xs font-medium transition-colors"
+                >
+                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.saveProvider') }}
+                </button>
+                <button
+                  @click="saveCloudProvider(providerName, true)"
+                  :disabled="providerForms[providerName].saving || !providerForms[providerName].apiKey"
+                  class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.connectAndActivate') }}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </template>
+
       <!-- Refresh button -->
       <button
         @click="platformsStore.fetchStatuses()"
@@ -735,7 +858,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
-import { useAiStore } from '../stores/ai'
+import { useAiStore, PROVIDER_MODELS } from '../stores/ai'
 import { COMMON_TIMEZONES } from '../utils/timezone'
 
 const { t } = useI18n()
@@ -998,10 +1121,67 @@ async function testAiConnection() {
 }
 
 async function saveAiConfig() {
-  const ok = await aiStore.saveConfig({ endpoint: aiEndpoint.value, model: aiModel.value, visionModel: aiVisionModel.value })
+  const ok = await aiStore.saveProvider('ollama', { endpoint: aiEndpoint.value, model: aiModel.value, visionModel: aiVisionModel.value, setActive: true })
   if (ok) {
     aiSaved.value = true
     setTimeout(() => { aiSaved.value = false }, 2500)
+  }
+}
+
+// ─── Cloud AI providers (OpenAI, Groq, Gemini) ───────────────────────────────
+
+interface ProviderFormState {
+  apiKey: string
+  model: string
+  editing: boolean
+  saving: boolean
+  saved: boolean
+  testResult: boolean | null
+}
+
+function makeProviderState(): ProviderFormState {
+  return { apiKey: '', model: '', editing: false, saving: false, saved: false, testResult: null }
+}
+
+const providerForms = ref<Record<string, ProviderFormState>>({
+  openai: makeProviderState(),
+  groq:   makeProviderState(),
+  gemini: makeProviderState(),
+})
+
+function getProvider(name: string) {
+  return aiStore.providers.find((p) => p.name === name)
+}
+
+async function saveCloudProvider(name: string, setActive = false) {
+  const form = providerForms.value[name]
+  form.saving = true
+  const ok = await aiStore.saveProvider(name, { apiKey: form.apiKey || undefined, model: form.model || undefined, setActive })
+  form.saving = false
+  if (ok) {
+    form.saved = true
+    form.editing = false
+    form.apiKey = ''
+    setTimeout(() => { form.saved = false }, 2500)
+  }
+}
+
+async function setActiveProvider(name: string) {
+  const provider = getProvider(name)
+  if (!provider?.configured) return
+  await aiStore.saveProvider(name, { setActive: true })
+}
+
+async function disconnectCloudProvider(name: string) {
+  if (!confirm(t('ai.disconnectConfirm'))) return
+  await aiStore.deleteProvider(name)
+}
+
+function seedProviderForms() {
+  for (const p of aiStore.providers) {
+    if (p.name === 'ollama') continue
+    const form = providerForms.value[p.name]
+    if (form) form.model = p.model || ''
   }
 }
 
@@ -1032,6 +1212,7 @@ onMounted(async () => {
     loadMetaConnections(),
     platformsStore.fetchTokenExpiry(),
     aiStore.fetchConfig(),
+    aiStore.fetchProviders(),
   ])
 
   // Seed board checkboxes from current selection
@@ -1041,5 +1222,6 @@ onMounted(async () => {
   aiEndpoint.value = aiStore.config.endpoint
   aiModel.value = aiStore.config.model
   aiVisionModel.value = aiStore.config.visionModel
+  seedProviderForms()
 })
 </script>

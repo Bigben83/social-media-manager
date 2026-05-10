@@ -327,6 +327,32 @@ export default {
     visionModelLabel: 'Vision Model',
     visionModelPlaceholder: 'e.g. llava, llama3.2-vision',
     visionModelHint: 'Used for image captioning. Pull with: ollama pull llava',
+    activeProvider: 'Active Provider',
+    setActive: 'Set as Active',
+    active: 'Active',
+    disconnect: 'Disconnect',
+    disconnectConfirm: 'Remove this provider and its API key?',
+    apiKeyLabel: 'API Key',
+    apiKeyPlaceholder: 'Paste your API key…',
+    apiKeyConfigured: 'API key saved',
+    connectAndActivate: 'Connect & Set Active',
+    saveProvider: 'Save',
+    providerSaved: 'Saved!',
+    openai: {
+      sectionTitle: 'OpenAI',
+      sectionSubtitle: 'GPT-4o and GPT-4o-mini via the OpenAI API.',
+      getKeyHint: 'Get an API key at platform.openai.com',
+    },
+    groq: {
+      sectionTitle: 'Groq',
+      sectionSubtitle: 'Ultra-fast inference with Llama and Mixtral models.',
+      getKeyHint: 'Get an API key at console.groq.com',
+    },
+    gemini: {
+      sectionTitle: 'Google Gemini',
+      sectionSubtitle: 'Gemini 2.0 Flash and 1.5 Pro with native vision support.',
+      getKeyHint: 'Get an API key at aistudio.google.com',
+    },
   },
 
   feed: {
