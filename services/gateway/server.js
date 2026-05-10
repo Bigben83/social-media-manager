@@ -745,18 +745,143 @@ app.delete('/credentials/meta', async () => {
   return { success: true };
 });
 
+// ─── Pinterest OAuth Flow ─────────────────────────────────────────────────────
+
+const PINTEREST_API = 'https://api.pinterest.com/v5';
+const PINTEREST_AUTH_URL = 'https://www.pinterest.com/oauth/';
+const PINTEREST_TOKEN_URL = 'https://api.pinterest.com/v5/oauth/token';
+
+app.post('/credentials/pinterest-app', async (request, reply) => {
+  const { clientId, clientSecret } = request.body || {};
+  if (!clientId || !clientSecret) {
+    return reply.code(400).send({ error: 'clientId and clientSecret are required' });
+  }
+  await setCredentials('pinterest_app', { clientId, clientSecret: encryptToken(clientSecret) });
+  log.info({ action: 'pinterest_app_save', outcome: 'success' });
+  return { success: true };
+});
+
+app.get('/credentials/pinterest-app', async () => {
+  const cred = await getCredentials('pinterest_app');
+  if (!cred) return { configured: false };
+  const plain = decryptToken(cred.clientSecret) || '';
+  return { configured: true, clientId: cred.clientId, clientSecretHint: plain ? `****${plain.slice(-4)}` : '****' };
+});
+
+app.get('/auth/pinterest/init', async (request, reply) => {
+  const cred = await getCredentials('pinterest_app');
+  if (!cred?.clientId) {
+    return reply.code(400).send({ error: 'Save your Pinterest Client ID and Secret first' });
+  }
+  const redirectUri = `${APP_BASE_URL}/api/auth/pinterest/callback`;
+  const scopes = 'pins:read,pins:write,boards:read,user_accounts:read';
+  const url = `${PINTEREST_AUTH_URL}?client_id=${cred.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scopes}`;
+  return { url };
+});
+
+app.get('/auth/pinterest/callback', async (request, reply) => {
+  const { code, error: oauthError } = request.query;
+
+  if (oauthError) {
+    return reply.redirect(`${APP_BASE_URL}/settings?pinterest_error=${encodeURIComponent(oauthError)}`);
+  }
+  if (!code) {
+    return reply.redirect(`${APP_BASE_URL}/settings?pinterest_error=no_code`);
+  }
+
+  try {
+    const appCred = await getCredentials('pinterest_app');
+    if (!appCred?.clientId) throw new Error('App credentials not configured');
+    const clientSecret = decryptToken(appCred.clientSecret);
+    if (!clientSecret) throw new Error('Failed to decrypt client secret');
+
+    const redirectUri = `${APP_BASE_URL}/api/auth/pinterest/callback`;
+    const basicAuth = Buffer.from(`${appCred.clientId}:${clientSecret}`).toString('base64');
+
+    const tokenRes = await axios.post(
+      PINTEREST_TOKEN_URL,
+      new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }).toString(),
+      {
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        timeout: 15000,
+      }
+    );
+
+    const { access_token, refresh_token, expires_in } = tokenRes.data;
+    const tokenExpiry = new Date(Date.now() + (expires_in || 30 * 24 * 60 * 60) * 1000).toISOString();
+
+    const [userRes, boardsRes] = await Promise.all([
+      axios.get(`${PINTEREST_API}/user_account`, {
+        headers: { Authorization: `Bearer ${access_token}` },
+        timeout: 10000,
+      }),
+      axios.get(`${PINTEREST_API}/boards`, {
+        headers: { Authorization: `Bearer ${access_token}` },
+        params: { page_size: 100 },
+        timeout: 15000,
+      }),
+    ]);
+
+    const boards = (boardsRes.data.items || []).map((b) => ({
+      id: b.id,
+      name: b.name,
+      privacy: b.privacy,
+      selected: false,
+    }));
+
+    await setCredentials('pinterest', {
+      userId: userRes.data.username,
+      username: userRes.data.username,
+      displayName: userRes.data.business_name || userRes.data.username,
+      avatar: userRes.data.profile_image,
+      accessToken: encryptToken(access_token),
+      refreshToken: refresh_token ? encryptToken(refresh_token) : null,
+      tokenExpiry,
+      boards,
+    });
+
+    log.info({ action: 'pinterest_oauth_callback', username: userRes.data.username, boards: boards.length, outcome: 'success' });
+    reply.redirect(`${APP_BASE_URL}/settings?pinterest_connected=1`);
+  } catch (err) {
+    const msg = err.response?.data?.message || err.message;
+    log.error({ action: 'pinterest_oauth_callback', outcome: 'failure', err: msg });
+    reply.redirect(`${APP_BASE_URL}/settings?pinterest_error=${encodeURIComponent(msg)}`);
+  }
+});
+
+app.post('/credentials/pinterest/boards', async (request, reply) => {
+  const { selectedBoardIds = [] } = request.body || {};
+  const cred = await getCredentials('pinterest');
+  if (!cred) return reply.code(400).send({ error: 'Pinterest not connected' });
+
+  const boards = (cred.boards || []).map((b) => ({ ...b, selected: selectedBoardIds.includes(b.id) }));
+  await setCredentials('pinterest', { ...cred, boards });
+  log.info({ action: 'pinterest_boards_save', selected: boards.filter((b) => b.selected).length, outcome: 'success' });
+  return { success: true, selected: boards.filter((b) => b.selected).length };
+});
+
+app.delete('/credentials/pinterest', async () => {
+  await deleteCredentials('pinterest');
+  return { success: true };
+});
+
 // ─── Credential Status ────────────────────────────────────────────────────────
 
 // Aggregate connection status for all DB-managed platforms
 app.get('/credentials', async () => {
-  const [metaApp, fb, ig] = await Promise.all([
+  const [metaApp, fb, ig, pinterest] = await Promise.all([
     getCredentials('meta_app'),
     getCredentials('facebook'),
     getCredentials('instagram'),
+    getCredentials('pinterest'),
   ]);
 
   const fbPages = (fb?.pages || []).filter((p) => p.selected);
   const igAccounts = (ig?.accounts || []).filter((a) => a.selected);
+  const pinterestBoards = (pinterest?.boards || []).filter((b) => b.selected);
 
   return {
     metaApp: { configured: !!(metaApp?.appId) },
@@ -767,6 +892,12 @@ app.get('/credentials', async () => {
     instagram: {
       connected: igAccounts.length > 0,
       accounts: igAccounts.map(({ id, username, avatar }) => ({ id, username, avatar })),
+    },
+    pinterest: {
+      connected: pinterestBoards.length > 0,
+      username: pinterest?.username || null,
+      boards: pinterestBoards.map(({ id, name, privacy }) => ({ id, name, privacy })),
+      allBoards: (pinterest?.boards || []).map(({ id, name, privacy, selected }) => ({ id, name, privacy, selected })),
     },
   };
 });
@@ -783,6 +914,7 @@ const INDUSTRY_DEFAULTS = {
   bluesky:   [[1,10],[2,10],[3,10],[1,11],[2,11]],
   reddit:    [[1,7],[2,7],[3,7],[4,7],[0,9]],
   youtube:   [[4,12],[5,12],[6,12],[4,15],[5,15]],
+  pinterest: [[5,12],[6,14],[0,15],[5,20],[6,20]],
 };
 const DEFAULT_SLOTS = [[2,9],[3,9],[4,9],[2,12],[3,12]];
 

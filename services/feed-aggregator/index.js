@@ -15,6 +15,7 @@ const PLATFORM_SERVICES = {
   bluesky:   process.env.BLUESKY_SERVICE_URL   || 'http://bluesky:3004',
   instagram: process.env.INSTAGRAM_SERVICE_URL || 'http://instagram:3005',
   facebook:  process.env.FACEBOOK_SERVICE_URL  || 'http://facebook:3006',
+  pinterest: process.env.PINTEREST_SERVICE_URL || 'http://pinterest:3008',
 };
 
 const log = createLogger('feed-aggregator');

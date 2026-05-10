@@ -96,6 +96,17 @@ export const useComposeStore = defineStore('compose', () => {
       })
     }
 
+    for (const board of platformsStore.connectedPinterestBoards) {
+      next.push({
+        key: `pinterest:${board.id}`,
+        platform: 'pinterest',
+        accountId: board.id,
+        label: board.name,
+        color: PLATFORM_META.pinterest.color,
+        selected: false,
+      })
+    }
+
     destinations.value = next
   }
 

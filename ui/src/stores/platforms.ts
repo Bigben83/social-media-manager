@@ -31,6 +31,19 @@ export interface MetaDiscovery {
   igAccounts: MetaIgAccount[]
 }
 
+export interface PinterestBoard {
+  id: string
+  name: string
+  privacy?: string
+  selected?: boolean
+}
+
+export interface PinterestCredentials {
+  configured: boolean
+  clientId?: string
+  clientSecretHint?: string
+}
+
 export interface MetaCredentials {
   configured: boolean
   appId?: string
@@ -54,6 +67,7 @@ export const PLATFORM_META: Record<string, { label: string; color: string; icon:
   facebook:  { label: 'Facebook',   color: '#1877F2', icon: 'fa-brands fa-facebook' },
   reddit:    { label: 'Reddit',     color: '#FF4500', icon: 'fa-brands fa-reddit' },
   youtube:   { label: 'YouTube',    color: '#FF0000', icon: 'fa-brands fa-youtube' },
+  pinterest: { label: 'Pinterest',  color: '#E60023', icon: 'fa-brands fa-pinterest' },
 }
 
 export const usePlatformsStore = defineStore('platforms', () => {
@@ -69,6 +83,13 @@ export const usePlatformsStore = defineStore('platforms', () => {
   // Connected pages/accounts (fetched from gateway)
   const connectedPages = ref<MetaPage[]>([])
   const connectedIgAccounts = ref<MetaIgAccount[]>([])
+
+  // Pinterest
+  const pinterestCredentials = ref<PinterestCredentials>({ configured: false })
+  const pinterestLoading = ref(false)
+  const pinterestError = ref<string | null>(null)
+  const connectedPinterestBoards = ref<PinterestBoard[]>([])
+  const allPinterestBoards = ref<PinterestBoard[]>([])
 
   // Token expiry
   const tokenExpiry = ref<TokenExpiryAccount[]>([])
@@ -108,7 +129,74 @@ export const usePlatformsStore = defineStore('platforms', () => {
       const data = await res.json()
       connectedPages.value = data.facebook?.pages || []
       connectedIgAccounts.value = data.instagram?.accounts || []
+      connectedPinterestBoards.value = data.pinterest?.boards || []
+      allPinterestBoards.value = data.pinterest?.allBoards || []
     } catch (_) { /* ignore */ }
+  }
+
+  async function fetchPinterestCredentials() {
+    try {
+      const res = await axios.get('/api/credentials/pinterest-app')
+      pinterestCredentials.value = res.data
+    } catch (err) {
+      console.error('Pinterest credentials fetch error:', err)
+    }
+  }
+
+  async function savePinterestApp(clientId: string, clientSecret: string) {
+    pinterestLoading.value = true
+    pinterestError.value = null
+    try {
+      await axios.post('/api/credentials/pinterest-app', { clientId, clientSecret })
+      pinterestCredentials.value = { configured: true, clientId, clientSecretHint: `****${clientSecret.slice(-4)}` }
+    } catch (err: any) {
+      pinterestError.value = err.response?.data?.error || 'Failed to save app credentials'
+    } finally {
+      pinterestLoading.value = false
+    }
+  }
+
+  async function startPinterestOAuth() {
+    pinterestLoading.value = true
+    pinterestError.value = null
+    try {
+      const res = await axios.get('/api/auth/pinterest/init')
+      window.location.href = res.data.url
+    } catch (err: any) {
+      pinterestError.value = err.response?.data?.error || 'Failed to start OAuth'
+      pinterestLoading.value = false
+    }
+  }
+
+  async function savePinterestBoards(selectedBoardIds: string[]) {
+    pinterestLoading.value = true
+    pinterestError.value = null
+    try {
+      await axios.post('/api/credentials/pinterest/boards', { selectedBoardIds })
+      allPinterestBoards.value = allPinterestBoards.value.map((b) => ({
+        ...b,
+        selected: selectedBoardIds.includes(b.id),
+      }))
+      connectedPinterestBoards.value = allPinterestBoards.value.filter((b) => b.selected)
+    } catch (err: any) {
+      pinterestError.value = err.response?.data?.error || 'Failed to save board selection'
+    } finally {
+      pinterestLoading.value = false
+    }
+  }
+
+  async function disconnectPinterest() {
+    pinterestLoading.value = true
+    try {
+      await axios.delete('/api/credentials/pinterest')
+      connectedPinterestBoards.value = []
+      allPinterestBoards.value = []
+      await fetchStatuses()
+    } catch (err) {
+      console.error('Pinterest disconnect error:', err)
+    } finally {
+      pinterestLoading.value = false
+    }
   }
 
   // ─── Platform status ──────────────────────────────────────────────────────
@@ -215,5 +303,9 @@ export const usePlatformsStore = defineStore('platforms', () => {
     fetchMetaDiscovery, saveMetaSelection, disconnectMeta,
     tokenExpiry, expiringAccounts, hasExpiryWarning,
     fetchTokenExpiry, dismissTokenWarning, refreshMetaTokens,
+    pinterestCredentials, pinterestLoading, pinterestError,
+    connectedPinterestBoards, allPinterestBoards,
+    fetchPinterestCredentials, savePinterestApp, startPinterestOAuth,
+    savePinterestBoards, disconnectPinterest,
   }
 })

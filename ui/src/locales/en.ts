@@ -237,6 +237,31 @@ export default {
       timezoneAuto: 'Use browser timezone',
     },
 
+    pinterest: {
+      sectionTitle: 'Pinterest',
+      sectionSubtitle: 'Connect your Pinterest account to create pins on your boards.',
+      clientIdLabel: 'Client ID',
+      clientSecretLabel: 'Client Secret',
+      clientIdPlaceholder: 'Your Pinterest App Client ID',
+      clientSecretPlaceholder: 'Your Pinterest App Client Secret',
+      saveApp: 'Save App Credentials',
+      saving: 'Saving...',
+      appConfigured: 'App credentials saved',
+      connectButton: 'Connect with Pinterest',
+      connecting: 'Redirecting to Pinterest...',
+      reconnect: 'Reconnect',
+      disconnect: 'Disconnect',
+      disconnectConfirm: 'This will disconnect your Pinterest account and all boards. Continue?',
+      boardsTitle: 'Your Boards',
+      noBoards: 'No boards found.',
+      saveBoards: 'Save Board Selection',
+      savingBoards: 'Saving...',
+      boardsSaved: 'Saved!',
+      getAppHelp: 'Get your credentials from',
+      devPortal: 'developers.pinterest.com',
+      errorTitle: 'Pinterest OAuth Error',
+    },
+
     meta: {
       sectionTitle: 'Facebook & Instagram',
       sectionSubtitle: 'Both platforms share a single Facebook Developer App. Connect once to manage all your Pages and Instagram accounts.',
@@ -317,5 +342,6 @@ export default {
     facebook: 'Facebook',
     reddit: 'Reddit',
     youtube: 'YouTube',
+    pinterest: 'Pinterest',
   },
 }

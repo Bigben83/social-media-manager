@@ -182,6 +182,20 @@ services:
       - messageBroker
       - mongodb
 
+  pinterest:
+    build:
+      context: ./services
+      dockerfile: pinterest/Dockerfile
+    volumes:
+      - pinterest_modules:/services/pinterest/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - messageBroker
+      - mongodb
+
   feed-aggregator:
     build:
       context: ./services
@@ -200,6 +214,7 @@ services:
       - mastodon
       - bluesky
       - instagram
+      - pinterest
       - facebook
 
   scheduler:
@@ -257,6 +272,7 @@ volumes:
   bluesky_modules:
   instagram_modules:
   facebook_modules:
+  pinterest_modules:
   feed_aggregator_modules:
   scheduler_modules:
   ui_modules:

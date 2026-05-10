@@ -169,6 +169,146 @@
       </div>
 
       <!-- ═══════════════════════════════════════════════════════════════════
+           PINTEREST — OAuth connection card
+      ════════════════════════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+        <!-- Header -->
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold" style="background:#E60023">P</span>
+          <div>
+            <p class="font-semibold">{{ $t('settings.pinterest.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.pinterest.sectionSubtitle') }}</p>
+          </div>
+        </div>
+
+        <!-- OAuth error banner -->
+        <div v-if="pinterestOauthError" class="mx-5 mt-4 bg-red-900/40 border border-red-700 rounded-lg p-3 text-sm text-red-300 flex items-start gap-2">
+          <span class="shrink-0">⚠</span>
+          <span><strong>{{ $t('settings.pinterest.errorTitle') }}:</strong> {{ pinterestOauthError }}</span>
+        </div>
+
+        <!-- Step 1: App credentials -->
+        <div class="p-5 border-b border-gray-800/60">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Step 1 — Pinterest Developer App</p>
+
+          <div v-if="pinterestAppConfigured" class="flex items-center justify-between">
+            <div class="flex items-center gap-2 text-sm text-green-400">
+              <span>✓</span>
+              <span>{{ $t('settings.pinterest.appConfigured') }}</span>
+              <span class="text-gray-600 font-mono text-xs">({{ platformsStore.pinterestCredentials.clientId }})</span>
+            </div>
+            <button @click="editingPinterestApp = !editingPinterestApp" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+              Edit
+            </button>
+          </div>
+
+          <div v-if="!pinterestAppConfigured || editingPinterestApp" class="space-y-3 mt-2">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">{{ $t('settings.pinterest.clientIdLabel') }}</label>
+              <input
+                v-model="pinterestClientId"
+                type="text"
+                :placeholder="$t('settings.pinterest.clientIdPlaceholder')"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-red-500"
+              />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">{{ $t('settings.pinterest.clientSecretLabel') }}</label>
+              <input
+                v-model="pinterestClientSecret"
+                type="password"
+                :placeholder="pinterestAppConfigured ? platformsStore.pinterestCredentials.clientSecretHint : $t('settings.pinterest.clientSecretPlaceholder')"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-red-500"
+              />
+            </div>
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-gray-600">
+                {{ $t('settings.pinterest.getAppHelp') }}
+                <a href="https://developers.pinterest.com/apps/" target="_blank" rel="noopener" class="text-red-400 hover:text-red-300 underline">
+                  {{ $t('settings.pinterest.devPortal') }}
+                </a>
+              </p>
+              <button
+                @click="savePinterestApp"
+                :disabled="!pinterestClientId || !pinterestClientSecret || platformsStore.pinterestLoading"
+                class="px-4 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+              >
+                {{ platformsStore.pinterestLoading ? $t('settings.pinterest.saving') : $t('settings.pinterest.saveApp') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: OAuth connect + boards -->
+        <div class="p-5" :class="{ 'opacity-40 pointer-events-none': !pinterestAppConfigured }">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Step 2 — Connect Account</p>
+
+          <!-- Connected — show boards -->
+          <div v-if="pinterestConnected" class="space-y-4">
+            <div class="space-y-1.5">
+              <p class="text-xs text-gray-500">{{ $t('settings.pinterest.boardsTitle') }}</p>
+              <div v-if="!platformsStore.allPinterestBoards.length" class="text-sm text-gray-600">{{ $t('settings.pinterest.noBoards') }}</div>
+              <div v-else class="space-y-1.5">
+                <label
+                  v-for="board in platformsStore.allPinterestBoards"
+                  :key="board.id"
+                  class="flex items-center gap-3 bg-gray-800/60 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-800 transition-colors"
+                >
+                  <input type="checkbox" :value="board.id" v-model="selectedBoardIds" class="w-4 h-4 accent-red-500" />
+                  <span class="w-6 h-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0" style="background:#E60023">P</span>
+                  <span class="text-sm flex-1">{{ board.name }}</span>
+                  <span class="text-xs text-gray-600">{{ board.privacy }}</span>
+                  <span v-if="board.selected" class="w-2 h-2 rounded-full bg-green-400 shrink-0"></span>
+                </label>
+              </div>
+              <div class="flex items-center justify-between pt-2">
+                <span v-if="pinterestBoardsSaved" class="text-xs text-green-400">{{ $t('settings.pinterest.boardsSaved') }}</span>
+                <span v-else />
+                <button
+                  @click="savePinterestBoards"
+                  :disabled="platformsStore.pinterestLoading"
+                  class="px-4 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {{ platformsStore.pinterestLoading ? $t('settings.pinterest.savingBoards') : $t('settings.pinterest.saveBoards') }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex gap-2">
+              <button
+                @click="platformsStore.startPinterestOAuth()"
+                :disabled="platformsStore.pinterestLoading"
+                class="px-4 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
+              >
+                {{ $t('settings.pinterest.reconnect') }}
+              </button>
+              <button
+                @click="confirmPinterestDisconnect"
+                :disabled="platformsStore.pinterestLoading"
+                class="px-4 py-2 text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-900/50 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
+              >
+                {{ $t('settings.pinterest.disconnect') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Not yet connected -->
+          <div v-else>
+            <button
+              @click="platformsStore.startPinterestOAuth()"
+              :disabled="!pinterestAppConfigured || platformsStore.pinterestLoading"
+              class="w-full py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              <span v-if="platformsStore.pinterestLoading">{{ $t('settings.pinterest.connecting') }}</span>
+              <span v-else>{{ $t('settings.pinterest.connectButton') }}</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════════════
            PAGE/ACCOUNT PICKER — shown after OAuth callback
       ════════════════════════════════════════════════════════════════════ -->
       <div
@@ -664,10 +804,44 @@ async function confirmSelection() {
 
 const oauthError = ref<string | null>(null)
 
+// ─── Pinterest ────────────────────────────────────────────────────────────────
+
+const pinterestClientId = ref('')
+const pinterestClientSecret = ref('')
+const editingPinterestApp = ref(false)
+const pinterestOauthError = ref<string | null>(null)
+const pinterestBoardsSaved = ref(false)
+const selectedBoardIds = ref<string[]>([])
+
+const pinterestAppConfigured = computed(() => platformsStore.pinterestCredentials.configured)
+const pinterestConnected = computed(() => platformsStore.allPinterestBoards.length > 0)
+
+async function savePinterestApp() {
+  await platformsStore.savePinterestApp(pinterestClientId.value, pinterestClientSecret.value)
+  if (!platformsStore.pinterestError) {
+    editingPinterestApp.value = false
+    pinterestClientSecret.value = ''
+  }
+}
+
+async function savePinterestBoards() {
+  await platformsStore.savePinterestBoards(selectedBoardIds.value)
+  if (!platformsStore.pinterestError) {
+    pinterestBoardsSaved.value = true
+    setTimeout(() => { pinterestBoardsSaved.value = false }, 2500)
+  }
+}
+
+function confirmPinterestDisconnect() {
+  if (window.confirm(t('settings.pinterest.disconnectConfirm'))) {
+    platformsStore.disconnectPinterest().then(loadMetaConnections)
+  }
+}
+
 // ─── Other platforms (not Meta) ──────────────────────────────────────────────
 
 const otherPlatforms = computed(() => {
-  const skip = new Set(['instagram', 'facebook'])
+  const skip = new Set(['instagram', 'facebook', 'pinterest'])
   return Object.fromEntries(Object.entries(PLATFORM_META).filter(([k]) => !skip.has(k)))
 })
 
@@ -750,7 +924,7 @@ const allConnectedAccounts = computed((): ProfileAccount[] => {
   const accounts: ProfileAccount[] = []
 
   for (const [platform, meta] of Object.entries(PLATFORM_META)) {
-    if (platform === 'facebook' || platform === 'instagram') continue
+    if (platform === 'facebook' || platform === 'instagram' || platform === 'pinterest') continue
     if (platformsStore.isConnected(platform)) {
       accounts.push({ key: platform, label: t(`platforms.${platform}`), platform, color: meta.color, avatar: null })
     }
@@ -762,6 +936,10 @@ const allConnectedAccounts = computed((): ProfileAccount[] => {
 
   for (const account of platformsStore.connectedIgAccounts) {
     accounts.push({ key: `instagram:${account.id}`, label: `@${account.username}`, platform: 'instagram', color: PLATFORM_META.instagram.color, avatar: account.avatar || null })
+  }
+
+  for (const board of platformsStore.connectedPinterestBoards) {
+    accounts.push({ key: `pinterest:${board.id}`, label: board.name, platform: 'pinterest', color: PLATFORM_META.pinterest.color, avatar: null })
   }
 
   return accounts
@@ -833,21 +1011,31 @@ onMounted(async () => {
   // Check for OAuth callback query params
   if (route.query.meta_discovery) {
     await platformsStore.fetchMetaDiscovery()
-    // Clear query param from URL without navigation
     window.history.replaceState({}, '', '/settings')
   }
   if (route.query.meta_error) {
     oauthError.value = decodeURIComponent(String(route.query.meta_error))
     window.history.replaceState({}, '', '/settings')
   }
+  if (route.query.pinterest_connected) {
+    window.history.replaceState({}, '', '/settings')
+  }
+  if (route.query.pinterest_error) {
+    pinterestOauthError.value = decodeURIComponent(String(route.query.pinterest_error))
+    window.history.replaceState({}, '', '/settings')
+  }
 
   await Promise.all([
     platformsStore.fetchStatuses(),
     platformsStore.fetchMetaCredentials(),
+    platformsStore.fetchPinterestCredentials(),
     loadMetaConnections(),
     platformsStore.fetchTokenExpiry(),
     aiStore.fetchConfig(),
   ])
+
+  // Seed board checkboxes from current selection
+  selectedBoardIds.value = platformsStore.allPinterestBoards.filter((b) => b.selected).map((b) => b.id)
 
   // Seed local form from fetched config
   aiEndpoint.value = aiStore.config.endpoint

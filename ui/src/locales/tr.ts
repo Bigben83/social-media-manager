@@ -237,6 +237,31 @@ export default {
       timezoneAuto: 'Tarayıcı saat dilimini kullan',
     },
 
+    pinterest: {
+      sectionTitle: 'Pinterest',
+      sectionSubtitle: 'Pinterest hesabını bağlayarak panolarına pin oluştur.',
+      clientIdLabel: 'İstemci Kimliği',
+      clientSecretLabel: 'İstemci Gizli Anahtarı',
+      clientIdPlaceholder: 'Pinterest Uygulama İstemci Kimliğin',
+      clientSecretPlaceholder: 'Pinterest Uygulama Gizli Anahtarın',
+      saveApp: 'Uygulama Bilgilerini Kaydet',
+      saving: 'Kaydediliyor...',
+      appConfigured: 'Uygulama bilgileri kaydedildi',
+      connectButton: 'Pinterest ile Bağlan',
+      connecting: 'Pinterest\'e yönlendiriliyor...',
+      reconnect: 'Yeniden Bağlan',
+      disconnect: 'Bağlantıyı Kes',
+      disconnectConfirm: 'Bu işlem Pinterest hesabının ve tüm panolarının bağlantısını keser. Devam edilsin mi?',
+      boardsTitle: 'Panolarınız',
+      noBoards: 'Pano bulunamadı.',
+      saveBoards: 'Pano Seçimini Kaydet',
+      savingBoards: 'Kaydediliyor...',
+      boardsSaved: 'Kaydedildi!',
+      getAppHelp: 'Kimlik bilgilerini şuradan al:',
+      devPortal: 'developers.pinterest.com',
+      errorTitle: 'Pinterest OAuth Hatası',
+    },
+
     meta: {
       sectionTitle: 'Facebook & Instagram',
       sectionSubtitle: 'Her iki platform da aynı Facebook Geliştirici Uygulamasını kullanır. Tüm Sayfaları ve Instagram hesaplarını yönetmek için bir kez bağlan.',
@@ -317,5 +342,6 @@ export default {
     facebook: 'Facebook',
     reddit: 'Reddit',
     youtube: 'YouTube',
+    pinterest: 'Pinterest',
   },
 }
