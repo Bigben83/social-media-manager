@@ -6,7 +6,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 
 ## Features
 
-- **Unified Feed** — Pull feeds from Twitter/X, Mastodon, Bluesky, LinkedIn, Instagram, Facebook, Reddit and YouTube into a single TweetDeck-style dashboard
+- **Unified Feed** — Pull feeds from Twitter/X, Mastodon, Bluesky, LinkedIn, Instagram, Facebook, Reddit, YouTube and Pinterest into a single TweetDeck-style dashboard
 - **Cross-post** — Write once, publish to multiple platforms simultaneously with per-account targeting
 - **Scheduler** — Schedule posts for a specific date/time; BullMQ handles retries with idempotent delivery (no duplicate posts)
 - **Per-account Timezone** — Each account stores its own timezone; the compose view converts scheduled times correctly
@@ -15,6 +15,8 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 - **Content Calendar** — Month/week calendar view of scheduled posts in the Scheduler
 - **Account Profiles** — Store business context (name, industry, audience, tone, hashtags) per account for AI context injection
 - **AI Assistance** — Powered by local [Ollama](https://ollama.ai): draft generation, hashtag suggestions, image captions (via vision models); streams directly into the editor
+- **Analytics & Insights** — Publishing stats, 30-day activity chart, platform breakdown, per-account filtering, engagement heatmap, best posting times, and top posts (crawled from platform APIs)
+- **Scheduling Suggestions** — Optimal posting times suggested in Compose, based on your engagement history or industry defaults
 - **Token Expiry Warnings** — Dashboard banner when Meta tokens are within 7 days of expiry
 - **Token Encryption** — OAuth tokens stored AES-256-GCM encrypted at rest
 - **Structured Logging** — Pino JSON logging across all services with consistent fields
@@ -56,6 +58,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 | `bluesky` | 3004 | Bluesky (AT Protocol) integration |
 | `instagram` | 3005 | Instagram Graph API |
 | `facebook` | 3006 | Facebook Pages Graph API |
+| `pinterest` | 3008 | Pinterest API v5 |
 | `mongodb` | 27018 | Database |
 | `redis` | 6379 | Cache & job queue |
 | `messageBroker` | 5672 / 15672 | RabbitMQ (legacy, largely unused) |
@@ -127,8 +130,8 @@ Then go to **Settings → AI Integration**, set the endpoint to `http://host.doc
 | Instagram | Free | ✅ | ✅ | Business/Creator account + Facebook Page required |
 | Facebook | Free | ✅ | ✅ | Facebook Page required (personal timelines not supported) |
 | YouTube | Free | ✅ | ❌ | Subscription feed only; publishing in pipeline |
+| Pinterest | Free | ✅ | ✅ | OAuth via Settings UI; boards as destinations; image required for pins |
 | TikTok | Free | — | — | In pipeline |
-| Pinterest | Free | — | — | In pipeline |
 | Google Business | Free | — | — | In pipeline |
 
 ---
@@ -229,6 +232,56 @@ LINKEDIN_ACCESS_TOKEN=your_token_here
 
 ---
 
+## Pinterest Setup
+
+Pinterest uses a standard OAuth 2.0 authorization code flow. Tokens are stored encrypted (AES-256-GCM) in MongoDB. Each Pinterest board becomes a separate posting destination in Compose.
+
+### What you need
+
+- A [Pinterest Developer account](https://developers.pinterest.com/)
+- A Pinterest user account with at least one board
+
+### Create a Pinterest App
+
+1. Go to [developers.pinterest.com/apps](https://developers.pinterest.com/apps/) and click **New App**
+2. Fill in the app name and description; select **Web** as the platform
+3. Under **App settings**, note your **Client ID** and **Client Secret**
+
+### Configure the Redirect URI and Scopes
+
+In your app's **Authentication** settings, add to **Redirect URIs**:
+
+```text
+http://localhost:8081/api/auth/pinterest/callback
+```
+
+**Required scopes:**
+
+| Scope | Used for |
+| --- | --- |
+| `pins:read` | Read existing pins |
+| `pins:write` | Create new pins |
+| `boards:read` | List boards for destination picker |
+| `user_accounts:read` | Verify connected account |
+
+### Connect from the Settings UI
+
+1. Open <http://localhost:8081/settings>
+2. In the **Pinterest** card, enter your Client ID and Client Secret → **Save App Credentials**
+3. Click **Connect with Pinterest**
+4. Authorise the app on Pinterest's OAuth page
+5. Back in Settings, check the boards you want to use → **Save Board Selection**
+
+Each selected board now appears as a destination in the Compose view.
+
+### Posting Notes
+
+- **Image is required** — Pinterest's API does not support text-only pins. Always attach an image URL in Compose before selecting a Pinterest board as a destination.
+- The post content becomes both the pin **title** (first 100 characters) and the **description**.
+- Tokens are stored encrypted — no `.env` editing required.
+
+---
+
 ## Adding a New Language
 
 1. Create `ui/src/locales/xx.ts` (copy `en.ts` and translate)
@@ -278,7 +331,8 @@ LINKEDIN_ACCESS_TOKEN=your_token_here
 │   ├── mastodon/
 │   ├── bluesky/
 │   ├── instagram/
-│   └── facebook/
+│   ├── facebook/
+│   └── pinterest/
 ├── ui/
 │   └── src/
 │       ├── views/           # Dashboard, Compose, Scheduler (+ calendar/drafts), Settings, Media
