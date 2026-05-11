@@ -248,6 +248,18 @@
 
     <!-- ── Drafts panel — scrollable, constrained width ── -->
     <template v-else>
+
+      <!-- Drafts toolbar -->
+      <div class="flex-shrink-0 max-w-3xl mx-auto w-full px-6 pb-4 flex justify-end">
+        <button
+          @click="openBulkModal"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-violet-700 hover:bg-violet-600 rounded-lg text-sm font-medium transition-colors"
+        >
+          <span class="text-base leading-none">✨</span>
+          {{ $t('scheduler.bulkDraft.openButton') }}
+        </button>
+      </div>
+
       <div class="flex-1 overflow-y-auto px-6 pb-6">
         <div class="max-w-3xl mx-auto">
           <div v-if="draftsLoading" class="text-center text-gray-500 mt-20">
@@ -267,6 +279,10 @@
             >
               <div class="flex items-start justify-between gap-4">
                 <div class="flex-1 min-w-0">
+                  <!-- AI batch badge -->
+                  <span v-if="(draft as any).batchId" class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-violet-900/50 text-violet-300 border border-violet-800 mb-1.5">
+                    ✨ AI
+                  </span>
                   <p class="text-sm text-gray-200 line-clamp-2 mb-2">
                     {{ draft.content || '(no content)' }}
                   </p>
@@ -309,19 +325,168 @@
           </div>
         </div>
       </div>
+
+      <!-- ── Bulk Draft Modal ── -->
+      <Teleport to="body">
+        <Transition
+          enter-active-class="transition-opacity duration-200"
+          enter-from-class="opacity-0"
+          enter-to-class="opacity-100"
+          leave-active-class="transition-opacity duration-150"
+          leave-from-class="opacity-100"
+          leave-to-class="opacity-0"
+        >
+          <div
+            v-if="showBulkModal"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            @click.self="closeBulkModal"
+          >
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+
+              <!-- Header -->
+              <div class="flex items-start justify-between p-5 border-b border-gray-800 flex-shrink-0">
+                <div>
+                  <p class="font-semibold">{{ $t('scheduler.bulkDraft.title') }}</p>
+                  <p class="text-xs text-gray-500 mt-0.5">{{ $t('scheduler.bulkDraft.subtitle') }}</p>
+                </div>
+                <button @click="closeBulkModal" class="text-gray-500 hover:text-gray-200 text-2xl leading-none mt-0.5 ml-4">&times;</button>
+              </div>
+
+              <!-- Body -->
+              <div class="flex-1 overflow-y-auto p-5 space-y-5">
+
+                <!-- Topics -->
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('scheduler.bulkDraft.topicsLabel') }}</label>
+                  <textarea
+                    v-model="bulkTopics"
+                    rows="6"
+                    :placeholder="$t('scheduler.bulkDraft.topicsPlaceholder')"
+                    :disabled="!!bulkBatchId"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none disabled:opacity-50"
+                  />
+                  <p class="text-xs text-gray-600 mt-1">{{ $t('scheduler.bulkDraft.topicsHint') }}</p>
+                </div>
+
+                <!-- Tone -->
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">{{ $t('scheduler.bulkDraft.toneLabel') }}</label>
+                  <select
+                    v-model="bulkTone"
+                    :disabled="!!bulkBatchId"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                  >
+                    <option v-for="tone in BULK_TONES" :key="tone" :value="tone">
+                      {{ $t(`scheduler.bulkDraft.tones.${tone}`) }}
+                    </option>
+                  </select>
+                </div>
+
+                <!-- Destinations -->
+                <div>
+                  <label class="block text-xs text-gray-500 mb-2">{{ $t('scheduler.bulkDraft.destinationsLabel') }}</label>
+                  <div v-if="bulkDestinations.length" class="flex flex-wrap gap-2">
+                    <button
+                      v-for="dest in bulkDestinations"
+                      :key="dest.key"
+                      @click="!bulkBatchId && toggleBulkDest(dest.key)"
+                      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                      :class="dest.selected
+                        ? 'border-transparent text-white'
+                        : 'border-gray-700 text-gray-400 bg-gray-800 hover:border-gray-600'"
+                      :style="dest.selected ? { backgroundColor: dest.color, borderColor: dest.color } : {}"
+                    >
+                      <img v-if="dest.picture" :src="dest.picture" class="w-3.5 h-3.5 rounded-full object-cover" />
+                      {{ dest.label }}
+                    </button>
+                  </div>
+                  <p v-else class="text-xs text-gray-600">{{ $t('scheduler.bulkDraft.noDestinations') }}</p>
+                </div>
+
+                <!-- Progress -->
+                <div v-if="bulkProgress" class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                  <div class="flex items-center justify-between mb-2">
+                    <p class="text-sm font-medium text-gray-200">{{ $t('scheduler.bulkDraft.progress') }}</p>
+                    <span class="text-xs text-gray-400">{{ bulkProgress.processed }} / {{ bulkProgress.total }}</span>
+                  </div>
+                  <div class="w-full h-2 bg-gray-700 rounded-full overflow-hidden mb-3">
+                    <div
+                      class="h-full rounded-full transition-all duration-500"
+                      :class="bulkProgress.status === 'done' ? 'bg-green-500' : bulkProgress.status === 'failed' ? 'bg-red-500' : 'bg-violet-500 animate-pulse'"
+                      :style="{ width: `${bulkProgress.total ? Math.round((bulkProgress.processed / bulkProgress.total) * 100) : 0}%` }"
+                    />
+                  </div>
+                  <p class="text-xs">
+                    <span v-if="bulkProgress.status === 'done'" class="text-green-400">
+                      {{ $t('scheduler.bulkDraft.statusDone', { completed: bulkProgress.completed, failed: bulkProgress.failed }) }}
+                    </span>
+                    <span v-else-if="bulkProgress.status === 'failed'" class="text-red-400">
+                      {{ $t('scheduler.bulkDraft.statusFailed') }}
+                    </span>
+                    <span v-else class="text-gray-400">
+                      {{ $t('scheduler.bulkDraft.statusGenerating', { count: bulkProgress.total - bulkProgress.processed }) }}
+                    </span>
+                  </p>
+                </div>
+
+              </div>
+
+              <!-- Footer -->
+              <div class="flex-shrink-0 p-5 border-t border-gray-800 flex items-center justify-end gap-3">
+                <!-- While processing: allow dismissing to background -->
+                <template v-if="bulkBatchId && bulkProgress?.status === 'processing'">
+                  <button @click="closeBulkModal" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors">
+                    {{ $t('scheduler.bulkDraft.runInBackground') }}
+                  </button>
+                </template>
+                <!-- Done / failed / not started -->
+                <template v-else>
+                  <button
+                    v-if="bulkProgress?.status === 'done'"
+                    @click="resetBulkModal"
+                    class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    {{ $t('scheduler.bulkDraft.generateMore') }}
+                  </button>
+                  <button
+                    v-if="bulkProgress?.status === 'done'"
+                    @click="closeBulkModal"
+                    class="px-4 py-2 bg-violet-600 hover:bg-violet-700 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    {{ $t('scheduler.bulkDraft.viewDrafts') }}
+                  </button>
+                  <button
+                    v-if="!bulkBatchId || bulkProgress?.status === 'failed'"
+                    @click="submitBulkDraft"
+                    :disabled="bulkLoading || !bulkTopics.trim()"
+                    class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    {{ bulkLoading ? $t('scheduler.bulkDraft.generating') : $t('scheduler.bulkDraft.generate') }}
+                  </button>
+                </template>
+              </div>
+
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
+
     </template>
 
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import dayjs from 'dayjs'
-import { PLATFORM_META } from '../stores/platforms'
+import { PLATFORM_META, usePlatformsStore } from '../stores/platforms'
+import { useComposeStore, type Destination } from '../stores/compose'
 
 const { t, tm } = useI18n()
+const platformsStore = usePlatformsStore()
+const composeStore = useComposeStore()
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -565,6 +730,94 @@ function statusClass(status: string) {
   } as Record<string, string>)[status] ?? 'bg-gray-800 text-gray-400'
 }
 
+// ── Bulk draft ─────────────────────────────────────────────────────────────────
+
+interface BulkProgress {
+  total: number; completed: number; failed: number; status: string; processed: number
+}
+
+const BULK_TONES = ['professional', 'casual', 'engaging', 'informative', 'humorous', 'inspirational']
+
+const showBulkModal = ref(false)
+const bulkTopics = ref('')
+const bulkTone = ref('engaging')
+const bulkLoading = ref(false)
+const bulkBatchId = ref<string | null>(null)
+const bulkProgress = ref<BulkProgress | null>(null)
+const bulkDestinations = ref<Destination[]>([])
+
+let bulkPollTimer: ReturnType<typeof setInterval> | null = null
+
+async function openBulkModal() {
+  showBulkModal.value = true
+  bulkBatchId.value = null
+  bulkProgress.value = null
+  bulkTopics.value = ''
+  bulkTone.value = 'engaging'
+  await platformsStore.fetchMetaConnections()
+  composeStore.initDestinations()
+  composeStore.destinations.forEach((d) => { d.selected = false })
+  bulkDestinations.value = composeStore.destinations
+}
+
+function toggleBulkDest(key: string) {
+  const dest = bulkDestinations.value.find((d) => d.key === key)
+  if (dest) dest.selected = !dest.selected
+}
+
+function closeBulkModal() {
+  showBulkModal.value = false
+  stopBulkPoll()
+}
+
+function resetBulkModal() {
+  bulkBatchId.value = null
+  bulkProgress.value = null
+  bulkTopics.value = ''
+  bulkDestinations.value.forEach((d) => { d.selected = false })
+}
+
+function stopBulkPoll() {
+  if (bulkPollTimer !== null) {
+    clearInterval(bulkPollTimer)
+    bulkPollTimer = null
+  }
+}
+
+async function pollBulkProgress() {
+  if (!bulkBatchId.value) return
+  try {
+    const res = await axios.get(`/api/ai/bulk-draft/${bulkBatchId.value}`)
+    bulkProgress.value = res.data
+    if (res.data.status === 'done' || res.data.status === 'failed') {
+      stopBulkPoll()
+      await fetchDrafts()
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function submitBulkDraft() {
+  const topics = bulkTopics.value.split('\n').map((t) => t.trim()).filter(Boolean)
+  if (!topics.length) return
+  bulkLoading.value = true
+  try {
+    const res = await axios.post('/api/ai/bulk-draft', {
+      topics,
+      destinations: bulkDestinations.value,
+      tone: bulkTone.value,
+    })
+    bulkBatchId.value = res.data.batchId
+    bulkProgress.value = { total: topics.length, completed: 0, failed: 0, status: 'processing', processed: 0 }
+    bulkPollTimer = setInterval(pollBulkProgress, 2000)
+  } catch (err) {
+    console.error(err)
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
 // ── Watchers & lifecycle ───────────────────────────────────────────────────────
 
 watch(activeStatus, fetchJobs)
@@ -577,5 +830,9 @@ onMounted(() => {
   fetchJobs()
   fetchDrafts()
   fetchCalendarJobs()
+})
+
+onUnmounted(() => {
+  stopBulkPoll()
 })
 </script>

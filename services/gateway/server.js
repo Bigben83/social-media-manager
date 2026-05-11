@@ -758,6 +758,125 @@ app.post('/ai/stream', async (request, reply) => {
   }
 });
 
+// ─── Bulk AI Draft Generation ─────────────────────────────────────────────────
+
+// POST /ai/bulk-draft — kick off a batch; returns batchId immediately (non-blocking)
+// Body: { topics: string[], destinations: Destination[], tone?: string, model?: string }
+app.post('/ai/bulk-draft', async (request, reply) => {
+  const { topics, destinations = [], tone = '', model: reqModel } = request.body || {};
+  if (!Array.isArray(topics) || !topics.length) return reply.code(400).send({ error: 'topics array is required' });
+
+  const filteredTopics = topics.map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean);
+  if (!filteredTopics.length) return reply.code(400).send({ error: 'No valid topics provided' });
+
+  const db = await getDb();
+  const batchId = new ObjectId();
+  const now = new Date();
+
+  await db.collection('bulk_draft_batches').insertOne({
+    _id: batchId,
+    total: filteredTopics.length,
+    completed: 0,
+    failed: 0,
+    status: 'processing',
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const selectedDests = destinations.filter((d) => d.selected);
+  const toneClause = tone ? `Write in a ${tone} tone.` : '';
+  const system = `You are a social media content writer. Create engaging, concise posts that perform well. ${toneClause} Write only the post text with relevant hashtags. No explanations or preamble.`;
+
+  // Fire-and-forget — process topics sequentially in the background
+  (async () => {
+    const pconf = await getActiveProviderConfig();
+    const model = reqModel || pconf.model;
+
+    for (const topic of filteredTopics) {
+      try {
+        const prompt = `Write a social media post about: ${topic}`;
+        let content = '';
+
+        if (pconf.provider === 'ollama') {
+          const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
+          content = res.data.response || '';
+        } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+          if (!pconf.apiKey) throw new Error(`${pconf.provider} API key not configured`);
+          const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+            model, messages: buildOpenAIMessages(prompt, system), stream: false,
+          }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
+          content = res.data.choices[0]?.message?.content || '';
+        } else if (pconf.provider === 'gemini') {
+          if (!pconf.apiKey) throw new Error('Gemini API key not configured');
+          const res = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+            { contents: buildGeminiContents(prompt, system) },
+            { timeout: 90000 },
+          );
+          content = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        }
+
+        if (content.trim()) {
+          const draftNow = new Date();
+          await db.collection('drafts').insertOne({
+            content: content.trim(),
+            mediaUrl: '',
+            scheduledAt: '',
+            destinations: selectedDests,
+            batchId: batchId.toString(),
+            topic,
+            createdAt: draftNow,
+            updatedAt: draftNow,
+          });
+        }
+
+        await db.collection('bulk_draft_batches').updateOne(
+          { _id: batchId },
+          { $inc: { completed: 1 }, $set: { updatedAt: new Date() } },
+        );
+      } catch (err) {
+        log.error({ action: 'bulk_draft_topic', topic, outcome: 'failure', err: err.message });
+        await db.collection('bulk_draft_batches').updateOne(
+          { _id: batchId },
+          { $inc: { failed: 1 }, $set: { updatedAt: new Date() } },
+        );
+      }
+    }
+
+    await db.collection('bulk_draft_batches').updateOne(
+      { _id: batchId },
+      { $set: { status: 'done', updatedAt: new Date() } },
+    );
+    log.info({ action: 'bulk_draft_batch', batchId: batchId.toString(), total: filteredTopics.length, outcome: 'success' });
+  })().catch((err) => {
+    log.error({ action: 'bulk_draft_batch', batchId: batchId.toString(), outcome: 'failure', err: err.message });
+    getDb().then((d) => d.collection('bulk_draft_batches').updateOne(
+      { _id: batchId },
+      { $set: { status: 'failed', updatedAt: new Date() } },
+    )).catch(() => {});
+  });
+
+  return reply.code(202).send({ batchId: batchId.toString() });
+});
+
+// GET /ai/bulk-draft/:batchId — poll batch progress
+app.get('/ai/bulk-draft/:batchId', async (request, reply) => {
+  const { batchId } = request.params;
+  let oid;
+  try { oid = new ObjectId(batchId); } catch { return reply.code(400).send({ error: 'Invalid batchId' }); }
+  const db = await getDb();
+  const batch = await db.collection('bulk_draft_batches').findOne({ _id: oid });
+  if (!batch) return reply.code(404).send({ error: 'Batch not found' });
+  return {
+    batchId: batch._id.toString(),
+    total: batch.total,
+    completed: batch.completed,
+    failed: batch.failed,
+    status: batch.status,
+    processed: batch.completed + batch.failed,
+  };
+});
+
 // ─── Platform service URLs ────────────────────────────────────────────────────
 
 const PLATFORM_SERVICES = {
