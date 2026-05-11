@@ -95,6 +95,15 @@ export default {
     cancel: 'Cancel',
     delete: 'Delete',
     deleting: 'Deleting…',
+
+    allFiles: 'All Files',
+    unorganized: 'Unorganized',
+    accounts: 'Accounts',
+    folders: 'Folders',
+    newFolder: 'New Folder',
+    folderNamePlaceholder: 'Folder name…',
+    moveToFolder: 'Move to folder',
+    removeFolderAssign: 'Remove from folder',
   },
 
   dashboard: {

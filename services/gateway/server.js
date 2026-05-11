@@ -62,6 +62,7 @@ async function deleteCredentials(id) {
 // ─── Media Upload & Library ───────────────────────────────────────────────────
 
 app.post('/upload', async (request, reply) => {
+  const folder = request.query.folder || null;
   const data = await request.file();
   if (!data) return reply.code(400).send({ error: 'No file provided' });
 
@@ -88,6 +89,7 @@ app.post('/upload', async (request, reply) => {
     url: `/media/${filename}`,
     mimetype: data.mimetype,
     size: stat.size,
+    folder: folder || null,
     uploadedAt: new Date(),
   };
 
@@ -98,14 +100,79 @@ app.post('/upload', async (request, reply) => {
     app.log.error({ action: 'media_metadata_save', outcome: 'failure', err: err.message });
   }
 
-  return { url: record.url, filename, originalName: data.filename, mimetype: data.mimetype, size: stat.size };
+  return { url: record.url, filename, originalName: data.filename, mimetype: data.mimetype, size: stat.size, folder: record.folder };
 });
 
-// List all uploaded media files, newest first
-app.get('/media-library', async () => {
+// List uploaded media files, newest first; optionally filter by folder
+// folder=__none__ → unorganized (null/missing); folder=<name> → that folder; omit → all
+app.get('/media-library', async (request) => {
   const db = await getDb();
-  const files = await db.collection('media_files').find({}).sort({ uploadedAt: -1 }).toArray();
+  const { folder } = request.query;
+  const query = {};
+  if (folder === '__none__') {
+    query.$or = [{ folder: { $exists: false } }, { folder: null }, { folder: '' }];
+  } else if (folder) {
+    query.folder = folder;
+  }
+  const files = await db.collection('media_files').find(query).sort({ uploadedAt: -1 }).toArray();
   return { files };
+});
+
+// List custom folders with per-folder file counts
+app.get('/media-folders', async () => {
+  const db = await getDb();
+  const [folders, counts] = await Promise.all([
+    db.collection('media_folders').find({}).sort({ createdAt: 1 }).toArray(),
+    db.collection('media_files').aggregate([
+      { $group: { _id: { $ifNull: ['$folder', '__none__'] }, count: { $sum: 1 } } },
+    ]).toArray(),
+  ]);
+  const countMap = Object.fromEntries(counts.map((c) => [c._id, c.count]));
+  const total = counts.reduce((s, c) => s + c.count, 0);
+  return {
+    folders: folders.map((f) => ({ name: f.name, count: countMap[f.name] || 0 })),
+    totalCount: total,
+    unorganizedCount: countMap['__none__'] || 0,
+    folderCounts: countMap,
+  };
+});
+
+// Create a custom folder
+app.post('/media-folders', async (request, reply) => {
+  const { name } = request.body || {};
+  if (!name?.trim()) return reply.code(400).send({ error: 'Folder name is required' });
+  const trimmed = name.trim();
+  const db = await getDb();
+  if (await db.collection('media_folders').findOne({ name: trimmed })) {
+    return reply.code(409).send({ error: 'Folder already exists' });
+  }
+  await db.collection('media_folders').insertOne({ name: trimmed, createdAt: new Date() });
+  return { name: trimmed };
+});
+
+// Delete a custom folder; files in it become unorganized
+app.delete('/media-folders/:name', async (request, reply) => {
+  const name = decodeURIComponent(request.params.name);
+  const db = await getDb();
+  await db.collection('media_folders').deleteOne({ name });
+  await db.collection('media_files').updateMany({ folder: name }, { $set: { folder: null } });
+  return { success: true };
+});
+
+// Update a file's folder assignment
+app.patch('/media/:filename', async (request, reply) => {
+  const { filename } = request.params;
+  if (!filename || filename.includes('/') || filename.includes('..') || filename.includes('\0')) {
+    return reply.code(400).send({ error: 'Invalid filename' });
+  }
+  const { folder } = request.body || {};
+  const db = await getDb();
+  const result = await db.collection('media_files').updateOne(
+    { filename },
+    { $set: { folder: folder || null } },
+  );
+  if (!result.matchedCount) return reply.code(404).send({ error: 'File not found' });
+  return { success: true };
 });
 
 // Delete a media file from disk and database

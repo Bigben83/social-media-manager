@@ -95,6 +95,15 @@ export default {
     cancel: 'İptal',
     delete: 'Sil',
     deleting: 'Siliniyor…',
+
+    allFiles: 'Tüm Dosyalar',
+    unorganized: 'Düzenlenmemiş',
+    accounts: 'Hesaplar',
+    folders: 'Klasörler',
+    newFolder: 'Yeni Klasör',
+    folderNamePlaceholder: 'Klasör adı…',
+    moveToFolder: 'Klasöre taşı',
+    removeFolderAssign: 'Klasörden çıkar',
   },
 
   dashboard: {
