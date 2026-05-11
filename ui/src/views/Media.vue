@@ -183,12 +183,19 @@
                 loading="lazy"
               />
 
-              <!-- Video placeholder -->
-              <div v-else class="w-full h-full flex flex-col items-center justify-center gap-2 bg-gray-800">
-                <svg class="w-8 h-8 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.882v6.236a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span class="text-xs text-gray-500 px-2 text-center truncate w-full">{{ file.originalName }}</span>
+              <!-- Video thumbnail -->
+              <div v-else class="relative w-full h-full bg-gray-800">
+                <video
+                  :src="file.url"
+                  class="w-full h-full object-cover"
+                  preload="metadata"
+                  muted
+                  playsinline
+                  @loadedmetadata="seekVideoToThumbnail"
+                />
+                <div class="absolute inset-0 flex items-end justify-start p-1.5 pointer-events-none">
+                  <span class="bg-black/60 rounded px-1 py-0.5 text-xs text-gray-300 leading-none">▶</span>
+                </div>
               </div>
 
               <!-- Hover overlay -->
@@ -352,18 +359,39 @@ const newFolderInputRef = ref<HTMLInputElement | null>(null)
 
 const movingFileId = ref<string | null>(null)
 
+// Profile map: accountKey → businessName (used to group accounts under one folder)
+const profileMap = ref<Record<string, string>>({})
+
+async function fetchProfiles() {
+  try {
+    const res = await axios.get('/api/profiles')
+    const map: Record<string, string> = {}
+    for (const p of res.data as Array<{ _id: string; businessName?: string }>) {
+      if (p.businessName?.trim()) map[p._id] = p.businessName.trim()
+    }
+    profileMap.value = map
+  } catch { }
+}
+
 const accountFolders = computed<AccountFolder[]>(() => {
-  const result: AccountFolder[] = []
   const { connectedPages, connectedIgAccounts, connectedPinterestBoards } = platformsStore
+  // Use a Map keyed by folder label to deduplicate accounts with the same business name
+  const seen = new Map<string, AccountFolder>()
+
+  function add(platformKey: string, fallbackLabel: string) {
+    const label = profileMap.value[platformKey] || fallbackLabel
+    if (!seen.has(label)) seen.set(label, { key: label, label })
+  }
 
   for (const page of connectedPages) {
-    result.push({ key: `facebook:${page.id}`, label: `Facebook: ${page.name}` })
+    add(`facebook:${page.id}`, page.name)
   }
   for (const acc of connectedIgAccounts) {
-    result.push({ key: `instagram:${acc.id}`, label: `Instagram: @${acc.username}` })
+    add(`instagram:${acc.id}`, acc.username)
   }
-  for (const board of connectedPinterestBoards) {
-    result.push({ key: `pinterest:${board.id}`, label: `Pinterest: ${board.name}` })
+  if (connectedPinterestBoards.length > 0) {
+    // All boards belong to one Pinterest account — one folder entry
+    add('pinterest', 'Pinterest')
   }
 
   const standardPlatforms = [
@@ -376,23 +404,19 @@ const accountFolders = computed<AccountFolder[]>(() => {
   ]
   for (const p of standardPlatforms) {
     const status = platformsStore.statuses.find((s) => s.platform === p.key)
-    if (status?.connected) {
-      result.push({ key: p.key, label: p.label })
-    }
+    if (status?.connected) add(p.key, p.label)
   }
 
-  return result
+  return Array.from(seen.values())
 })
 
 function folderLabel(key: string): string {
-  const af = accountFolders.value.find((a) => a.key === key)
-  if (af) return af.label
-  return key
+  return accountFolders.value.find((a) => a.key === key)?.label ?? key
 }
 
 onMounted(async () => {
   await platformsStore.fetchMetaConnections()
-  await Promise.all([fetchFolders(), fetchLibrary()])
+  await Promise.all([fetchProfiles(), fetchFolders(), fetchLibrary()])
 })
 
 async function fetchFolders() {
@@ -547,6 +571,13 @@ function useInPost(url: string) {
 
 function isImage(mimetype: string) {
   return mimetype.startsWith('image/')
+}
+
+function seekVideoToThumbnail(event: Event) {
+  const video = event.target as HTMLVideoElement
+  if (video.duration > 0) {
+    video.currentTime = Math.min(0.5, video.duration * 0.25)
+  }
 }
 
 function formatSize(bytes: number): string {
