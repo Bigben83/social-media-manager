@@ -1937,4 +1937,220 @@ app.get('/analytics/posts', async (request) => {
   return { posts: normalised, total: schedTotal + immTotal };
 });
 
+// ─── Hashtag Groups ───────────────────────────────────────────────────────────
+
+app.get('/hashtag-groups', async () => {
+  const db = await getDb();
+  const groups = await db.collection('hashtag_groups').find({}).sort({ name: 1 }).toArray();
+  return { groups };
+});
+
+app.post('/hashtag-groups', async (request, reply) => {
+  const { name, hashtags } = request.body || {};
+  if (!name?.trim()) return reply.code(400).send({ error: 'name is required' });
+  const tags = (hashtags || []).map((t) => (t.startsWith('#') ? t : `#${t}`).toLowerCase()).filter(Boolean);
+  const db = await getDb();
+  const result = await db.collection('hashtag_groups').insertOne({
+    name: name.trim(),
+    hashtags: [...new Set(tags)],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  return { success: true, _id: result.insertedId };
+});
+
+app.put('/hashtag-groups/:id', async (request, reply) => {
+  const { id } = request.params;
+  const { name, hashtags } = request.body || {};
+  const update = { updatedAt: new Date() };
+  if (name?.trim()) update.name = name.trim();
+  if (hashtags) {
+    const tags = hashtags.map((t) => (t.startsWith('#') ? t : `#${t}`).toLowerCase()).filter(Boolean);
+    update.hashtags = [...new Set(tags)];
+  }
+  const db = await getDb();
+  let oid;
+  try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
+  await db.collection('hashtag_groups').updateOne({ _id: oid }, { $set: update });
+  return { success: true };
+});
+
+app.delete('/hashtag-groups/:id', async (request, reply) => {
+  const { id } = request.params;
+  const db = await getDb();
+  let oid;
+  try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
+  await db.collection('hashtag_groups').deleteOne({ _id: oid });
+  return { success: true };
+});
+
+// ─── Hashtag Stats & Scraper ──────────────────────────────────────────────────
+
+const HASHTAG_RE = /#([a-zA-Z]\w*)/g;
+
+function extractHashtags(text) {
+  if (!text) return [];
+  const tags = [];
+  let m;
+  HASHTAG_RE.lastIndex = 0;
+  while ((m = HASHTAG_RE.exec(text)) !== null) tags.push(`#${m[1].toLowerCase()}`);
+  return tags;
+}
+
+function gradeHashtag(count, avgEngagement) {
+  if (count >= 5 && avgEngagement >= 10) return 'A';
+  if (count >= 3 && avgEngagement >= 3)  return 'B';
+  if (count >= 2)                         return 'C';
+  return 'D';
+}
+
+app.post('/hashtags/scrape', async () => {
+  const db = await getDb();
+
+  // Collect hashtag → { count, totalEngagement, platforms }
+  const tagMap = {};
+
+  function touch(tag, platform, engagement) {
+    if (!tagMap[tag]) tagMap[tag] = { count: 0, totalEngagement: 0, platforms: new Set() };
+    tagMap[tag].count++;
+    tagMap[tag].totalEngagement += engagement;
+    tagMap[tag].platforms.add(platform);
+  }
+
+  // Scan published posts
+  const posts = await db.collection('posts').find({}, { projection: { content: 1, destinations: 1, platformResults: 1 } }).toArray();
+  const postMetrics = await db.collection('post_metrics').find({}).toArray();
+
+  // Build engagement lookup keyed by content fingerprint (first 100 chars)
+  const metricsByContent = {};
+  for (const m of postMetrics) {
+    if (m.content) {
+      const key = m.content.slice(0, 100).toLowerCase().trim();
+      metricsByContent[key] = (metricsByContent[key] || 0) + m.metrics.engagementTotal;
+    }
+  }
+
+  for (const post of posts) {
+    const tags = extractHashtags(post.content || '');
+    const engagement = post.content
+      ? (metricsByContent[post.content.slice(0, 100).toLowerCase().trim()] || 0)
+      : 0;
+    const platforms = (post.destinations || []).map((d) => d.platform);
+    for (const tag of tags) {
+      for (const platform of platforms.length ? platforms : ['unknown']) {
+        touch(tag, platform, engagement / Math.max(tags.length, 1));
+      }
+    }
+  }
+
+  // Also scan feed items
+  const feeds = await db.collection('feeds').find({}, { projection: { content: 1, platform: 1, metrics: 1 } }).toArray();
+  for (const item of feeds) {
+    const tags = extractHashtags(item.content || '');
+    const engagement = (item.metrics?.likes || 0) + (item.metrics?.comments || 0) + (item.metrics?.shares || 0);
+    for (const tag of tags) {
+      touch(tag, item.platform || 'unknown', engagement / Math.max(tags.length, 1));
+    }
+  }
+
+  // Upsert hashtag_stats
+  let scraped = 0;
+  for (const [tag, data] of Object.entries(tagMap)) {
+    const avgEngagement = data.count > 0 ? data.totalEngagement / data.count : 0;
+    await db.collection('hashtag_stats').updateOne(
+      { _id: tag },
+      {
+        $set: {
+          count: data.count,
+          avgEngagement: Math.round(avgEngagement * 10) / 10,
+          grade: gradeHashtag(data.count, avgEngagement),
+          platforms: [...data.platforms],
+          lastScraped: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+    scraped++;
+  }
+
+  app.log.info({ action: 'hashtag_scrape', outcome: 'success', scraped });
+  return { success: true, scraped };
+});
+
+app.get('/hashtags/stats', async (request) => {
+  const sortBy = request.query.sort || 'count';
+  const db = await getDb();
+  const sortField = sortBy === 'engagement' ? 'avgEngagement' : 'count';
+  const stats = await db.collection('hashtag_stats')
+    .find({})
+    .sort({ [sortField]: -1 })
+    .limit(200)
+    .toArray();
+  return { stats };
+});
+
+app.post('/hashtags/ai-suggest', async (request, reply) => {
+  const { accountKey, topTags = [], count = 20 } = request.body || {};
+
+  let profileCtx = '';
+  if (accountKey) {
+    try {
+      const db = await getDb();
+      const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+      if (profile) {
+        const parts = [];
+        if (profile.businessName)   parts.push(`Business: ${profile.businessName}`);
+        if (profile.description)    parts.push(`Description: ${profile.description}`);
+        if (profile.industry)       parts.push(`Industry: ${profile.industry}`);
+        if (profile.targetAudience) parts.push(`Target audience: ${profile.targetAudience}`);
+        if (profile.keywords)       parts.push(`Existing keywords: ${profile.keywords}`);
+        if (profile.hashtags)       parts.push(`Current hashtags: ${profile.hashtags}`);
+        profileCtx = parts.join('\n');
+      }
+    } catch (_) {}
+  }
+
+  const topTagList = topTags.slice(0, 15).map((t) => t._id || t).join(', ');
+
+  const system = 'You are a social media hashtag strategist. Return ONLY hashtags, space-separated, no explanations.';
+  const prompt = [
+    `Suggest ${count} high-performing hashtags for a social media account.`,
+    profileCtx ? `\nACCOUNT CONTEXT:\n${profileCtx}` : '',
+    topTagList ? `\nCURRENT TOP HASHTAGS (by usage):\n${topTagList}` : '',
+    `\nReturn exactly ${count} unique hashtags as a space-separated list. Mix popular and niche tags. Include a variety of sizes (broad, medium, niche). Example: #photography #naturephotography #landscapephoto`,
+  ].filter(Boolean).join('');
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 60000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 60000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 60000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    const tags = [...new Set((text.match(/#[a-zA-Z]\w*/g) || []).map((t) => t.toLowerCase()))].slice(0, count);
+    return { success: true, hashtags: tags };
+  } catch (err) {
+    return reply.code(503).send({ error: 'AI suggestion failed', detail: err.message });
+  }
+});
+
 module.exports = app;

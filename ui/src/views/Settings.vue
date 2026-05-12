@@ -743,6 +743,258 @@
       </div>
 
       <!-- ═══════════════════════════════════════════════════════════════════
+           HASHTAG GROUPS
+      ════════════════════════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+        <!-- Header -->
+        <div class="p-5 border-b border-gray-800 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-emerald-700 flex items-center justify-center text-white font-bold text-base shrink-0">#</div>
+            <div>
+              <p class="font-semibold">{{ $t('settings.hashtags.sectionTitle') }}</p>
+              <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.hashtags.sectionSubtitle') }}</p>
+            </div>
+          </div>
+          <button
+            @click="showHashtagStats = !showHashtagStats; showHashtagStats && hashtagStore.stats.length === 0 && hashtagStore.fetchStats()"
+            class="text-xs px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors"
+          >
+            {{ showHashtagStats ? $t('settings.hashtags.hideStats') : $t('settings.hashtags.showStats') }}
+          </button>
+        </div>
+
+        <div class="p-5 space-y-4">
+
+          <!-- Group list -->
+          <div v-if="hashtagStore.groups.length" class="space-y-3">
+            <div
+              v-for="group in hashtagStore.groups"
+              :key="group._id"
+              class="border border-gray-800 rounded-xl p-4"
+            >
+              <!-- View mode -->
+              <template v-if="editingGroupId !== group._id">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-gray-200">{{ group.name }}</p>
+                    <div class="flex flex-wrap gap-1 mt-2">
+                      <span
+                        v-for="tag in group.hashtags"
+                        :key="tag"
+                        class="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700"
+                      >{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div class="flex gap-1.5 shrink-0">
+                    <button
+                      @click="startEditGroup(group)"
+                      class="text-xs px-2.5 py-1 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors"
+                    >{{ $t('settings.hashtags.edit') }}</button>
+                    <button
+                      @click="handleDeleteGroup(group._id)"
+                      class="text-xs px-2.5 py-1 rounded-lg border border-red-900/60 text-red-400 hover:bg-red-900/20 transition-colors"
+                    >{{ $t('settings.hashtags.delete') }}</button>
+                  </div>
+                </div>
+              </template>
+              <!-- Edit mode -->
+              <template v-else>
+                <div class="space-y-2">
+                  <input
+                    v-model="editGroupName"
+                    :placeholder="$t('settings.hashtags.groupNamePlaceholder')"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500"
+                  />
+                  <textarea
+                    v-model="editGroupHashtags"
+                    :placeholder="$t('settings.hashtags.hashtagsPlaceholder')"
+                    rows="3"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 resize-none focus:outline-none focus:border-emerald-500"
+                  ></textarea>
+                  <div class="flex gap-2">
+                    <button
+                      @click="saveEditGroup(group._id)"
+                      class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm font-medium text-white transition-colors"
+                    >{{ $t('settings.hashtags.save') }}</button>
+                    <button
+                      @click="editingGroupId = ''"
+                      class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300 transition-colors"
+                    >{{ $t('settings.hashtags.cancel') }}</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <p v-else-if="!hashtagStore.groupsLoading" class="text-sm text-gray-600 text-center py-2">
+            {{ $t('settings.hashtags.noGroups') }}
+          </p>
+
+          <!-- Add new group form -->
+          <div v-if="addingHashtagGroup" class="border border-emerald-900/40 bg-emerald-950/20 rounded-xl p-4 space-y-2">
+            <input
+              v-model="newGroupName"
+              :placeholder="$t('settings.hashtags.groupNamePlaceholder')"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500"
+            />
+            <textarea
+              v-model="newGroupHashtags"
+              :placeholder="$t('settings.hashtags.hashtagsPlaceholder')"
+              rows="4"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 resize-none focus:outline-none focus:border-emerald-500"
+            ></textarea>
+            <div class="flex gap-2">
+              <button
+                @click="handleCreateGroup"
+                :disabled="!newGroupName.trim()"
+                class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
+              >{{ $t('settings.hashtags.createGroup') }}</button>
+              <button
+                @click="addingHashtagGroup = false"
+                class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300 transition-colors"
+              >{{ $t('settings.hashtags.cancel') }}</button>
+            </div>
+          </div>
+
+          <button
+            v-if="!addingHashtagGroup"
+            @click="addingHashtagGroup = true"
+            class="text-sm text-emerald-400 hover:text-emerald-300 transition-colors"
+          >+ {{ $t('settings.hashtags.addGroup') }}</button>
+
+          <!-- Stats panel -->
+          <div v-if="showHashtagStats" class="border-t border-gray-800 pt-4 space-y-4">
+
+            <!-- Controls row -->
+            <div class="flex items-center flex-wrap gap-2">
+              <p class="text-sm font-semibold text-gray-300 mr-2">{{ $t('settings.hashtags.statsTitle') }}</p>
+
+              <button
+                @click="statsSort = 'count'; hashtagStore.fetchStats('count')"
+                class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
+                :class="statsSort === 'count' ? 'border-emerald-600 text-emerald-300 bg-emerald-900/20' : 'border-gray-700 text-gray-400 hover:bg-gray-800'"
+              >{{ $t('settings.hashtags.sortByUsage') }}</button>
+
+              <button
+                @click="statsSort = 'engagement'; hashtagStore.fetchStats('engagement')"
+                class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
+                :class="statsSort === 'engagement' ? 'border-emerald-600 text-emerald-300 bg-emerald-900/20' : 'border-gray-700 text-gray-400 hover:bg-gray-800'"
+              >{{ $t('settings.hashtags.sortByEngagement') }}</button>
+
+              <button
+                @click="scrapeHashtagsNow"
+                :disabled="hashtagStore.scraping"
+                class="ml-auto text-xs px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              >
+                <svg v-if="hashtagStore.scraping" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                {{ hashtagStore.scraping ? $t('settings.hashtags.scanning') : $t('settings.hashtags.scanPosts') }}
+              </button>
+            </div>
+
+            <!-- AI Suggest row -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <select
+                v-model="aiSuggestAccount"
+                class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-violet-500 flex-1 min-w-0"
+              >
+                <option value="">{{ $t('settings.hashtags.allAccounts') }}</option>
+                <option v-for="acc in allConnectedAccounts" :key="acc.key" :value="acc.key">{{ acc.label }}</option>
+              </select>
+              <button
+                @click="handleAiSuggest"
+                :disabled="hashtagStore.aiSuggesting"
+                class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-violet-700/60 text-violet-300 hover:bg-violet-900/30 disabled:opacity-50 transition-colors shrink-0"
+              >
+                <svg v-if="hashtagStore.aiSuggesting" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                <span v-if="!hashtagStore.aiSuggesting">✨</span>
+                {{ hashtagStore.aiSuggesting ? $t('settings.hashtags.suggesting') : $t('settings.hashtags.aiSuggest') }}
+              </button>
+            </div>
+
+            <!-- AI suggestions chips -->
+            <div v-if="hashtagStore.aiSuggestions.length" class="space-y-3">
+              <p class="text-xs text-gray-500">{{ $t('settings.hashtags.selectToGroup') }}</p>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="tag in hashtagStore.aiSuggestions"
+                  :key="tag"
+                  @click="toggleAiTag(tag)"
+                  class="text-xs px-2.5 py-0.5 rounded-full border transition-colors"
+                  :class="selectedAiTags.has(tag)
+                    ? 'bg-emerald-800 border-emerald-600 text-white'
+                    : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300'"
+                >{{ tag }}</button>
+              </div>
+              <div v-if="selectedAiTags.size" class="flex gap-2">
+                <input
+                  v-model="aiGroupName"
+                  :placeholder="$t('settings.hashtags.groupNamePlaceholder')"
+                  class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500 min-w-0"
+                />
+                <button
+                  @click="createGroupFromAi"
+                  :disabled="!aiGroupName.trim()"
+                  class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
+                >{{ $t('settings.hashtags.createGroup') }}</button>
+              </div>
+            </div>
+
+            <!-- Stats table -->
+            <div v-if="hashtagStore.statsLoading" class="text-center py-4 text-sm text-gray-600">
+              {{ $t('settings.hashtags.loadingStats') }}
+            </div>
+            <div v-else-if="hashtagStore.stats.length" class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="text-gray-500 border-b border-gray-800">
+                    <th class="text-left py-2 pr-4 font-medium">{{ $t('settings.hashtags.colHashtag') }}</th>
+                    <th class="text-right py-2 pr-4 font-medium">{{ $t('settings.hashtags.colUses') }}</th>
+                    <th class="text-right py-2 pr-4 font-medium">{{ $t('settings.hashtags.colEngagement') }}</th>
+                    <th class="text-center py-2 pr-4 font-medium">{{ $t('settings.hashtags.colGrade') }}</th>
+                    <th class="text-left py-2 font-medium">{{ $t('settings.hashtags.colPlatforms') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800/60">
+                  <tr
+                    v-for="stat in hashtagStore.stats.slice(0, 100)"
+                    :key="stat._id"
+                    class="hover:bg-gray-800/30 transition-colors"
+                  >
+                    <td class="py-1.5 pr-4 font-mono text-emerald-400">{{ stat._id }}</td>
+                    <td class="py-1.5 pr-4 text-right text-gray-300">{{ stat.count }}</td>
+                    <td class="py-1.5 pr-4 text-right text-gray-300">{{ stat.avgEngagement }}</td>
+                    <td class="py-1.5 pr-4 text-center">
+                      <span
+                        class="px-1.5 py-0.5 rounded text-xs font-bold"
+                        :class="{
+                          'bg-orange-900/50 text-orange-300': stat.grade === 'A',
+                          'bg-green-900/50 text-green-300':  stat.grade === 'B',
+                          'bg-blue-900/50 text-blue-300':    stat.grade === 'C',
+                          'bg-gray-800 text-gray-500':       stat.grade === 'D',
+                        }"
+                      >{{ gradeLabel(stat.grade) }}</span>
+                    </td>
+                    <td class="py-1.5 text-gray-500">{{ stat.platforms.join(', ') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="text-sm text-gray-600 text-center py-4">
+              {{ $t('settings.hashtags.noStats') }}
+            </p>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════════════
            AI INTEGRATION — Ollama configuration card
       ════════════════════════════════════════════════════════════════════ -->
       <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
@@ -974,6 +1226,7 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
 import { useAiStore, PROVIDER_MODELS } from '../stores/ai'
+import { useHashtagStore, type HashtagGroup } from '../stores/hashtags'
 import { COMMON_TIMEZONES } from '../utils/timezone'
 
 const { t } = useI18n()
@@ -981,6 +1234,7 @@ const { t } = useI18n()
 const route = useRoute()
 const platformsStore = usePlatformsStore()
 const aiStore = useAiStore()
+const hashtagStore = useHashtagStore()
 
 // ─── App credential form state ──────────────────────────────────────────────
 
@@ -1097,6 +1351,82 @@ function confirmTikTokDisconnect() {
   if (window.confirm(t('settings.tiktok.disconnectConfirm'))) {
     platformsStore.disconnectTikTok().then(loadMetaConnections)
   }
+}
+
+// ─── Hashtag Groups ──────────────────────────────────────────────────────────
+
+const addingHashtagGroup = ref(false)
+const newGroupName = ref('')
+const newGroupHashtags = ref('')
+const editingGroupId = ref('')
+const editGroupName = ref('')
+const editGroupHashtags = ref('')
+const showHashtagStats = ref(false)
+const statsSort = ref<'count' | 'engagement'>('count')
+const aiSuggestAccount = ref('')
+const selectedAiTags = ref(new Set<string>())
+const aiGroupName = ref('')
+
+function parseHashtagInput(raw: string): string[] {
+  return [...new Set(
+    raw.replace(/,/g, ' ').split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 1)
+  )]
+}
+
+function toggleAiTag(tag: string) {
+  const s = new Set(selectedAiTags.value)
+  if (s.has(tag)) s.delete(tag)
+  else s.add(tag)
+  selectedAiTags.value = s
+}
+
+async function handleCreateGroup() {
+  if (!newGroupName.value.trim()) return
+  const tags = parseHashtagInput(newGroupHashtags.value)
+  await hashtagStore.createGroup(newGroupName.value.trim(), tags)
+  newGroupName.value = ''
+  newGroupHashtags.value = ''
+  addingHashtagGroup.value = false
+}
+
+function startEditGroup(group: HashtagGroup) {
+  editingGroupId.value = group._id
+  editGroupName.value = group.name
+  editGroupHashtags.value = group.hashtags.join(' ')
+}
+
+async function saveEditGroup(id: string) {
+  const tags = parseHashtagInput(editGroupHashtags.value)
+  await hashtagStore.updateGroup(id, editGroupName.value.trim(), tags)
+  editingGroupId.value = ''
+}
+
+async function handleDeleteGroup(id: string) {
+  if (window.confirm(t('settings.hashtags.deleteConfirm'))) {
+    await hashtagStore.deleteGroup(id)
+  }
+}
+
+async function scrapeHashtagsNow() {
+  await hashtagStore.scrapeHashtags()
+  statsSort.value = 'count'
+}
+
+async function handleAiSuggest() {
+  await hashtagStore.aiSuggest(aiSuggestAccount.value || undefined)
+}
+
+async function createGroupFromAi() {
+  if (!aiGroupName.value.trim() || !selectedAiTags.value.size) return
+  await hashtagStore.createGroup(aiGroupName.value.trim(), [...selectedAiTags.value])
+  aiGroupName.value = ''
+  selectedAiTags.value = new Set()
+  hashtagStore.aiSuggestions.splice(0)
+}
+
+function gradeLabel(grade: string): string {
+  const map: Record<string, string> = { A: '🔥 A', B: '✅ B', C: '🔵 C', D: '⚪ D' }
+  return map[grade] || grade
 }
 
 // ─── Other platforms (not Meta) ──────────────────────────────────────────────
@@ -1369,6 +1699,7 @@ onMounted(async () => {
     platformsStore.fetchTokenExpiry(),
     aiStore.fetchConfig(),
     aiStore.fetchProviders(),
+    hashtagStore.fetchGroups(),
   ])
 
   // Seed board checkboxes from current selection

@@ -300,6 +300,26 @@
           </div>
         </div>
 
+        <!-- Hashtag Groups -->
+        <div
+          v-if="hashtagStore.groups.length"
+          class="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3"
+        >
+          <p class="text-xs text-gray-500 mb-2">{{ $t('compose.hashtagGroups') }}</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="group in hashtagStore.groups"
+              :key="group._id"
+              @click="insertHashtagGroup(group.hashtags)"
+              class="text-xs px-2.5 py-1 rounded-lg border border-emerald-700/60 text-emerald-300 hover:bg-emerald-900/30 transition-colors"
+              :title="group.hashtags.join(' ')"
+            >
+              # {{ group.name }}
+              <span class="text-emerald-600 ml-1">{{ group.hashtags.length }}</span>
+            </button>
+          </div>
+        </div>
+
         <!-- First Comment -->
         <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <button
@@ -438,6 +458,7 @@ import axios from 'axios'
 import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore } from '../stores/ai'
+import { useHashtagStore } from '../stores/hashtags'
 import PostPreview from '../components/compose/PostPreview.vue'
 import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr, utcToNaiveDatetimeString } from '../utils/timezone'
 
@@ -445,6 +466,7 @@ const { t } = useI18n()
 const composeStore = useComposeStore()
 const platformsStore = usePlatformsStore()
 const aiStore = useAiStore()
+const hashtagStore = useHashtagStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -464,6 +486,7 @@ onMounted(async () => {
     platformsStore.fetchStatuses(),
     platformsStore.fetchMetaConnections(),
     aiStore.fetchConfig(),
+    hashtagStore.fetchGroups(),
   ])
   composeStore.initDestinations()
 
@@ -855,6 +878,13 @@ function insertHashtag(tag: string) {
   if (contentHasTag(tag)) return
   const sep = composeStore.content.endsWith(' ') || !composeStore.content ? '' : ' '
   composeStore.content += `${sep}${tag}`
+}
+
+function insertHashtagGroup(hashtags: string[]) {
+  const toInsert = hashtags.filter((t) => !contentHasTag(t))
+  if (!toInsert.length) return
+  const sep = composeStore.content.endsWith(' ') || !composeStore.content ? '' : ' '
+  composeStore.content += `${sep}${toInsert.join(' ')}`
 }
 
 // Debounced watcher — triggers suggestion after 1.5 s of no typing
