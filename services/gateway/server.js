@@ -1325,15 +1325,140 @@ app.delete('/credentials/pinterest', async () => {
   return { success: true };
 });
 
+// ─── TikTok OAuth ─────────────────────────────────────────────────────────────
+
+const TIKTOK_AUTH_URL = 'https://www.tiktok.com/v2/auth/authorize/';
+const TIKTOK_TOKEN_URL = 'https://open.tiktokapis.com/v2/oauth/token/';
+const TIKTOK_API = 'https://open.tiktokapis.com/v2';
+
+app.post('/credentials/tiktok-app', async (request, reply) => {
+  const { clientKey, clientSecret } = request.body || {};
+  if (!clientKey || !clientSecret) return reply.code(400).send({ error: 'clientKey and clientSecret are required' });
+  await setCredentials('tiktok_app', { clientKey, clientSecret: encryptToken(clientSecret) });
+  log.info({ action: 'tiktok_app_save', outcome: 'success' });
+  return { success: true };
+});
+
+app.get('/credentials/tiktok-app', async () => {
+  const cred = await getCredentials('tiktok_app');
+  if (!cred?.clientKey) return { configured: false };
+  return { configured: true, clientKey: cred.clientKey, clientSecretHint: `****${decryptToken(cred.clientSecret).slice(-4)}` };
+});
+
+app.get('/auth/tiktok/init', async (request, reply) => {
+  const cred = await getCredentials('tiktok_app');
+  if (!cred?.clientKey) return reply.code(400).send({ error: 'Save your TikTok Client Key and Secret first' });
+
+  const codeVerifier = crypto.randomBytes(32).toString('base64url');
+  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+  const state = crypto.randomBytes(16).toString('hex');
+
+  // Persist PKCE verifier for the callback
+  const db = await getDb();
+  await db.collection('platform_credentials').updateOne(
+    { _id: 'tiktok_pkce' },
+    { $set: { codeVerifier, state, createdAt: new Date() } },
+    { upsert: true }
+  );
+
+  const redirectUri = `${APP_BASE_URL}/api/auth/tiktok/callback`;
+  const scopes = 'user.info.basic,video.list,video.publish';
+  const params = new URLSearchParams({
+    client_key: cred.clientKey,
+    scope: scopes,
+    response_type: 'code',
+    redirect_uri: redirectUri,
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  });
+  return { url: `${TIKTOK_AUTH_URL}?${params.toString()}` };
+});
+
+app.get('/auth/tiktok/callback', async (request, reply) => {
+  const { code, state, error: oauthError, error_description } = request.query;
+
+  if (oauthError) {
+    const msg = error_description || oauthError;
+    return reply.redirect(`${APP_BASE_URL}/settings?tiktok_error=${encodeURIComponent(msg)}`);
+  }
+  if (!code) {
+    return reply.redirect(`${APP_BASE_URL}/settings?tiktok_error=no_code`);
+  }
+
+  try {
+    const db = await getDb();
+    const pkce = await db.collection('platform_credentials').findOne({ _id: 'tiktok_pkce' });
+    if (!pkce?.codeVerifier) throw new Error('PKCE state not found — try connecting again');
+    if (state && pkce.state && state !== pkce.state) throw new Error('OAuth state mismatch');
+
+    const appCred = await getCredentials('tiktok_app');
+    if (!appCred?.clientKey) throw new Error('App credentials not configured');
+    const clientSecret = decryptToken(appCred.clientSecret);
+
+    const redirectUri = `${APP_BASE_URL}/api/auth/tiktok/callback`;
+    const tokenRes = await axios.post(
+      TIKTOK_TOKEN_URL,
+      new URLSearchParams({
+        client_key: appCred.clientKey,
+        client_secret: clientSecret,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code_verifier: pkce.codeVerifier,
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
+    );
+
+    const { access_token, refresh_token, expires_in, refresh_expires_in, open_id } = tokenRes.data;
+    const tokenExpiry = new Date(Date.now() + (expires_in || 86400) * 1000).toISOString();
+    const refreshExpiry = new Date(Date.now() + (refresh_expires_in || 31536000) * 1000).toISOString();
+
+    const userRes = await axios.get(`${TIKTOK_API}/user/info/`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+      params: { fields: 'open_id,display_name,avatar_url,username' },
+      timeout: 10000,
+    });
+    const user = userRes.data?.data?.user || {};
+
+    await setCredentials('tiktok', {
+      openId: open_id || user.open_id,
+      username: user.username || user.display_name,
+      displayName: user.display_name,
+      avatar: user.avatar_url || null,
+      accessToken: encryptToken(access_token),
+      refreshToken: refresh_token ? encryptToken(refresh_token) : null,
+      tokenExpiry,
+      refreshExpiry,
+    });
+
+    // Clean up PKCE temp state
+    await db.collection('platform_credentials').deleteOne({ _id: 'tiktok_pkce' });
+
+    log.info({ action: 'tiktok_oauth_callback', username: user.username || user.display_name, outcome: 'success' });
+    reply.redirect(`${APP_BASE_URL}/settings?tiktok_connected=1`);
+  } catch (err) {
+    const msg = err.response?.data?.error?.message || err.response?.data?.message || err.message;
+    log.error({ action: 'tiktok_oauth_callback', outcome: 'failure', err: msg });
+    reply.redirect(`${APP_BASE_URL}/settings?tiktok_error=${encodeURIComponent(msg)}`);
+  }
+});
+
+app.delete('/credentials/tiktok', async () => {
+  await deleteCredentials('tiktok');
+  return { success: true };
+});
+
 // ─── Credential Status ────────────────────────────────────────────────────────
 
 // Aggregate connection status for all DB-managed platforms
 app.get('/credentials', async () => {
-  const [metaApp, fb, ig, pinterest] = await Promise.all([
+  const [metaApp, fb, ig, pinterest, tiktok] = await Promise.all([
     getCredentials('meta_app'),
     getCredentials('facebook'),
     getCredentials('instagram'),
     getCredentials('pinterest'),
+    getCredentials('tiktok'),
   ]);
 
   const fbPages = (fb?.pages || []).filter((p) => p.selected);
@@ -1356,6 +1481,12 @@ app.get('/credentials', async () => {
       boards: pinterestBoards.map(({ id, name, privacy }) => ({ id, name, privacy })),
       allBoards: (pinterest?.boards || []).map(({ id, name, privacy, selected }) => ({ id, name, privacy, selected })),
     },
+    tiktok: {
+      connected: !!(tiktok?.accessToken),
+      username: tiktok?.username || null,
+      displayName: tiktok?.displayName || null,
+      avatar: tiktok?.avatar || null,
+    },
   };
 });
 
@@ -1372,6 +1503,7 @@ const INDUSTRY_DEFAULTS = {
   reddit:    [[1,7],[2,7],[3,7],[4,7],[0,9]],
   youtube:   [[4,12],[5,12],[6,12],[4,15],[5,15]],
   pinterest: [[5,12],[6,14],[0,15],[5,20],[6,20]],
+  tiktok:    [[2,18],[3,18],[4,18],[5,12],[0,14]],
 };
 const DEFAULT_SLOTS = [[2,9],[3,9],[4,9],[2,12],[3,12]];
 

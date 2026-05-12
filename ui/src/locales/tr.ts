@@ -274,6 +274,28 @@ export default {
       timezoneAuto: 'Tarayıcı saat dilimini kullan',
     },
 
+    tiktok: {
+      sectionTitle: 'TikTok',
+      sectionSubtitle: 'Video yayınlamak için TikTok hesabını bağla.',
+      clientKeyLabel: 'İstemci Anahtarı',
+      clientSecretLabel: 'İstemci Gizli Anahtarı',
+      clientKeyPlaceholder: 'TikTok Uygulama İstemci Anahtarın',
+      clientSecretPlaceholder: 'TikTok Uygulama Gizli Anahtarın',
+      saveApp: 'Uygulama Bilgilerini Kaydet',
+      saving: 'Kaydediliyor...',
+      appConfigured: 'Uygulama bilgileri kaydedildi',
+      connectButton: 'TikTok ile Bağlan',
+      connecting: 'TikTok\'a yönlendiriliyor...',
+      reconnect: 'Yeniden Bağlan',
+      disconnect: 'Bağlantıyı Kes',
+      disconnectConfirm: 'Bu işlem TikTok hesabının bağlantısını keser. Devam edilsin mi?',
+      connectedAs: 'Bağlı hesap',
+      videoOnly: 'TikTok yalnızca video gönderiyi destekler. Yayınlamak için Oluştur\'da bir video seçin.',
+      errorTitle: 'TikTok OAuth Hatası',
+      getAppHelp: 'Kimlik bilgilerini buradan al',
+      devPortal: 'developers.tiktok.com',
+    },
+
     pinterest: {
       sectionTitle: 'Pinterest',
       sectionSubtitle: 'Pinterest hesabını bağlayarak panolarına pin oluştur.',
@@ -406,5 +428,6 @@ export default {
     reddit: 'Reddit',
     youtube: 'YouTube',
     pinterest: 'Pinterest',
+    tiktok: 'TikTok',
   },
 }

@@ -6,7 +6,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 
 ## Features
 
-- **Unified Feed** — Pull feeds from Twitter/X, Mastodon, Bluesky, LinkedIn, Instagram, Facebook, Reddit, YouTube and Pinterest into a single TweetDeck-style dashboard
+- **Unified Feed** — Pull feeds from Twitter/X, Mastodon, Bluesky, LinkedIn, Instagram, Facebook, Reddit, YouTube, Pinterest and TikTok into a single TweetDeck-style dashboard
 - **Cross-post** — Write once, publish to multiple platforms simultaneously with per-account targeting
 - **Scheduler** — Schedule posts for a specific date/time; BullMQ handles retries with idempotent delivery (no duplicate posts)
 - **Per-account Timezone** — Each account stores its own timezone; the compose view converts scheduled times correctly
@@ -59,6 +59,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 | `instagram` | 3005 | Instagram Graph API |
 | `facebook` | 3006 | Facebook Pages Graph API |
 | `pinterest` | 3008 | Pinterest API v5 |
+| `tiktok` | 3007 | TikTok Content Posting API |
 | `mongodb` | 27018 | Database |
 | `redis` | 6379 | Cache & job queue |
 | `messageBroker` | 5672 / 15672 | RabbitMQ (legacy, largely unused) |
@@ -147,7 +148,7 @@ Paste your API key and click **Connect & Set Active**. Keys are stored AES-256-G
 | Facebook | Free | ✅ | ✅ | Facebook Page required (personal timelines not supported) |
 | YouTube | Free | ✅ | ❌ | Subscription feed only; publishing in pipeline |
 | Pinterest | Free | ✅ | ✅ | OAuth via Settings UI; boards as destinations; image required for pins |
-| TikTok | Free | — | — | In pipeline |
+| TikTok | Free | ✅ | ✅ | OAuth 2.0 PKCE via Settings UI; video required for posts; auto token refresh |
 | Google Business | Free | — | — | In pipeline |
 
 ---
@@ -294,6 +295,58 @@ Each selected board now appears as a destination in the Compose view.
 
 - **Image is required** — Pinterest's API does not support text-only pins. Always attach an image URL in Compose before selecting a Pinterest board as a destination.
 - The post content becomes both the pin **title** (first 100 characters) and the **description**.
+- Tokens are stored encrypted — no `.env` editing required.
+
+---
+
+## TikTok Setup
+
+TikTok uses OAuth 2.0 with PKCE (Proof Key for Code Exchange). Tokens are stored AES-256-GCM encrypted in MongoDB and auto-refreshed when they expire (~24 h access token, ~365 day refresh token).
+
+### TikTok Prerequisites
+
+- A [TikTok Developer account](https://developers.tiktok.com/)
+- A TikTok user account
+
+### Create a TikTok App
+
+1. Go to [developers.tiktok.com](https://developers.tiktok.com/) and sign in
+2. Click **Manage Apps** → **Create an app**
+3. Fill in the app name, description, and category
+4. Under **Products**, add **Login Kit** and **Content Posting API**
+
+### TikTok Redirect URI and Scopes
+
+In your app's **Login Kit** settings, add to **Redirect URIs**:
+
+```text
+http://localhost:8081/api/auth/tiktok/callback
+```
+
+**Required scopes (request these in Login Kit):**
+
+| Scope | Used for |
+| --- | --- |
+| `user.info.basic` | Display connected username |
+| `video.list` | Fetch your TikTok feed |
+| `video.publish` | Publish video posts |
+
+After submitting for review, note your **Client Key** and **Client Secret** from the app dashboard.
+
+### Connect TikTok from Settings
+
+1. Open <http://localhost:8081/settings>
+2. In the **TikTok** card, enter your Client Key and Client Secret → **Save App Credentials**
+3. Click **Connect with TikTok**
+4. Authorise the app on TikTok's OAuth page
+5. You'll be redirected back to Settings — the account is now connected
+
+### TikTok Posting Notes
+
+- **Video is required** — TikTok does not support text-only posts. Always attach a video URL in Compose when posting to TikTok.
+- The post content becomes the video caption (max 2,200 characters).
+- Posts are published via TikTok's `PULL_FROM_URL` API — TikTok fetches the video from your media server asynchronously.
+- The access token auto-refreshes in the background; no manual re-authentication is needed until the refresh token expires (~1 year).
 - Tokens are stored encrypted — no `.env` editing required.
 
 ---

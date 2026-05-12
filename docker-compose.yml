@@ -196,6 +196,20 @@ services:
       - messageBroker
       - mongodb
 
+  tiktok:
+    build:
+      context: ./services
+      dockerfile: tiktok/Dockerfile
+    volumes:
+      - tiktok_modules:/services/tiktok/node_modules
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - socialMediaManagerNetwork
+    depends_on:
+      - messageBroker
+      - mongodb
+
   feed-aggregator:
     build:
       context: ./services
@@ -215,6 +229,7 @@ services:
       - bluesky
       - instagram
       - pinterest
+      - tiktok
       - facebook
 
   scheduler:
@@ -273,6 +288,7 @@ volumes:
   instagram_modules:
   facebook_modules:
   pinterest_modules:
+  tiktok_modules:
   feed_aggregator_modules:
   scheduler_modules:
   ui_modules:

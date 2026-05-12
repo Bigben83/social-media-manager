@@ -274,6 +274,28 @@ export default {
       timezoneAuto: 'Use browser timezone',
     },
 
+    tiktok: {
+      sectionTitle: 'TikTok',
+      sectionSubtitle: 'Connect your TikTok account to publish videos.',
+      clientKeyLabel: 'Client Key',
+      clientSecretLabel: 'Client Secret',
+      clientKeyPlaceholder: 'Your TikTok App Client Key',
+      clientSecretPlaceholder: 'Your TikTok App Client Secret',
+      saveApp: 'Save App Credentials',
+      saving: 'Saving...',
+      appConfigured: 'App credentials saved',
+      connectButton: 'Connect with TikTok',
+      connecting: 'Redirecting to TikTok...',
+      reconnect: 'Reconnect',
+      disconnect: 'Disconnect',
+      disconnectConfirm: 'This will disconnect your TikTok account. Continue?',
+      connectedAs: 'Connected as',
+      videoOnly: 'TikTok only supports video posts. Select a video in Compose to publish.',
+      errorTitle: 'TikTok OAuth Error',
+      getAppHelp: 'Get your credentials from',
+      devPortal: 'developers.tiktok.com',
+    },
+
     pinterest: {
       sectionTitle: 'Pinterest',
       sectionSubtitle: 'Connect your Pinterest account to create pins on your boards.',
@@ -406,5 +428,6 @@ export default {
     reddit: 'Reddit',
     youtube: 'YouTube',
     pinterest: 'Pinterest',
+    tiktok: 'TikTok',
   },
 }

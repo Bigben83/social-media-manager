@@ -309,6 +309,121 @@
       </div>
 
       <!-- ═══════════════════════════════════════════════════════════════════
+           TIKTOK — OAuth connection card
+      ════════════════════════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+        <!-- Header -->
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold" style="background:#EE1D52">T</span>
+          <div>
+            <p class="font-semibold">{{ $t('settings.tiktok.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.tiktok.sectionSubtitle') }}</p>
+          </div>
+        </div>
+
+        <!-- OAuth error banner -->
+        <div v-if="tiktokOauthError" class="mx-5 mt-4 bg-red-900/40 border border-red-700 rounded-lg p-3 text-sm text-red-300 flex items-start gap-2">
+          <span class="shrink-0">⚠</span>
+          <span><strong>{{ $t('settings.tiktok.errorTitle') }}:</strong> {{ tiktokOauthError }}</span>
+        </div>
+
+        <!-- Step 1: App credentials -->
+        <div class="p-5 border-b border-gray-800/60">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Step 1 — TikTok Developer App</p>
+
+          <div v-if="tiktokAppConfigured" class="flex items-center justify-between">
+            <div class="flex items-center gap-2 text-sm text-green-400">
+              <span>✓</span>
+              <span>{{ $t('settings.tiktok.appConfigured') }}</span>
+              <span class="text-gray-600 font-mono text-xs">({{ platformsStore.tiktokCredentials.clientKey }})</span>
+            </div>
+            <button @click="editingTikTokApp = !editingTikTokApp" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+              Edit
+            </button>
+          </div>
+
+          <div v-if="!tiktokAppConfigured || editingTikTokApp" class="space-y-3 mt-2">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">{{ $t('settings.tiktok.clientKeyLabel') }}</label>
+              <input
+                v-model="tiktokClientKey"
+                type="text"
+                :placeholder="$t('settings.tiktok.clientKeyPlaceholder')"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-pink-500"
+              />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">{{ $t('settings.tiktok.clientSecretLabel') }}</label>
+              <input
+                v-model="tiktokClientSecret"
+                type="password"
+                :placeholder="tiktokAppConfigured ? platformsStore.tiktokCredentials.clientSecretHint : $t('settings.tiktok.clientSecretPlaceholder')"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-pink-500"
+              />
+            </div>
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-gray-600">
+                {{ $t('settings.tiktok.getAppHelp') }}
+                <a href="https://developers.tiktok.com/" target="_blank" rel="noopener" class="text-pink-400 hover:text-pink-300 underline">
+                  {{ $t('settings.tiktok.devPortal') }}
+                </a>
+              </p>
+              <button
+                @click="saveTikTokApp"
+                :disabled="!tiktokClientKey || !tiktokClientSecret || platformsStore.tiktokLoading"
+                class="px-4 py-1.5 bg-pink-600 hover:bg-pink-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+              >
+                {{ platformsStore.tiktokLoading ? $t('settings.tiktok.saving') : $t('settings.tiktok.saveApp') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: OAuth connect -->
+        <div class="p-5" :class="{ 'opacity-40 pointer-events-none': !tiktokAppConfigured }">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Step 2 — Connect Account</p>
+
+          <!-- Connected -->
+          <div v-if="platformsStore.tiktokConnected" class="space-y-4">
+            <div class="flex items-center gap-3 bg-gray-800/60 rounded-lg px-4 py-3">
+              <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style="background:#EE1D52">T</span>
+              <div>
+                <p class="text-sm font-medium text-white">{{ platformsStore.tiktokUsername || $t('settings.tiktok.connectedAs') }}</p>
+                <p class="text-xs text-gray-500">{{ $t('settings.tiktok.connectedAs') }}</p>
+              </div>
+            </div>
+            <p class="text-xs text-gray-600">{{ $t('settings.tiktok.videoOnly') }}</p>
+            <div class="flex gap-2">
+              <button
+                @click="platformsStore.startTikTokOAuth()"
+                :disabled="platformsStore.tiktokLoading"
+                class="px-4 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
+              >{{ $t('settings.tiktok.reconnect') }}</button>
+              <button
+                @click="confirmTikTokDisconnect"
+                :disabled="platformsStore.tiktokLoading"
+                class="px-4 py-2 text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-900/50 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
+              >{{ $t('settings.tiktok.disconnect') }}</button>
+            </div>
+          </div>
+
+          <!-- Not yet connected -->
+          <div v-else>
+            <button
+              @click="platformsStore.startTikTokOAuth()"
+              :disabled="!tiktokAppConfigured || platformsStore.tiktokLoading"
+              class="w-full py-2.5 bg-pink-600 hover:bg-pink-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              <span v-if="platformsStore.tiktokLoading">{{ $t('settings.tiktok.connecting') }}</span>
+              <span v-else>{{ $t('settings.tiktok.connectButton') }}</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════════════
            PAGE/ACCOUNT PICKER — shown after OAuth callback
       ════════════════════════════════════════════════════════════════════ -->
       <div
@@ -961,10 +1076,33 @@ function confirmPinterestDisconnect() {
   }
 }
 
+// ─── TikTok ──────────────────────────────────────────────────────────────────
+
+const tiktokClientKey = ref('')
+const tiktokClientSecret = ref('')
+const editingTikTokApp = ref(false)
+const tiktokOauthError = ref<string | null>(null)
+
+const tiktokAppConfigured = computed(() => platformsStore.tiktokCredentials.configured)
+
+async function saveTikTokApp() {
+  await platformsStore.saveTikTokApp(tiktokClientKey.value, tiktokClientSecret.value)
+  if (!platformsStore.tiktokError) {
+    editingTikTokApp.value = false
+    tiktokClientSecret.value = ''
+  }
+}
+
+function confirmTikTokDisconnect() {
+  if (window.confirm(t('settings.tiktok.disconnectConfirm'))) {
+    platformsStore.disconnectTikTok().then(loadMetaConnections)
+  }
+}
+
 // ─── Other platforms (not Meta) ──────────────────────────────────────────────
 
 const otherPlatforms = computed(() => {
-  const skip = new Set(['instagram', 'facebook', 'pinterest'])
+  const skip = new Set(['instagram', 'facebook', 'pinterest', 'tiktok'])
   return Object.fromEntries(Object.entries(PLATFORM_META).filter(([k]) => !skip.has(k)))
 })
 
@@ -1047,10 +1185,20 @@ const allConnectedAccounts = computed((): ProfileAccount[] => {
   const accounts: ProfileAccount[] = []
 
   for (const [platform, meta] of Object.entries(PLATFORM_META)) {
-    if (platform === 'facebook' || platform === 'instagram' || platform === 'pinterest') continue
+    if (platform === 'facebook' || platform === 'instagram' || platform === 'pinterest' || platform === 'tiktok') continue
     if (platformsStore.isConnected(platform)) {
       accounts.push({ key: platform, label: t(`platforms.${platform}`), platform, color: meta.color, avatar: null })
     }
+  }
+
+  if (platformsStore.tiktokConnected) {
+    accounts.push({
+      key: 'tiktok',
+      label: platformsStore.tiktokUsername ? `@${platformsStore.tiktokUsername}` : 'TikTok',
+      platform: 'tiktok',
+      color: PLATFORM_META.tiktok.color,
+      avatar: null,
+    })
   }
 
   for (const page of platformsStore.connectedPages) {
@@ -1204,11 +1352,19 @@ onMounted(async () => {
     pinterestOauthError.value = decodeURIComponent(String(route.query.pinterest_error))
     window.history.replaceState({}, '', '/settings')
   }
+  if (route.query.tiktok_connected) {
+    window.history.replaceState({}, '', '/settings')
+  }
+  if (route.query.tiktok_error) {
+    tiktokOauthError.value = decodeURIComponent(String(route.query.tiktok_error))
+    window.history.replaceState({}, '', '/settings')
+  }
 
   await Promise.all([
     platformsStore.fetchStatuses(),
     platformsStore.fetchMetaCredentials(),
     platformsStore.fetchPinterestCredentials(),
+    platformsStore.fetchTikTokCredentials(),
     loadMetaConnections(),
     platformsStore.fetchTokenExpiry(),
     aiStore.fetchConfig(),

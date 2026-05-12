@@ -18,6 +18,7 @@ const PLATFORM_SERVICES = {
   instagram: process.env.INSTAGRAM_SERVICE_URL || 'http://instagram:3005',
   facebook:  process.env.FACEBOOK_SERVICE_URL  || 'http://facebook:3006',
   pinterest: process.env.PINTEREST_SERVICE_URL || 'http://pinterest:3008',
+  tiktok:    process.env.TIKTOK_SERVICE_URL    || 'http://tiktok:3007',
 };
 
 const log = createLogger('scheduler');

@@ -68,6 +68,7 @@ export const PLATFORM_META: Record<string, { label: string; color: string; icon:
   reddit:    { label: 'Reddit',     color: '#FF4500', icon: 'fa-brands fa-reddit' },
   youtube:   { label: 'YouTube',    color: '#FF0000', icon: 'fa-brands fa-youtube' },
   pinterest: { label: 'Pinterest',  color: '#E60023', icon: 'fa-brands fa-pinterest' },
+  tiktok:    { label: 'TikTok',     color: '#EE1D52', icon: 'fa-brands fa-tiktok' },
 }
 
 export const usePlatformsStore = defineStore('platforms', () => {
@@ -131,6 +132,8 @@ export const usePlatformsStore = defineStore('platforms', () => {
       connectedIgAccounts.value = data.instagram?.accounts || []
       connectedPinterestBoards.value = data.pinterest?.boards || []
       allPinterestBoards.value = data.pinterest?.allBoards || []
+      tiktokConnected.value = data.tiktok?.connected ?? false
+      tiktokUsername.value = data.tiktok?.username || null
     } catch (_) { /* ignore */ }
   }
 
@@ -196,6 +199,68 @@ export const usePlatformsStore = defineStore('platforms', () => {
       console.error('Pinterest disconnect error:', err)
     } finally {
       pinterestLoading.value = false
+    }
+  }
+
+  // ─── TikTok ───────────────────────────────────────────────────────────────
+
+  interface TikTokCredentials {
+    configured: boolean
+    clientKey?: string
+    clientSecretHint?: string
+  }
+
+  const tiktokCredentials = ref<TikTokCredentials>({ configured: false })
+  const tiktokLoading = ref(false)
+  const tiktokError = ref<string | null>(null)
+  const tiktokConnected = ref(false)
+  const tiktokUsername = ref<string | null>(null)
+
+  async function fetchTikTokCredentials() {
+    try {
+      const res = await axios.get('/api/credentials/tiktok-app')
+      tiktokCredentials.value = res.data
+    } catch (err) {
+      console.error('TikTok credentials fetch error:', err)
+    }
+  }
+
+  async function saveTikTokApp(clientKey: string, clientSecret: string) {
+    tiktokLoading.value = true
+    tiktokError.value = null
+    try {
+      await axios.post('/api/credentials/tiktok-app', { clientKey, clientSecret })
+      tiktokCredentials.value = { configured: true, clientKey, clientSecretHint: `****${clientSecret.slice(-4)}` }
+    } catch (err: any) {
+      tiktokError.value = err.response?.data?.error || 'Failed to save app credentials'
+    } finally {
+      tiktokLoading.value = false
+    }
+  }
+
+  async function startTikTokOAuth() {
+    tiktokLoading.value = true
+    tiktokError.value = null
+    try {
+      const res = await axios.get('/api/auth/tiktok/init')
+      window.location.href = res.data.url
+    } catch (err: any) {
+      tiktokError.value = err.response?.data?.error || 'Failed to start OAuth'
+      tiktokLoading.value = false
+    }
+  }
+
+  async function disconnectTikTok() {
+    tiktokLoading.value = true
+    try {
+      await axios.delete('/api/credentials/tiktok')
+      tiktokConnected.value = false
+      tiktokUsername.value = null
+      await fetchStatuses()
+    } catch (err) {
+      console.error('TikTok disconnect error:', err)
+    } finally {
+      tiktokLoading.value = false
     }
   }
 
@@ -307,5 +372,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
     connectedPinterestBoards, allPinterestBoards,
     fetchPinterestCredentials, savePinterestApp, startPinterestOAuth,
     savePinterestBoards, disconnectPinterest,
+    tiktokCredentials, tiktokLoading, tiktokError, tiktokConnected, tiktokUsername,
+    fetchTikTokCredentials, saveTikTokApp, startTikTokOAuth, disconnectTikTok,
   }
 })
