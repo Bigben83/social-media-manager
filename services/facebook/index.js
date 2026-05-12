@@ -112,7 +112,7 @@ class FacebookService extends BasePlatformService {
     return allItems;
   }
 
-  async publishPost({ content, link, imageUrl, accountId } = {}) {
+  async publishPost({ content, link, imageUrl, accountId, firstComment } = {}) {
     const allPages = await this._getPages();
     if (allPages.length === 0) throw new Error('No Facebook Pages connected');
     if (!content) throw new Error('content is required');
@@ -128,7 +128,21 @@ class FacebookService extends BasePlatformService {
       if (imageUrl) params.picture = imageUrl;
 
       const res = await axios.post(`${GRAPH_API}/${page.id}/feed`, null, { params });
-      results.push({ pageId: page.id, pageName: page.name, postId: res.data.id });
+      const postId = res.data.id;
+
+      if (firstComment?.trim()) {
+        try {
+          await axios.post(`${GRAPH_API}/${postId}/comments`, null, {
+            params: { message: firstComment.trim(), access_token: page.accessToken },
+            timeout: 10000,
+          });
+          this.app.log.info({ action: 'first_comment', platform: 'facebook', postId, outcome: 'success' });
+        } catch (err) {
+          this.app.log.warn({ action: 'first_comment', platform: 'facebook', postId, outcome: 'failure', err: err.response?.data?.error?.message || err.message });
+        }
+      }
+
+      results.push({ pageId: page.id, pageName: page.name, postId });
     }
 
     return results;

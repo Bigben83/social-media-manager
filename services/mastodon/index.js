@@ -92,7 +92,7 @@ class MastodonService extends BasePlatformService {
     return items;
   }
 
-  async publishPost({ content, media = [], sensitive = false, spoilerText = '' } = {}) {
+  async publishPost({ content, media = [], sensitive = false, spoilerText = '', firstComment } = {}) {
     const client = this._initClient();
     if (!client) throw new Error('Mastodon access token not configured');
 
@@ -102,6 +102,18 @@ class MastodonService extends BasePlatformService {
       spoilerText,
       mediaIds: media,
     });
+
+    if (firstComment?.trim()) {
+      try {
+        await client.v1.statuses.create({
+          status: firstComment.trim(),
+          inReplyToId: status.id,
+        });
+        this.app.log.info({ action: 'first_comment', platform: 'mastodon', statusId: status.id, outcome: 'success' });
+      } catch (err) {
+        this.app.log.warn({ action: 'first_comment', platform: 'mastodon', statusId: status.id, outcome: 'failure', err: err.message });
+      }
+    }
 
     return { id: status.id, url: status.url };
   }

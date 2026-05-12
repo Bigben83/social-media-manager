@@ -31,7 +31,7 @@ let redis;
 async function processPostJob(job) {
   // destinations: [{ platform, accountId?, imageUrl?, videoUrl?, link? }]
   // Falls back to legacy { platforms: string[] } format
-  const { postId, content, destinations, platforms, media = [] } = job.data;
+  const { postId, content, destinations, platforms, media = [], firstComment } = job.data;
   // Ensure every post has a stable ID for analytics tracking
   const effectivePostId = postId || randomUUID();
 
@@ -60,7 +60,7 @@ async function processPostJob(job) {
       continue;
     }
     try {
-      const response = await axios.post(`${serviceUrl}/post`, { content, accountId, imageUrl, videoUrl, link, media }, { timeout: 30000 });
+      const response = await axios.post(`${serviceUrl}/post`, { content, accountId, imageUrl, videoUrl, link, media, firstComment: firstComment?.trim() || undefined }, { timeout: 30000 });
       results[resultKey] = { success: true, ...response.data.result };
     } catch (err) {
       results[resultKey] = { success: false, error: err.message };
@@ -125,7 +125,7 @@ app.get('/health', async () => ({ status: 'ok', service: 'scheduler' }));
 // Body: { content, scheduledAt, destinations: [{ platform, accountId?, imageUrl?, videoUrl?, link? }] }
 // Legacy { platforms: string[] } still accepted for backwards compatibility.
 app.post('/schedule', async (request, reply) => {
-  const { postId, content, destinations, platforms, scheduledAt, media = [] } = request.body;
+  const { postId, content, destinations, platforms, scheduledAt, media = [], firstComment } = request.body;
 
   const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
 
@@ -140,7 +140,7 @@ app.post('/schedule', async (request, reply) => {
 
   const job = await postQueue.add(
     'scheduled-post',
-    { postId, content, destinations: destList, media },
+    { postId, content, destinations: destList, media, firstComment: firstComment?.trim() || undefined },
     { delay, attempts: 3, backoff: { type: 'exponential', delay: 60000 } }
   );
 

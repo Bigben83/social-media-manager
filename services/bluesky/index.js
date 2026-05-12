@@ -96,7 +96,7 @@ class BlueskyService extends BasePlatformService {
     return items;
   }
 
-  async publishPost({ content, media = [] } = {}) {
+  async publishPost({ content, media = [], firstComment } = {}) {
     await this._ensureLoggedIn();
 
     const rt = new RichText({ text: content });
@@ -109,6 +109,25 @@ class BlueskyService extends BasePlatformService {
     }
 
     const result = await this.agent.post(postData);
+
+    if (firstComment?.trim()) {
+      try {
+        const commentRt = new RichText({ text: firstComment.trim() });
+        await commentRt.detectFacets(this.agent);
+        await this.agent.post({
+          text: commentRt.text,
+          facets: commentRt.facets,
+          reply: {
+            root: { uri: result.uri, cid: result.cid },
+            parent: { uri: result.uri, cid: result.cid },
+          },
+        });
+        this.app.log.info({ action: 'first_comment', platform: 'bluesky', uri: result.uri, outcome: 'success' });
+      } catch (err) {
+        this.app.log.warn({ action: 'first_comment', platform: 'bluesky', uri: result.uri, outcome: 'failure', err: err.message });
+      }
+    }
+
     return { uri: result.uri, cid: result.cid };
   }
 }

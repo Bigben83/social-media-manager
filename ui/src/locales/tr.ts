@@ -182,6 +182,10 @@ export default {
     captionGenerate: '✨ Açıklama oluştur',
     captionGenerating: 'Açıklama oluşturuluyor…',
     captionError: 'Açıklama oluşturma başarısız',
+
+    firstCommentToggle: 'İlk Yorum',
+    firstCommentPlaceholder: 'İlk yorum ekle (hashtagler, bağlantılar, ek bilgi)…',
+    firstCommentHint: 'Instagram, Facebook, Mastodon ve Bluesky\'de desteklenir.',
   },
 
   scheduler: {

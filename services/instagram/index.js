@@ -119,7 +119,7 @@ class InstagramService extends BasePlatformService {
   }
 
   // Instagram requires media (image_url or video_url) — text-only posts are not supported.
-  async publishPost({ content, imageUrl, videoUrl, accountId } = {}) {
+  async publishPost({ content, imageUrl, videoUrl, accountId, firstComment } = {}) {
     const allAccounts = await this._getAccounts();
     if (allAccounts.length === 0) throw new Error('No Instagram accounts connected');
 
@@ -154,7 +154,21 @@ class InstagramService extends BasePlatformService {
         null,
         { params: { creation_id: containerRes.data.id, access_token: account.accessToken } }
       );
-      results.push({ accountId: account.id, username: account.username, postId: publishRes.data.id });
+      const postId = publishRes.data.id;
+
+      if (firstComment?.trim()) {
+        try {
+          await axios.post(`${GRAPH_API}/${postId}/comments`, null, {
+            params: { message: firstComment.trim(), access_token: account.accessToken },
+            timeout: 10000,
+          });
+          this.app.log.info({ action: 'first_comment', platform: 'instagram', postId, outcome: 'success' });
+        } catch (err) {
+          this.app.log.warn({ action: 'first_comment', platform: 'instagram', postId, outcome: 'failure', err: err.response?.data?.error?.message || err.message });
+        }
+      }
+
+      results.push({ accountId: account.id, username: account.username, postId });
     }
 
     return results;

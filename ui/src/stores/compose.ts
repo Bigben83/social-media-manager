@@ -30,6 +30,7 @@ export interface Draft {
   mediaUrl: string
   scheduledAt: string
   destinations: Destination[]
+  firstComment?: string
   createdAt: string
   updatedAt: string
 }
@@ -38,6 +39,7 @@ export const useComposeStore = defineStore('compose', () => {
   const content = ref('')
   const mediaUrl = ref('')
   const scheduledAt = ref('')
+  const firstComment = ref('')
   const destinations = ref<Destination[]>([])
   const sending = ref(false)
   const savingDraft = ref(false)
@@ -119,6 +121,7 @@ export const useComposeStore = defineStore('compose', () => {
     content.value = ''
     mediaUrl.value = ''
     scheduledAt.value = ''
+    firstComment.value = ''
     draftId.value = null
     destinations.value.forEach((d) => { d.selected = false })
     lastResult.value = null
@@ -129,6 +132,7 @@ export const useComposeStore = defineStore('compose', () => {
     content.value = draft.content || ''
     mediaUrl.value = draft.mediaUrl || ''
     scheduledAt.value = draft.scheduledAt || ''
+    firstComment.value = draft.firstComment || ''
     if (draft.destinations?.length) {
       destinations.value.forEach((d) => {
         const saved = draft.destinations.find((s) => s.key === d.key)
@@ -144,6 +148,7 @@ export const useComposeStore = defineStore('compose', () => {
         content: content.value,
         mediaUrl: mediaUrl.value,
         scheduledAt: scheduledAt.value,
+        firstComment: firstComment.value || undefined,
         destinations: destinations.value.map(({ key, platform, accountId, label, color, picture, selected }) => ({
           key, platform, accountId, label, color, picture, selected,
         })),
@@ -176,6 +181,8 @@ export const useComposeStore = defineStore('compose', () => {
         ...(mediaUrl.value.trim() && { imageUrl: mediaUrl.value.trim() }),
       }))
 
+      const firstCommentValue = firstComment.value.trim() || undefined
+
       if (scheduledAt.value) {
         const utcScheduledAt = timezone
           ? naiveDatetimeToUtc(scheduledAt.value, timezone)
@@ -184,11 +191,13 @@ export const useComposeStore = defineStore('compose', () => {
           content: content.value,
           scheduledAt: utcScheduledAt,
           destinations: destPayload,
+          ...(firstCommentValue && { firstComment: firstCommentValue }),
         })
       } else {
         await axios.post('/api/post', {
           content: content.value,
           destinations: destPayload,
+          ...(firstCommentValue && { firstComment: firstCommentValue }),
         })
       }
 
@@ -202,7 +211,7 @@ export const useComposeStore = defineStore('compose', () => {
   }
 
   return {
-    content, mediaUrl, scheduledAt, destinations, sending, savingDraft, draftId, lastResult,
+    content, mediaUrl, scheduledAt, firstComment, destinations, sending, savingDraft, draftId, lastResult,
     selectedDestinations, activeCharLimit,
     charLimit, isOverLimit,
     initDestinations, toggleDestination, reset, loadDraft, saveDraft, post,

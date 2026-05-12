@@ -182,6 +182,10 @@ export default {
     captionGenerate: '✨ Generate caption',
     captionGenerating: 'Generating caption…',
     captionError: 'Caption generation failed',
+
+    firstCommentToggle: 'First Comment',
+    firstCommentPlaceholder: 'Add a first comment (hashtags, links, extra context)…',
+    firstCommentHint: 'Supported on Instagram, Facebook, Mastodon, and Bluesky.',
   },
 
   scheduler: {

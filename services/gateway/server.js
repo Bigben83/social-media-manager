@@ -958,7 +958,7 @@ const PLATFORM_SERVICES = {
 // Direct multi-platform post endpoint.
 // Body: { content: string, destinations: Array<{ platform, accountId?, imageUrl?, videoUrl?, link? }> }
 app.post('/post', async (request, reply) => {
-  const { content, destinations = [] } = request.body || {};
+  const { content, destinations = [], firstComment } = request.body || {};
   if (!content?.trim()) return reply.code(400).send({ error: 'content is required' });
   if (!destinations.length) return reply.code(400).send({ error: 'destinations must not be empty' });
 
@@ -966,7 +966,11 @@ app.post('/post', async (request, reply) => {
     destinations.map(async ({ platform, accountId, imageUrl, videoUrl, link }) => {
       const serviceUrl = PLATFORM_SERVICES[platform];
       if (!serviceUrl) throw new Error(`Unknown platform: ${platform}`);
-      const res = await axios.post(`${serviceUrl}/post`, { content, accountId, imageUrl, videoUrl, link }, { timeout: 30000 });
+      const res = await axios.post(
+        `${serviceUrl}/post`,
+        { content, accountId, imageUrl, videoUrl, link, firstComment: firstComment?.trim() || undefined },
+        { timeout: 30000 }
+      );
       return { platform, accountId, ...res.data };
     })
   );
@@ -988,6 +992,7 @@ app.post('/post', async (request, reply) => {
       _id: crypto.randomUUID(),
       type: 'immediate',
       content,
+      ...(firstComment?.trim() && { firstComment: firstComment.trim() }),
       destinations,
       platformResults: Object.fromEntries(
         output.map((r) => [
