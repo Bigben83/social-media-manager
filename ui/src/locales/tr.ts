@@ -5,7 +5,6 @@ export default {
     media: 'Medya',
     scheduler: 'Zamanlama',
     analytics: 'Analitik',
-    competitors: 'Rakipler',
     settings: 'Ayarlar',
   },
 
@@ -180,8 +179,6 @@ export default {
     aiNoContext: 'Profil yok — Ayarlar\'dan ekle',
     aiNotConfigured: 'YZ yapılandırılmamış — Ayarlar → YZ Entegrasyonu',
     aiError: 'Oluşturma başarısız',
-    aiUseCompetitors: 'Rakip bağlamını kullan',
-    aiUseCompetitorsHint: '{names} ile farklılaş',
 
     captionGenerate: '✨ Açıklama oluştur',
     captionGenerating: 'Açıklama oluşturuluyor…',
@@ -457,34 +454,6 @@ export default {
 
   feed: {
     openOriginal: '↗ Aç',
-  },
-
-  competitors: {
-    sectionTitle: 'Rakip İstihbaratı',
-    sectionSubtitle: 'En fazla 2 rakibi takip edin ve içeriklerini YZ gönderilerinizi geliştirmek için kullanın.',
-    addCompetitor: 'Rakip Ekle',
-    addButton: 'Ekle',
-    namePlaceholder: 'Rakip adı',
-    websitePlaceholder: 'https://rakip.com',
-    socialUrls: 'Sosyal profil URL\'leri',
-    scrapeNow: 'Şimdi Tara',
-    scraping: 'Taranıyor…',
-    summarizeAi: 'YZ ile Özetle',
-    summarizing: 'Özetleniyor…',
-    extractKeywords: 'Anahtar Kelime Çıkar',
-    extractingKeywords: 'Çıkarılıyor…',
-    aiSummaryLabel: 'YZ Özeti',
-    keywordsLabel: 'Rakip Anahtar Kelimeleri',
-    lastScraped: 'Son tarama',
-    scrapeSuccess: '{count} kaynak başarıyla tarandı',
-    scrapeNoContent: 'İçerik bulunamadı — URL\'yi kontrol edip tekrar deneyin',
-    emptyState: 'Henüz rakip eklenmedi. İçeriklerini takip etmek için en fazla 2 rakip ekleyin.',
-    maxReached: 'Maksimum 2 rakibe ulaşıldı.',
-    edit: 'Düzenle',
-    save: 'Kaydet',
-    cancel: 'İptal',
-    delete: 'Kaldır',
-    confirmDelete: 'Bu rakip kaldırılsın mı?',
   },
 
   platforms: {

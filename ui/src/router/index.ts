@@ -33,11 +33,6 @@ const router = createRouter({
       component: () => import('../views/Analytics.vue'),
     },
     {
-      path: '/competitors',
-      name: 'competitors',
-      component: () => import('../views/Competitors.vue'),
-    },
-    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),

@@ -267,20 +267,6 @@
                   </button>
                 </div>
               </div>
-
-              <!-- Competitor context checkbox (only when summaries exist) -->
-              <div v-if="hasCompetitorSummaries" class="flex items-center gap-2 text-xs text-gray-400">
-                <input
-                  id="useCompetitorCtx"
-                  v-model="useCompetitorContext"
-                  type="checkbox"
-                  class="accent-violet-500"
-                />
-                <label for="useCompetitorCtx" class="cursor-pointer select-none">
-                  🔍 {{ $t('compose.aiUseCompetitors') }}
-                </label>
-                <span class="text-gray-600">— {{ $t('compose.aiUseCompetitorsHint', { names: competitorNames }) }}</span>
-              </div>
             </template>
           </div>
         </div>
@@ -473,7 +459,6 @@ import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore } from '../stores/ai'
 import { useHashtagStore } from '../stores/hashtags'
-import { useCompetitorStore } from '../stores/competitors'
 import PostPreview from '../components/compose/PostPreview.vue'
 import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr, utcToNaiveDatetimeString } from '../utils/timezone'
 
@@ -482,7 +467,6 @@ const composeStore = useComposeStore()
 const platformsStore = usePlatformsStore()
 const aiStore = useAiStore()
 const hashtagStore = useHashtagStore()
-const competitorStore = useCompetitorStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -503,7 +487,6 @@ onMounted(async () => {
     platformsStore.fetchMetaConnections(),
     aiStore.fetchConfig(),
     hashtagStore.fetchGroups(),
-    competitorStore.fetchCompetitors(),
   ])
   composeStore.initDestinations()
 
@@ -704,14 +687,6 @@ const generating = ref(false)
 const aiError = ref(false)
 const aiContextAccount = ref('')
 const abortController = ref<AbortController | null>(null)
-const useCompetitorContext = ref(false)
-
-const hasCompetitorSummaries = computed(() =>
-  competitorStore.competitors.some((c) => c.aiSummary?.trim())
-)
-const competitorNames = computed(() =>
-  competitorStore.competitors.filter((c) => c.aiSummary?.trim()).map((c) => c.name).join(', ')
-)
 
 const aiConfigured = computed(() => aiStore.config.enabled && !!aiStore.config.endpoint)
 
@@ -784,7 +759,7 @@ async function generatePost() {
   composeStore.content = ''
 
   try {
-    const gen = aiStore.streamGenerate(prompt, system, undefined, abortController.value.signal, useCompetitorContext.value)
+    const gen = aiStore.streamGenerate(prompt, system, undefined, abortController.value.signal)
     for await (const token of gen) {
       composeStore.content += token
     }
