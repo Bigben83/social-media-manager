@@ -115,6 +115,12 @@ async function processSystemJob(job) {
     log.info({ action: 'metrics_crawl', trigger: 'scheduled', outcome: 'success', total: res.data.total });
     return res.data;
   }
+  if (job.name === 'competitor-scrape') {
+    log.info({ action: 'competitor_scrape', trigger: 'scheduled', outcome: 'start' });
+    const res = await axios.post(`${GATEWAY_URL}/competitors/scrape-all`, {}, { timeout: 120000 });
+    log.info({ action: 'competitor_scrape', trigger: 'scheduled', outcome: 'success', results: res.data.results?.length });
+    return res.data;
+  }
 }
 
 // ─── HTTP Endpoints ──────────────────────────────────────────────────────────
@@ -225,6 +231,13 @@ async function start() {
     { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 5, removeOnFail: 5 }
   );
   log.info({ action: 'system_job_register', job: 'metrics-crawl', interval: '24h', outcome: 'success' });
+
+  await systemQueue.add(
+    'competitor-scrape',
+    {},
+    { repeat: { every: 7 * 24 * 60 * 60 * 1000 }, removeOnComplete: 5, removeOnFail: 5 }
+  );
+  log.info({ action: 'system_job_register', job: 'competitor-scrape', interval: '7d', outcome: 'success' });
 
   await app.listen({ port: process.env.PORT || 3011, host: '0.0.0.0' });
   log.info({ action: 'service_start', port: 3011, outcome: 'success' }, 'Scheduler started');

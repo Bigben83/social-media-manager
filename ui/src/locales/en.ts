@@ -5,6 +5,7 @@ export default {
     media: 'Media',
     scheduler: 'Scheduler',
     analytics: 'Analytics',
+    competitors: 'Competitors',
     settings: 'Settings',
   },
 
@@ -179,6 +180,8 @@ export default {
     aiNoContext: 'No profile — set one in Settings',
     aiNotConfigured: 'AI not configured — check Settings → AI Integration',
     aiError: 'Generation failed',
+    aiUseCompetitors: 'Use competitor context',
+    aiUseCompetitorsHint: 'differentiate from {names}',
 
     captionGenerate: '✨ Generate caption',
     captionGenerating: 'Generating caption…',
@@ -454,6 +457,34 @@ export default {
 
   feed: {
     openOriginal: '↗ Open',
+  },
+
+  competitors: {
+    sectionTitle: 'Competitor Intelligence',
+    sectionSubtitle: 'Track up to 2 competitors and use their content to improve your AI-generated posts.',
+    addCompetitor: 'Add Competitor',
+    addButton: 'Add',
+    namePlaceholder: 'Competitor name',
+    websitePlaceholder: 'https://competitor.com',
+    socialUrls: 'Social profile URLs',
+    scrapeNow: 'Scrape Now',
+    scraping: 'Scraping…',
+    summarizeAi: 'Summarise with AI',
+    summarizing: 'Summarising…',
+    extractKeywords: 'Extract Keywords',
+    extractingKeywords: 'Extracting…',
+    aiSummaryLabel: 'AI Summary',
+    keywordsLabel: 'Competitor Keywords',
+    lastScraped: 'Last scraped',
+    scrapeSuccess: 'Scraped {count} source(s) successfully',
+    scrapeNoContent: 'No content found — check the URL and try again',
+    emptyState: 'No competitors added yet. Add up to 2 to track their content.',
+    maxReached: 'Maximum 2 competitors reached.',
+    edit: 'Edit',
+    save: 'Save',
+    cancel: 'Cancel',
+    delete: 'Remove',
+    confirmDelete: 'Remove this competitor?',
   },
 
   platforms: {
