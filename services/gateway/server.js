@@ -635,8 +635,11 @@ app.get('/ai/models', async (request, reply) => {
 });
 
 app.post('/ai/generate', async (request, reply) => {
-  const { prompt, system, model: reqModel } = request.body || {};
+  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
+
+  const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
+  const system = rawSystem ? rawSystem + competitorSuffix : (competitorSuffix || undefined);
 
   const pconf = await getActiveProviderConfig();
   const model = reqModel || pconf.model;
@@ -744,8 +747,11 @@ app.post('/ai/caption', async (request, reply) => {
 
 // SSE streaming endpoint — normalized data: { token, done } format for all providers
 app.post('/ai/stream', async (request, reply) => {
-  const { prompt, system, model: reqModel } = request.body || {};
+  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
+
+  const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
+  const system = rawSystem ? rawSystem + competitorSuffix : (competitorSuffix || undefined);
 
   const pconf = await getActiveProviderConfig();
   const model = reqModel || pconf.model;
@@ -2150,6 +2156,266 @@ app.post('/hashtags/ai-suggest', async (request, reply) => {
     return { success: true, hashtags: tags };
   } catch (err) {
     return reply.code(503).send({ error: 'AI suggestion failed', detail: err.message });
+  }
+});
+
+// ─── Competitor Intelligence ──────────────────────────────────────────────────
+
+async function extractTextFromUrl(url) {
+  try {
+    const res = await axios.get(url, { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SocialManager/1.0)' } });
+    const html = res.data || '';
+    const title = (html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1] || '';
+    const desc = (html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || [])[1] || '';
+    const headings = [...html.matchAll(/<h[1-3][^>]*>(.*?)<\/h[1-3]>/gi)].map((m) => m[1].replace(/<[^>]+>/g, '').trim()).filter(Boolean).slice(0, 8);
+    const paras = [...html.matchAll(/<p[^>]*>(.*?)<\/p>/gis)].map((m) => m[1].replace(/<[^>]+>/g, '').trim()).filter((t) => t.length > 40).slice(0, 5);
+    return [title, desc, ...headings, ...paras].filter(Boolean).join('\n').slice(0, 3000);
+  } catch {
+    return '';
+  }
+}
+
+async function scrapeBluesky(profileUrl) {
+  try {
+    const handle = profileUrl.replace(/^https?:\/\/bsky\.app\/profile\//i, '').replace(/\/$/, '');
+    if (!handle) return '';
+    const res = await axios.get(`https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=10`, { timeout: 10000 });
+    const posts = (res.data.feed || []).map((f) => f.post?.record?.text || '').filter(Boolean);
+    return posts.join('\n').slice(0, 3000);
+  } catch {
+    return '';
+  }
+}
+
+async function scrapeMastodon(profileUrl) {
+  try {
+    const m = profileUrl.match(/^https?:\/\/([^/]+)\/@(.+)$/);
+    if (!m) return '';
+    const [, instance, username] = m;
+    const lookupRes = await axios.get(`https://${instance}/api/v1/accounts/lookup?acct=${encodeURIComponent(username)}`, { timeout: 10000 });
+    const accountId = lookupRes.data?.id;
+    if (!accountId) return '';
+    const statusRes = await axios.get(`https://${instance}/api/v1/accounts/${accountId}/statuses?limit=10&exclude_replies=true`, { timeout: 10000 });
+    const posts = (statusRes.data || []).map((s) => s.content?.replace(/<[^>]+>/g, '').trim() || '').filter(Boolean);
+    return posts.join('\n').slice(0, 3000);
+  } catch {
+    return '';
+  }
+}
+
+async function runCompetitorScrape(competitorId) {
+  const db = await getDb();
+  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(competitorId) });
+  if (!competitor) return { ok: false, message: 'Not found', sources: 0 };
+
+  const newItems = [];
+
+  if (competitor.websiteUrl) {
+    const text = await extractTextFromUrl(competitor.websiteUrl);
+    if (text) newItems.push({ source: 'website', url: competitor.websiteUrl, text, scrapedAt: new Date() });
+  }
+
+  const socialEntries = Object.entries(competitor.socialUrls || {});
+  for (const [platform, url] of socialEntries) {
+    if (!url) continue;
+    let text = '';
+    if (platform === 'bluesky') text = await scrapeBluesky(url);
+    else if (platform === 'mastodon') text = await scrapeMastodon(url);
+    else text = await extractTextFromUrl(url);
+    if (text) newItems.push({ source: platform, url, text, scrapedAt: new Date() });
+  }
+
+  const existing = competitor.scrapedContent || [];
+  const combined = [...newItems, ...existing].slice(0, 20);
+
+  await db.collection('competitors').updateOne(
+    { _id: new ObjectId(competitorId) },
+    { $set: { scrapedContent: combined, lastScraped: new Date(), updatedAt: new Date() } },
+  );
+
+  return { ok: true, sources: newItems.length, message: newItems.length ? `Scraped ${newItems.length} source(s)` : 'No content found' };
+}
+
+async function buildCompetitorSystemSuffix() {
+  try {
+    const db = await getDb();
+    const competitors = await db.collection('competitors').find({ aiSummary: { $nin: ['', null] } }).toArray();
+    if (!competitors.length) return '';
+    const lines = competitors.map((c) => `- ${c.name}: ${c.aiSummary}`).join('\n');
+    return `\n\nCOMPETITOR CONTEXT (for differentiation — do not copy, use to contrast):\n${lines}\nEmphasise what makes this brand unique compared to the above.`;
+  } catch {
+    return '';
+  }
+}
+
+// List competitors
+app.get('/competitors', async (request, reply) => {
+  const db = await getDb();
+  const list = await db.collection('competitors').find({}).sort({ createdAt: 1 }).toArray();
+  return list;
+});
+
+// Add competitor (max 2)
+app.post('/competitors', async (request, reply) => {
+  const db = await getDb();
+  const count = await db.collection('competitors').countDocuments();
+  if (count >= 2) return reply.code(400).send({ error: 'Maximum 2 competitors allowed' });
+  const { name, websiteUrl, socialUrls = {} } = request.body || {};
+  if (!name || !websiteUrl) return reply.code(400).send({ error: 'name and websiteUrl are required' });
+  const now = new Date();
+  const result = await db.collection('competitors').insertOne({
+    name, websiteUrl, socialUrls, scrapedContent: [], aiSummary: '', keywords: [], lastScraped: null, createdAt: now, updatedAt: now,
+  });
+  const doc = await db.collection('competitors').findOne({ _id: result.insertedId });
+  return doc;
+});
+
+// Update competitor
+app.put('/competitors/:id', async (request, reply) => {
+  const db = await getDb();
+  const { name, websiteUrl, socialUrls } = request.body || {};
+  const updates = { updatedAt: new Date() };
+  if (name !== undefined) updates.name = name;
+  if (websiteUrl !== undefined) updates.websiteUrl = websiteUrl;
+  if (socialUrls !== undefined) updates.socialUrls = socialUrls;
+  await db.collection('competitors').updateOne({ _id: new ObjectId(request.params.id) }, { $set: updates });
+  const doc = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  return doc;
+});
+
+// Delete competitor
+app.delete('/competitors/:id', async (request, reply) => {
+  const db = await getDb();
+  await db.collection('competitors').deleteOne({ _id: new ObjectId(request.params.id) });
+  return { success: true };
+});
+
+// Scrape one competitor
+app.post('/competitors/:id/scrape', async (request, reply) => {
+  try {
+    const result = await runCompetitorScrape(request.params.id);
+    return { success: result.ok, sources: result.sources, message: result.message };
+  } catch (err) {
+    return reply.code(500).send({ error: 'Scrape failed', detail: err.message });
+  }
+});
+
+// Scrape all competitors (called by scheduler)
+app.post('/competitors/scrape-all', async (request, reply) => {
+  const db = await getDb();
+  const all = await db.collection('competitors').find({}).toArray();
+  const results = [];
+  for (const c of all) {
+    const r = await runCompetitorScrape(c._id.toString());
+    results.push({ id: c._id.toString(), name: c.name, ...r });
+  }
+  return { success: true, results };
+});
+
+// Summarize competitor content with AI
+app.post('/competitors/:id/summarize', async (request, reply) => {
+  const db = await getDb();
+  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
+
+  const content = (competitor.scrapedContent || []).map((s) => `[${s.source}] ${s.text}`).join('\n\n').slice(0, 6000);
+  if (!content) return reply.code(400).send({ error: 'No scraped content to summarize' });
+
+  const system = 'You are a competitive intelligence analyst. Be concise.';
+  const prompt = `Analyse the following content from "${competitor.name}" and summarise their key themes, messaging style, and content strategy in 2-3 sentences. Focus on topics, tone, and positioning.\n\n${content}`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let summary = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 180000 });
+      summary = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 180000 });
+      summary = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 180000 },
+      );
+      summary = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    summary = summary.trim();
+    await db.collection('competitors').updateOne(
+      { _id: new ObjectId(request.params.id) },
+      { $set: { aiSummary: summary, updatedAt: new Date() } },
+    );
+    return { success: true, aiSummary: summary };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Summarization failed', detail: err.message });
+  }
+});
+
+// Extract keywords from scraped content using AI (item 34)
+app.post('/competitors/:id/extract-keywords', async (request, reply) => {
+  const db = await getDb();
+  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
+
+  const content = (competitor.scrapedContent || []).map((s) => s.text).join('\n\n').slice(0, 6000);
+  if (!content) return reply.code(400).send({ error: 'No scraped content to extract keywords from' });
+
+  const system = 'You are an SEO and content strategist. Return only valid JSON.';
+  const prompt = `Analyse the following content from "${competitor.name}" and extract the top 20 keywords and key phrases they appear to be targeting or ranking for. Include both short-tail and long-tail keywords.\n\nContent:\n${content}\n\nReturn ONLY a JSON array of strings, e.g. ["keyword one", "keyword two"]. No explanation, no markdown.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let keywords = [];
+    try {
+      const jsonStr = (text.match(/\[[\s\S]*\]/) || ['[]'])[0];
+      keywords = JSON.parse(jsonStr);
+      if (!Array.isArray(keywords)) keywords = [];
+      keywords = keywords.filter((k) => typeof k === 'string').slice(0, 20);
+    } catch {
+      keywords = [];
+    }
+
+    await db.collection('competitors').updateOne(
+      { _id: new ObjectId(request.params.id) },
+      { $set: { keywords, updatedAt: new Date() } },
+    );
+    return { success: true, keywords };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Keyword extraction failed', detail: err.message });
   }
 });
 
