@@ -2407,8 +2407,19 @@ app.post('/competitors/:id/extract-keywords', async (request, reply) => {
   const content = (competitor.scrapedContent || []).map((s) => s.text).join('\n\n').slice(0, 6000);
   if (!content) return reply.code(400).send({ error: 'No scraped content to extract keywords from' });
 
-  const system = 'You are an SEO and content strategist. Return only valid JSON.';
-  const prompt = `Analyse the following content from "${competitor.name}" and extract the top 20 keywords and key phrases they appear to be targeting or ranking for. Include both short-tail and long-tail keywords.\n\nContent:\n${content}\n\nReturn ONLY a JSON array of strings, e.g. ["keyword one", "keyword two"]. No explanation, no markdown.`;
+  const system = 'You are an SEO and content strategist. Return only valid JSON with no explanation, no markdown code blocks.';
+  const prompt = `Analyse the following content from "${competitor.name}" and extract the top 20 keywords and key phrases they appear to be targeting. For each keyword, classify its search intent using one of these four types:
+- informational: user wants to learn ("how to", "what is", "guide", "tips")
+- commercial: user is evaluating options ("best", "vs", "review", "top", "alternative")
+- transactional: user is ready to act ("buy", "free", "pricing", "download", "get started")
+- navigational: user is searching for a specific brand or tool by name
+
+Content:
+${content}
+
+Return ONLY a JSON array, e.g.:
+[{"term": "project management software", "intent": "commercial"}, {"term": "how to manage tasks", "intent": "informational"}]
+No explanation, no markdown.`;
 
   try {
     const pconf = await getActiveProviderConfig();
@@ -2436,12 +2447,21 @@ app.post('/competitors/:id/extract-keywords', async (request, reply) => {
       return reply.code(400).send({ error: 'AI not configured' });
     }
 
+    const VALID_INTENTS = new Set(['informational', 'commercial', 'transactional', 'navigational']);
     let keywords = [];
     try {
       const jsonStr = (text.match(/\[[\s\S]*\]/) || ['[]'])[0];
-      keywords = JSON.parse(jsonStr);
-      if (!Array.isArray(keywords)) keywords = [];
-      keywords = keywords.filter((k) => typeof k === 'string').slice(0, 20);
+      const parsed = JSON.parse(jsonStr);
+      if (!Array.isArray(parsed)) throw new Error();
+      const now = new Date();
+      keywords = parsed
+        .filter((k) => k && typeof k.term === 'string' && k.term.trim())
+        .slice(0, 20)
+        .map((k) => ({
+          term: k.term.trim(),
+          intent: VALID_INTENTS.has(k.intent) ? k.intent : 'informational',
+          extractedAt: now,
+        }));
     } catch {
       keywords = [];
     }

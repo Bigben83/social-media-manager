@@ -10,6 +10,14 @@ export interface AiAnalysis {
   moves: string[]
 }
 
+export type KeywordIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'
+
+export interface CompetitorKeyword {
+  term: string
+  intent: KeywordIntent
+  extractedAt?: string
+}
+
 export interface Competitor {
   _id: string
   name: string
@@ -18,7 +26,7 @@ export interface Competitor {
   scrapedContent: { source: string; url: string; text: string; scrapedAt: string }[]
   aiSummary: string
   aiAnalysis?: AiAnalysis
-  keywords: string[]
+  keywords: CompetitorKeyword[]
   lastScraped: string | null
   createdAt: string
   updatedAt: string

@@ -171,13 +171,22 @@
 
         <!-- Keywords -->
         <div v-if="competitor.keywords && competitor.keywords.length" class="mt-3">
-          <div class="text-xs text-blue-400 font-medium mb-2">{{ t('competitors.keywordsLabel') }}</div>
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs text-blue-400 font-medium">{{ t('competitors.keywordsLabel') }}</div>
+            <div class="flex items-center gap-2.5">
+              <span v-for="intent in KEYWORD_INTENTS" :key="intent.key" class="flex items-center gap-1 text-xs text-gray-400">
+                <span :class="intent.dot" class="w-1.5 h-1.5 rounded-full shrink-0"></span>{{ t(`competitors.intent_${intent.key}`) }}
+              </span>
+            </div>
+          </div>
           <div class="flex flex-wrap gap-1.5">
             <span
               v-for="kw in competitor.keywords"
-              :key="kw"
-              class="inline-block text-xs px-2 py-0.5 bg-blue-900/40 border border-blue-700/50 text-blue-300 rounded-full"
-            >{{ kw }}</span>
+              :key="typeof kw === 'string' ? kw : kw.term"
+              :class="typeof kw === 'string' ? 'bg-blue-900/40 border-blue-700/50 text-blue-300' : intentChipClass(kw.intent)"
+              :title="typeof kw === 'string' ? '' : t(`competitors.intent_${kw.intent}`)"
+              class="inline-block text-xs px-2 py-0.5 border rounded-full cursor-default"
+            >{{ typeof kw === 'string' ? kw : kw.term }}</span>
           </div>
         </div>
       </div>
@@ -218,10 +227,28 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useCompetitorStore, type Competitor } from '../stores/competitors'
+import { useCompetitorStore, type Competitor, type KeywordIntent } from '../stores/competitors'
 
 const { t } = useI18n()
 const competitorStore = useCompetitorStore()
+
+const KEYWORD_INTENTS = [
+  { key: 'informational', dot: 'bg-blue-400' },
+  { key: 'commercial',    dot: 'bg-violet-400' },
+  { key: 'transactional', dot: 'bg-green-400' },
+  { key: 'navigational',  dot: 'bg-gray-400' },
+]
+
+const INTENT_CHIP_CLASSES: Record<KeywordIntent, string> = {
+  informational: 'bg-blue-900/40 border-blue-700/50 text-blue-300',
+  commercial:    'bg-violet-900/40 border-violet-700/50 text-violet-300',
+  transactional: 'bg-green-900/40 border-green-700/50 text-green-300',
+  navigational:  'bg-gray-700 border-gray-600 text-gray-300',
+}
+
+function intentChipClass(intent: string): string {
+  return INTENT_CHIP_CLASSES[intent as KeywordIntent] ?? INTENT_CHIP_CLASSES.informational
+}
 
 const socialPlatforms = [
   { key: 'twitter',   icon: 'fa-brands fa-x-twitter',  placeholder: 'https://twitter.com/username' },
