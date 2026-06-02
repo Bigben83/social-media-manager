@@ -3763,6 +3763,99 @@ No explanation, no markdown.`;
   }
 });
 
+// ─── Quantitative Competitor Extraction ──────────────────────────────────────
+
+app.post('/competitors/:id/extract-quantitative', async (request, reply) => {
+  const db = await getDb();
+  let oid;
+  try { oid = new ObjectId(request.params.id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
+
+  const competitor = await db.collection('competitors').findOne({ _id: oid });
+  if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
+  if (!competitor.websiteUrl) return reply.code(400).send({ error: 'Competitor has no website URL' });
+
+  const baseUrl = competitor.websiteUrl.replace(/\/$/, '');
+
+  // Fetch additional sub-pages: /pricing, /features, /about, /careers
+  const subPaths = ['/pricing', '/features', '/about', '/careers'];
+  const pageTexts = await Promise.all([
+    extractTextFromUrl(baseUrl),
+    ...subPaths.map((p) => extractTextFromUrl(baseUrl + p)),
+  ]);
+  const combinedText = pageTexts.filter(Boolean).join('\n\n---\n\n').slice(0, 8000);
+
+  if (!combinedText.trim()) {
+    return reply.code(503).send({ error: 'Could not fetch any content from the competitor site' });
+  }
+
+  const system = 'You are a competitive intelligence analyst. Return only valid JSON with no markdown or explanation.';
+  const prompt = `Extract quantitative competitive data from this competitor's website content.
+Competitor: ${competitor.name} (${baseUrl})
+
+Website content:
+${combinedText}
+
+Return this JSON:
+{
+  "pricingTiers": [{ "name": "<tier name>", "price": "<price or 'Free' or 'Contact us'>", "highlights": ["<feature>"] }],
+  "keyFeatures": ["<feature 1>", "<feature 2>", "<feature 3>", "<feature 4>", "<feature 5>"],
+  "techStack": ["<detected technology>"],
+  "targetCustomer": "<one-sentence ICP>",
+  "jobPostings": <number of open roles detected, 0 if none>,
+  "growthSignals": ["<any hiring, funding, expansion, or new product signals>"],
+  "productCount": <estimated number of distinct products/services, 0 if unclear>
+}
+
+If data is not available for a field, use null for numbers and [] for arrays. Return ONLY valid JSON.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+    let profile = null;
+    try {
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      profile = JSON.parse(jsonStr);
+      if (!profile.keyFeatures) throw new Error('Missing keyFeatures');
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid extraction format — try again' });
+    }
+
+    await db.collection('competitors').updateOne(
+      { _id: oid },
+      { $set: { quantitativeProfile: profile, quantitativeExtractedAt: new Date(), updatedAt: new Date() } },
+    );
+
+    log.info({ action: 'extract_quantitative', competitor: competitor.name, outcome: 'success' });
+    return { success: true, quantitativeProfile: profile, extractedAt: new Date() };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Quantitative extraction failed', detail: err.message });
+  }
+});
+
 // ─── Strategic Group Map ─────────────────────────────────────────────────────
 
 const STRATEGIC_DIMENSIONS = [

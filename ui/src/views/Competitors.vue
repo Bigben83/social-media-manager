@@ -574,6 +574,60 @@
               </div>
             </div>
           </div>
+        <!-- Quantitative profile -->
+        <div v-if="competitor.quantitativeProfile" class="mt-4 border-t border-gray-700/60 pt-3">
+          <div class="text-xs text-cyan-400 font-medium mb-2">{{ t('competitors.quantitativeLabel') }}</div>
+
+          <!-- Pricing tiers -->
+          <div v-if="competitor.quantitativeProfile.pricingTiers?.length" class="mb-2">
+            <div class="text-xs text-gray-500 mb-1">{{ t('competitors.quantitativePricing') }}</div>
+            <div class="flex flex-wrap gap-1.5">
+              <div v-for="tier in competitor.quantitativeProfile.pricingTiers" :key="tier.name"
+                class="px-2 py-1 bg-cyan-900/30 border border-cyan-700/40 rounded text-xs text-cyan-200">
+                <span class="font-medium">{{ tier.name }}</span>
+                <span class="text-cyan-400 ml-1">{{ tier.price }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Key features -->
+          <div v-if="competitor.quantitativeProfile.keyFeatures?.length" class="mb-2">
+            <div class="text-xs text-gray-500 mb-1">{{ t('competitors.quantitativeFeatures') }}</div>
+            <ul class="space-y-0.5">
+              <li v-for="f in competitor.quantitativeProfile.keyFeatures.slice(0, 5)" :key="f" class="flex gap-1 text-xs text-gray-300">
+                <span class="text-cyan-500 shrink-0">›</span>{{ f }}
+              </li>
+            </ul>
+          </div>
+
+          <!-- Stats row -->
+          <div class="flex flex-wrap gap-3 text-xs text-gray-400">
+            <span v-if="competitor.quantitativeProfile.targetCustomer" class="flex items-center gap-1">
+              <i class="fa-solid fa-user-group text-[9px] text-cyan-500"></i>{{ competitor.quantitativeProfile.targetCustomer }}
+            </span>
+            <span v-if="competitor.quantitativeProfile.jobPostings" class="flex items-center gap-1">
+              <i class="fa-solid fa-briefcase text-[9px] text-green-400"></i>{{ competitor.quantitativeProfile.jobPostings }} open roles
+            </span>
+          </div>
+
+          <!-- Growth signals -->
+          <div v-if="competitor.quantitativeProfile.growthSignals?.length" class="mt-1.5 flex flex-wrap gap-1">
+            <span v-for="s in competitor.quantitativeProfile.growthSignals" :key="s" class="text-xs px-1.5 py-0.5 bg-green-900/30 border border-green-700/40 text-green-300 rounded-full">
+              <i class="fa-solid fa-arrow-trend-up text-[9px] mr-0.5"></i>{{ s }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Extract quantitative data button -->
+        <div class="mt-3 pt-3 border-t border-gray-700/60">
+          <button
+            @click="extractQuantitative(competitor._id)"
+            :disabled="extractingQuantitative[competitor._id]"
+            class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/60 disabled:opacity-40 border border-cyan-700/50 rounded-lg text-cyan-300 transition-colors w-full justify-center"
+          >
+            <i class="fa-solid fa-database text-[10px]" :class="{ 'animate-pulse': extractingQuantitative[competitor._id] }"></i>
+            {{ extractingQuantitative[competitor._id] ? t('competitors.extractingQuantitative') : t('competitors.extractQuantitative') }}
+          </button>
         </div>
       </div>
     </div>
@@ -752,6 +806,25 @@ const MATRIX_ROWS = [
   { key: 'moves',        label: 'Differentiation Moves',get: (c: Competitor) => (c.aiAnalysis?.moves || []).join(', ') || '—' },
   { key: 'keywords',     label: 'Top Keywords',         get: (c: Competitor) => ((c.keywords || []).slice(0, 5).map((k: any) => k.term).join(', ') || '—') },
 ] as const
+
+// ── Quantitative extraction ───────────────────────────────────────────────────
+const extractingQuantitative = reactive<Record<string, boolean>>({})
+
+async function extractQuantitative(id: string) {
+  extractingQuantitative[id] = true
+  try {
+    await competitorStore.fetchCompetitors()
+    const res = await axios.post(`/api/competitors/${id}/extract-quantitative`)
+    const idx = competitorStore.competitors.findIndex((c) => c._id === id)
+    if (idx !== -1) {
+      competitorStore.competitors[idx] = { ...competitorStore.competitors[idx], quantitativeProfile: res.data.quantitativeProfile }
+    }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Quantitative extraction failed')
+  } finally {
+    extractingQuantitative[id] = false
+  }
+}
 
 async function generateMatrixSynthesis() {
   matrixLoading.value = true

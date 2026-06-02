@@ -643,6 +643,11 @@ export default {
     cancel: 'Cancel',
     delete: 'Remove',
     confirmDelete: 'Remove this competitor?',
+    extractQuantitative: 'Extract Data',
+    extractingQuantitative: 'Extracting…',
+    quantitativeLabel: 'Quantitative Profile',
+    quantitativePricing: 'Pricing',
+    quantitativeFeatures: 'Key features',
   },
 
   platforms: {

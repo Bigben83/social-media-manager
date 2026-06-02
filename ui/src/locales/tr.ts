@@ -643,6 +643,11 @@ export default {
     cancel: 'İptal',
     delete: 'Kaldır',
     confirmDelete: 'Bu rakip kaldırılsın mı?',
+    extractQuantitative: 'Veri Çıkar',
+    extractingQuantitative: 'Çıkarılıyor…',
+    quantitativeLabel: 'Nicel Profil',
+    quantitativePricing: 'Fiyatlandırma',
+    quantitativeFeatures: 'Temel özellikler',
   },
 
   platforms: {
