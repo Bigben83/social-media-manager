@@ -5,6 +5,7 @@ export default {
     media: 'Media',
     scheduler: 'Scheduler',
     analytics: 'Analytics',
+    calendarPlan: 'Content Plan',
     competitors: 'Competitors',
     settings: 'Settings',
   },
@@ -92,6 +93,25 @@ export default {
     colTracked: 'Posts Tracked',
 
     dayNamesShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+  },
+
+  calendarPlan: {
+    title: 'Content Plan',
+    subtitle: 'AI-generated monthly content calendar with narrative brief and platform-native posts.',
+    month: 'Month',
+    account: 'Account context',
+    allAccounts: 'All accounts',
+    platforms: 'Platforms',
+    generate: 'Generate Plan',
+    generating: 'Generating…',
+    briefTitle: 'Narrative Brief',
+    theme: 'Monthly theme',
+    pillars: 'Content pillars',
+    toneGuidance: 'Tone guidance',
+    saveAllDrafts: 'Save {count} posts as Drafts',
+    savingAll: 'Saving drafts…',
+    draft: 'Draft',
+    week: 'Week {n}',
   },
 
   media: {

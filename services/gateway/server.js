@@ -917,6 +917,149 @@ app.post('/ai/stream', async (request, reply) => {
   }
 });
 
+// ─── Monthly Content Calendar ─────────────────────────────────────────────────
+
+// POST /ai/content-calendar — generate a monthly content plan with narrative brief + sample posts
+// Body: { accountKey?, platforms[], month? (YYYY-MM) }
+app.post('/ai/content-calendar', async (request, reply) => {
+  const { accountKey, platforms = [], month } = request.body || {};
+  if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
+
+  const db = await getDb();
+  const calMonth = month || new Date().toISOString().slice(0, 7);
+  const [year, mon] = calMonth.split('-');
+  const monthName = new Date(`${calMonth}-01`).toLocaleString('en', { month: 'long', year: 'numeric' });
+
+  // Load account profile for context
+  const profileKey = accountKey || null;
+  const profile = profileKey
+    ? await db.collection('account_profiles').findOne({ _id: profileKey })
+    : await db.collection('account_profiles').findOne({});
+
+  const contextParts = ['You are a social media content strategist.'];
+  if (profile) {
+    if (profile.businessName)   contextParts.push(`Business: ${profile.businessName}`);
+    if (profile.description)    contextParts.push(`Description: ${profile.description}`);
+    if (profile.industry)       contextParts.push(`Industry: ${profile.industry}`);
+    if (profile.toneOfVoice)    contextParts.push(`Tone of voice: ${profile.toneOfVoice}`);
+    if (profile.targetAudience) contextParts.push(`Target audience: ${profile.targetAudience}`);
+    if (profile.keywords)       contextParts.push(`Keywords: ${profile.keywords}`);
+  }
+  const brandContext = contextParts.join('\n');
+
+  // Per-platform post count: 3 per platform (weeks 1–3)
+  const platformList = platforms.slice(0, 5).join(', ');
+  const postsPerPlatform = 3;
+  const totalPosts = platforms.slice(0, 5).length * postsPerPlatform;
+
+  const system = 'You are a social media content strategist. Return only valid JSON with no explanation, no markdown code blocks.';
+  const prompt = `${brandContext}
+
+Create a content calendar for ${monthName} across these platforms: ${platformList}.
+
+Return a JSON object with exactly these fields:
+{
+  "brief": {
+    "theme": "The overarching monthly narrative theme in one sentence",
+    "pillars": ["3-4 content pillars that anchor all posts this month"],
+    "toneGuidance": "One sentence on tone and voice for this month",
+    "platformNotes": {
+      ${platforms.slice(0, 5).map((p) => `"${p}": "One sentence of platform-specific content strategy for ${p}"`).join(',\n      ')}
+    }
+  },
+  "posts": [
+    ${platforms.slice(0, 5).flatMap((p, pi) =>
+      [1, 2, 3].map((w, wi) => `{
+      "platform": "${p}",
+      "week": ${w},
+      "content": "<full post text ready to publish, following platform-specific best practices>",
+      "hashtags": ["<2-4 relevant hashtags>"],
+      "postType": "<educational|promotional|engagement|storytelling>",
+      "suggestedDay": "<best day of week to publish on ${p}>"
+    }${pi < platforms.length - 1 || wi < 2 ? ',' : ''}`)).join('\n    ')}
+  ]
+}
+
+Important: Each post must follow platform conventions — LinkedIn hooks in first 2 lines, TikTok scripts with second-0 hook, Instagram assuming silent viewing, etc.
+Return ONLY the JSON object.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 180000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 180000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 180000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let calendar = null;
+    try {
+      const jsonStr = (text.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      calendar = JSON.parse(jsonStr);
+      if (!calendar.brief || !Array.isArray(calendar.posts)) throw new Error();
+      // Normalise
+      if (!Array.isArray(calendar.brief.pillars)) calendar.brief.pillars = [];
+      if (typeof calendar.brief.theme !== 'string') calendar.brief.theme = '';
+      calendar.posts = calendar.posts.filter((p) => p && typeof p.content === 'string').slice(0, totalPosts);
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid calendar format — try again' });
+    }
+
+    const doc = {
+      accountKey: accountKey || null,
+      month: calMonth,
+      monthName,
+      platforms,
+      brief: calendar.brief,
+      posts: calendar.posts,
+      createdAt: new Date(),
+    };
+    const result = await db.collection('content_calendars').insertOne(doc);
+    log.info({ action: 'content_calendar', month: calMonth, platforms: platforms.join(','), posts: calendar.posts.length, outcome: 'success' });
+    return { success: true, calendarId: result.insertedId.toString(), ...doc };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Calendar generation failed', detail: err.message });
+  }
+});
+
+// GET /ai/content-calendar/:id — retrieve a saved calendar
+app.get('/ai/content-calendar/:id', async (request, reply) => {
+  let oid;
+  try { oid = new ObjectId(request.params.id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
+  const db = await getDb();
+  const cal = await db.collection('content_calendars').findOne({ _id: oid });
+  if (!cal) return reply.code(404).send({ error: 'Calendar not found' });
+  return { calendarId: cal._id.toString(), ...cal };
+});
+
+// GET /ai/content-calendars — list recent calendars
+app.get('/ai/content-calendars', async (request, reply) => {
+  const db = await getDb();
+  const cals = await db.collection('content_calendars')
+    .find({}, { projection: { posts: 0 } })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .toArray();
+  return { calendars: cals.map((c) => ({ calendarId: c._id.toString(), month: c.month, monthName: c.monthName, platforms: c.platforms, brief: c.brief, createdAt: c.createdAt })) };
+});
+
 // ─── Bulk AI Draft Generation ─────────────────────────────────────────────────
 
 // POST /ai/bulk-draft — kick off a batch; returns batchId immediately (non-blocking)

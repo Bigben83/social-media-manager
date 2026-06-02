@@ -38,6 +38,11 @@ const router = createRouter({
       component: () => import('../views/Competitors.vue'),
     },
     {
+      path: '/calendar-plan',
+      name: 'calendarPlan',
+      component: () => import('../views/CalendarPlan.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),

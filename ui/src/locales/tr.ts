@@ -5,6 +5,7 @@ export default {
     media: 'Medya',
     scheduler: 'Zamanlama',
     analytics: 'Analitik',
+    calendarPlan: 'İçerik Planı',
     competitors: 'Rakipler',
     settings: 'Ayarlar',
   },
@@ -92,6 +93,25 @@ export default {
     colTracked: 'Takip Edilen',
 
     dayNamesShort: ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'],
+  },
+
+  calendarPlan: {
+    title: 'İçerik Planı',
+    subtitle: 'YZ tarafından oluşturulan aylık içerik takvimi: anlatı özeti ve platforma özel gönderiler.',
+    month: 'Ay',
+    account: 'Hesap bağlamı',
+    allAccounts: 'Tüm hesaplar',
+    platforms: 'Platformlar',
+    generate: 'Plan Oluştur',
+    generating: 'Oluşturuluyor…',
+    briefTitle: 'Anlatı Özeti',
+    theme: 'Aylık tema',
+    pillars: 'İçerik sütunları',
+    toneGuidance: 'Ton rehberi',
+    saveAllDrafts: '{count} gönderiyi Taslak olarak kaydet',
+    savingAll: 'Taslaklar kaydediliyor…',
+    draft: 'Taslağa al',
+    week: '{n}. hafta',
   },
 
   media: {

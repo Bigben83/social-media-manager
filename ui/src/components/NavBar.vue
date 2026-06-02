@@ -65,9 +65,10 @@ const navLinks = [
   { to: '/compose',   label: 'nav.compose' },
   { to: '/media',     label: 'nav.media' },
   { to: '/scheduler', label: 'nav.scheduler' },
-  { to: '/analytics',    label: 'nav.analytics' },
-  { to: '/competitors',  label: 'nav.competitors' },
-  { to: '/settings',     label: 'nav.settings' },
+  { to: '/analytics',      label: 'nav.analytics' },
+  { to: '/calendar-plan',  label: 'nav.calendarPlan' },
+  { to: '/competitors',    label: 'nav.competitors' },
+  { to: '/settings',       label: 'nav.settings' },
 ]
 
 const currentLocale = computed(
