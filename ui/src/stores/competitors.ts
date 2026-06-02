@@ -166,7 +166,13 @@ export const useCompetitorStore = defineStore('competitors', () => {
         competitors.value[idx].aiSummary = ''
       }
     } catch (err: any) {
-      error.value = err.response?.data?.detail || err.response?.data?.error || 'Summarization failed'
+      // Long AI calls can exceed the proxy timeout while the server still completes.
+      // Re-fetch before showing an error — if the data saved, surface it silently.
+      await fetchCompetitors()
+      const saved = competitors.value.find((c) => c._id === id)?.aiAnalysis
+      if (!saved) {
+        error.value = err.response?.data?.detail || err.response?.data?.error || 'Summarization failed'
+      }
     } finally {
       summarizing.value = { ...summarizing.value, [id]: false }
     }
@@ -208,7 +214,13 @@ export const useCompetitorStore = defineStore('competitors', () => {
       const idx = competitors.value.findIndex((c) => c._id === id)
       if (idx !== -1) competitors.value[idx].contentRoadmap = res.data.contentRoadmap
     } catch (err: any) {
-      error.value = err.response?.data?.detail || err.response?.data?.error || 'Roadmap generation failed'
+      // Long AI calls can exceed the proxy timeout while the server still completes.
+      // Re-fetch before showing an error — if the data saved, surface it silently.
+      await fetchCompetitors()
+      const saved = competitors.value.find((c) => c._id === id)?.contentRoadmap
+      if (!saved?.length) {
+        error.value = err.response?.data?.detail || err.response?.data?.error || 'Roadmap generation failed'
+      }
     } finally {
       generatingRoadmap.value = { ...generatingRoadmap.value, [id]: false }
     }
