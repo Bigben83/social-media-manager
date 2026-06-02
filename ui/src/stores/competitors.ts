@@ -9,6 +9,15 @@ export interface CompetitorProfile {
   targetCustomer: string
 }
 
+export type SignalSeverity = 'low' | 'medium' | 'high'
+
+export interface CompetitorSignal {
+  type: string
+  description: string
+  severity: SignalSeverity
+  detectedAt: string
+}
+
 export interface AiAnalysis {
   themes: string[]
   tone: string
@@ -66,6 +75,7 @@ export interface Competitor {
   aiAnalysis?: AiAnalysis
   keywords: CompetitorKeyword[]
   contentChanged?: boolean
+  signals?: CompetitorSignal[]
   gapAnalysis?: GapAnalysis
   contentRoadmap?: RoadmapPost[]
   lastScraped: string | null
@@ -240,8 +250,26 @@ export const useCompetitorStore = defineStore('competitors', () => {
     }
   }
 
+  const detectingSignals = ref<Record<string, boolean>>({})
   const discoveringCompetitors = ref(false)
   const discoverySuggestions = ref<CompetitorSuggestion[]>([])
+
+  async function detectSignals(id: string): Promise<void> {
+    detectingSignals.value = { ...detectingSignals.value, [id]: true }
+    error.value = null
+    try {
+      const res = await axios.post(`/api/competitors/${id}/detect-signals`)
+      const idx = competitors.value.findIndex((c) => c._id === id)
+      if (idx !== -1) {
+        competitors.value[idx].signals = res.data.signals
+        competitors.value[idx].contentChanged = false
+      }
+    } catch (err: any) {
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Signal detection failed'
+    } finally {
+      detectingSignals.value = { ...detectingSignals.value, [id]: false }
+    }
+  }
 
   async function discoverCompetitors(): Promise<void> {
     discoveringCompetitors.value = true
@@ -258,9 +286,10 @@ export const useCompetitorStore = defineStore('competitors', () => {
   }
 
   return {
-    competitors, loading, scraping, summarizing, extractingKeywords, analyzingGaps, generatingRoadmap, scrapeResults,
-    discoveringCompetitors, discoverySuggestions, error,
+    competitors, loading, scraping, summarizing, extractingKeywords, analyzingGaps, generatingRoadmap,
+    detectingSignals, discoveringCompetitors, discoverySuggestions, scrapeResults, error,
     fetchCompetitors, addCompetitor, updateCompetitor, deleteCompetitor,
-    scrapeCompetitor, summarizeCompetitor, extractKeywords, analyzeGaps, generateRoadmap, discoverCompetitors,
+    scrapeCompetitor, summarizeCompetitor, extractKeywords, analyzeGaps, generateRoadmap,
+    detectSignals, discoverCompetitors,
   }
 })

@@ -101,6 +101,15 @@
             {{ competitorStore.extractingKeywords[competitor._id] ? t('competitors.extractingKeywords') : t('competitors.extractKeywords') }}
           </button>
           <button
+            @click="competitorStore.detectSignals(competitor._id)"
+            :disabled="competitorStore.detectingSignals[competitor._id] || !competitor.scrapedContent.length"
+            class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-yellow-700 hover:bg-yellow-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            :class="{ 'ring-1 ring-yellow-400': competitor.contentChanged && !competitorStore.detectingSignals[competitor._id] }"
+          >
+            <i class="fa-solid fa-tower-broadcast" :class="{ 'animate-pulse': competitorStore.detectingSignals[competitor._id] }"></i>
+            {{ competitorStore.detectingSignals[competitor._id] ? t('competitors.detectingSignals') : t('competitors.detectSignals') }}
+          </button>
+          <button
             @click="competitorStore.analyzeGaps(competitor._id)"
             :disabled="competitorStore.analyzingGaps[competitor._id] || !competitor.keywords?.length"
             class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
@@ -142,6 +151,28 @@
             <i class="fa-solid fa-circle-dot text-[8px] animate-pulse"></i>
             {{ t('competitors.newActivity') }}
           </span>
+        </div>
+
+        <!-- Market Signals -->
+        <div v-if="competitor.signals?.length" class="mb-3">
+          <div class="text-xs text-yellow-400 font-medium mb-1.5">{{ t('competitors.signalsLabel') }}</div>
+          <div class="flex flex-wrap gap-1.5">
+            <span
+              v-for="signal in competitor.signals"
+              :key="signal.type + signal.detectedAt"
+              :title="signal.description"
+              :class="{
+                'bg-red-900/40 border-red-700/60 text-red-300':    signal.severity === 'high',
+                'bg-amber-900/40 border-amber-700/60 text-amber-300': signal.severity === 'medium',
+                'bg-gray-700/60 border-gray-600/60 text-gray-300':  signal.severity === 'low',
+              }"
+              class="inline-flex items-center gap-1 text-xs px-2 py-0.5 border rounded-full cursor-default"
+            >
+              <i class="fa-solid fa-tower-broadcast text-[9px]"></i>
+              {{ t(`competitors.signalType_${signal.type}`) || signal.type.replace(/_/g, ' ') }}
+            </span>
+          </div>
+          <p v-if="competitor.signals.length === 1" class="text-xs text-gray-400 mt-1.5 italic">{{ competitor.signals[0].description }}</p>
         </div>
 
         <!-- Structured Profile Fact-sheet -->

@@ -2922,6 +2922,101 @@ app.post('/competitors/:id/analyze-gaps', async (request, reply) => {
   return { success: true, ...gapAnalysis };
 });
 
+// Detect and classify market signals from latest scraped content
+app.post('/competitors/:id/detect-signals', async (request, reply) => {
+  const db = await getDb();
+  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
+
+  const recentContent = (competitor.scrapedContent || []).slice(0, 10);
+  if (!recentContent.length) return reply.code(400).send({ error: 'Scrape first before detecting signals' });
+
+  const contentText = recentContent.map((s) => `[${s.source}] ${s.text}`).join('\n\n').slice(0, 4000);
+  const baseline = competitor.aiAnalysis
+    ? `Previous profile — Themes: ${(competitor.aiAnalysis.themes || []).join(', ')}. Tone: ${competitor.aiAnalysis.tone || 'unknown'}.`
+    : 'No prior analysis available.';
+
+  const system = 'You are a competitive intelligence analyst specialising in market signal detection. Return only valid JSON with no explanation, no markdown.';
+  const prompt = `Analyse the latest content from competitor "${competitor.name}" and detect any notable changes or strategic signals.
+
+Baseline context:
+${baseline}
+
+Latest scraped content:
+${contentText}
+
+Classify any changes you detect. Use these signal types:
+- topic_expansion: new content themes or topics not previously seen
+- tone_shift: measurable change in communication style or voice
+- campaign_launch: evidence of a new marketing campaign or product promotion
+- pricing_change: any mention of new pricing, offers, or discounts
+- market_entry: signs of entering a new platform, audience, or geography
+- competitive_aggression: direct competitor comparisons, attack marketing, or poaching language
+- frequency_change: evidence of significantly more or less content activity
+
+Return ONLY a JSON array (empty array [] if no significant signals):
+[{"type":"<type>","description":"<one sentence describing the specific change>","severity":"<low|medium|high>"}]
+
+Severity guide: high = major strategic shift, medium = notable change worth monitoring, low = minor or uncertain change.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    const VALID_TYPES = new Set(['topic_expansion', 'tone_shift', 'campaign_launch', 'pricing_change', 'market_entry', 'competitive_aggression', 'frequency_change']);
+    const VALID_SEVERITIES = new Set(['low', 'medium', 'high']);
+    let signals = [];
+    try {
+      const jsonStr = (text.match(/\[[\s\S]*\]/) || ['[]'])[0];
+      const parsed = JSON.parse(jsonStr);
+      if (!Array.isArray(parsed)) throw new Error();
+      const now = new Date();
+      signals = parsed
+        .filter((s) => s && VALID_TYPES.has(s.type) && typeof s.description === 'string')
+        .slice(0, 8)
+        .map((s) => ({
+          type: s.type,
+          description: s.description.trim(),
+          severity: VALID_SEVERITIES.has(s.severity) ? s.severity : 'medium',
+          detectedAt: now,
+        }));
+    } catch {
+      signals = [];
+    }
+
+    await db.collection('competitors').updateOne(
+      { _id: new ObjectId(request.params.id) },
+      { $set: { signals, contentChanged: false, updatedAt: new Date() } },
+    );
+    log.info({ action: 'detect_signals', competitorId: request.params.id, count: signals.length, outcome: 'success' });
+    return { success: true, signals };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Signal detection failed', detail: err.message });
+  }
+});
+
 // Generate a 5-post content roadmap from competitor keywords and gaps
 app.post('/competitors/:id/content-roadmap', async (request, reply) => {
   const db = await getDb();
