@@ -507,6 +507,11 @@ onMounted(async () => {
   ])
   composeStore.initDestinations()
 
+  // Pre-fill content when arriving from Competitor Roadmap ("Draft this post")
+  if (route.query.prefill) {
+    composeStore.content = String(route.query.prefill)
+  }
+
   // Pre-fill media URL when arriving from the Media Library ("Use in Post")
   if (route.query.media) {
     composeStore.mediaUrl = String(route.query.media)

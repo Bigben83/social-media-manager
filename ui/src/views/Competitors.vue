@@ -91,6 +91,14 @@
             <i class="fa-solid fa-tags" :class="{ 'animate-pulse': competitorStore.extractingKeywords[competitor._id] }"></i>
             {{ competitorStore.extractingKeywords[competitor._id] ? t('competitors.extractingKeywords') : t('competitors.extractKeywords') }}
           </button>
+          <button
+            @click="competitorStore.generateRoadmap(competitor._id)"
+            :disabled="competitorStore.generatingRoadmap[competitor._id] || (!competitor.keywords?.length && !competitor.scrapedContent.length)"
+            class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <i class="fa-solid fa-map" :class="{ 'animate-pulse': competitorStore.generatingRoadmap[competitor._id] }"></i>
+            {{ competitorStore.generatingRoadmap[competitor._id] ? t('competitors.generatingRoadmap') : t('competitors.generateRoadmap') }}
+          </button>
         </div>
 
         <!-- Scrape result message -->
@@ -189,6 +197,38 @@
             >{{ typeof kw === 'string' ? kw : kw.term }}</span>
           </div>
         </div>
+
+        <!-- Content Roadmap -->
+        <div v-if="competitor.contentRoadmap?.length" class="mt-4">
+          <div class="text-xs text-emerald-400 font-medium mb-2">{{ t('competitors.roadmapLabel') }}</div>
+          <div class="space-y-2">
+            <div
+              v-for="(post, idx) in competitor.contentRoadmap"
+              :key="idx"
+              class="p-3 bg-gray-700/50 rounded border border-gray-600"
+            >
+              <div class="flex items-start justify-between gap-3 mb-1.5">
+                <div class="text-xs font-semibold text-emerald-300">{{ post.topic }}</div>
+                <button
+                  @click="draftPost(post.headline)"
+                  class="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1 bg-violet-700 hover:bg-violet-600 text-white rounded"
+                >
+                  <i class="fa-solid fa-pen-to-square"></i>
+                  {{ t('competitors.roadmapDraft') }}
+                </button>
+              </div>
+              <p class="text-sm text-gray-200 mb-2">{{ post.headline }}</p>
+              <div v-if="post.rationale" class="text-xs text-gray-400 italic mb-2">{{ post.rationale }}</div>
+              <div v-if="post.keywords?.length" class="flex flex-wrap gap-1">
+                <span
+                  v-for="kw in post.keywords"
+                  :key="kw"
+                  class="text-xs px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/50 text-emerald-300 rounded"
+                >{{ kw }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -226,11 +266,20 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useCompetitorStore, type Competitor, type KeywordIntent } from '../stores/competitors'
+import { useComposeStore } from '../stores/compose'
 
 const { t } = useI18n()
+const router = useRouter()
 const competitorStore = useCompetitorStore()
+const composeStore = useComposeStore()
+
+function draftPost(headline: string) {
+  composeStore.content = headline
+  router.push('/compose')
+}
 
 const KEYWORD_INTENTS = [
   { key: 'informational', dot: 'bg-blue-400' },

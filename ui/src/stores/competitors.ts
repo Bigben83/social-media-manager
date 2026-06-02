@@ -18,6 +18,13 @@ export interface CompetitorKeyword {
   extractedAt?: string
 }
 
+export interface RoadmapPost {
+  topic: string
+  headline: string
+  keywords: string[]
+  rationale: string
+}
+
 export interface Competitor {
   _id: string
   name: string
@@ -27,6 +34,7 @@ export interface Competitor {
   aiSummary: string
   aiAnalysis?: AiAnalysis
   keywords: CompetitorKeyword[]
+  contentRoadmap?: RoadmapPost[]
   lastScraped: string | null
   createdAt: string
   updatedAt: string
@@ -38,6 +46,7 @@ export const useCompetitorStore = defineStore('competitors', () => {
   const scraping = ref<Record<string, boolean>>({})
   const summarizing = ref<Record<string, boolean>>({})
   const extractingKeywords = ref<Record<string, boolean>>({})
+  const generatingRoadmap = ref<Record<string, boolean>>({})
   const scrapeResults = ref<Record<string, { sources: number; ok: boolean; message: string }>>({})
   const error = ref<string | null>(null)
 
@@ -139,9 +148,23 @@ export const useCompetitorStore = defineStore('competitors', () => {
     }
   }
 
+  async function generateRoadmap(id: string): Promise<void> {
+    generatingRoadmap.value = { ...generatingRoadmap.value, [id]: true }
+    error.value = null
+    try {
+      const res = await axios.post(`/api/competitors/${id}/content-roadmap`)
+      const idx = competitors.value.findIndex((c) => c._id === id)
+      if (idx !== -1) competitors.value[idx].contentRoadmap = res.data.contentRoadmap
+    } catch (err: any) {
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Roadmap generation failed'
+    } finally {
+      generatingRoadmap.value = { ...generatingRoadmap.value, [id]: false }
+    }
+  }
+
   return {
-    competitors, loading, scraping, summarizing, extractingKeywords, scrapeResults, error,
+    competitors, loading, scraping, summarizing, extractingKeywords, generatingRoadmap, scrapeResults, error,
     fetchCompetitors, addCompetitor, updateCompetitor, deleteCompetitor,
-    scrapeCompetitor, summarizeCompetitor, extractKeywords,
+    scrapeCompetitor, summarizeCompetitor, extractKeywords, generateRoadmap,
   }
 })

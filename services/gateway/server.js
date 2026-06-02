@@ -2476,4 +2476,94 @@ No explanation, no markdown.`;
   }
 });
 
+// Generate a 5-post content roadmap from competitor keywords and gaps
+app.post('/competitors/:id/content-roadmap', async (request, reply) => {
+  const db = await getDb();
+  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
+
+  const keywords = (competitor.keywords || []);
+  const hasKeywords = keywords.length > 0;
+  const hasContent = (competitor.scrapedContent || []).length > 0;
+  if (!hasKeywords && !hasContent) return reply.code(400).send({ error: 'Extract keywords first before generating a roadmap' });
+
+  const kwList = hasKeywords
+    ? keywords.map((k) => (typeof k === 'string' ? k : k.term)).join(', ')
+    : '';
+  const gaps = competitor.aiAnalysis?.gaps || [];
+  const moves = competitor.aiAnalysis?.moves || [];
+
+  const gapsSection = gaps.length ? `\nCompetitor gaps/weaknesses:\n${gaps.map((g) => `- ${g}`).join('\n')}` : '';
+  const movesSection = moves.length ? `\nSuggested differentiation angles:\n${moves.map((m) => `- ${m}`).join('\n')}` : '';
+  const kwSection = kwList ? `\nCompetitor's keywords: ${kwList}` : '';
+
+  const system = 'You are a content strategist. Return only valid JSON with no explanation, no markdown code blocks.';
+  const prompt = `Create a 5-post content roadmap to compete against "${competitor.name}".
+${kwSection}${gapsSection}${movesSection}
+
+Generate 5 post ideas that exploit their weaknesses and differentiate clearly. For each post return:
+- topic: short topic name, max 8 words
+- headline: an engaging opening line or hook ready to use as post content (1-2 sentences)
+- keywords: array of 2-3 keywords from the competitor's list to target (use exact terms where available)
+- rationale: one sentence on why this post wins against ${competitor.name}
+
+Return ONLY a JSON array:
+[{"topic":"...","headline":"...","keywords":["..."],"rationale":"..."}]
+No explanation, no markdown.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 180000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 180000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 180000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let roadmap = [];
+    try {
+      const jsonStr = (text.match(/\[[\s\S]*\]/) || ['[]'])[0];
+      const parsed = JSON.parse(jsonStr);
+      if (!Array.isArray(parsed)) throw new Error();
+      roadmap = parsed
+        .filter((p) => p && typeof p.topic === 'string' && typeof p.headline === 'string')
+        .slice(0, 5)
+        .map((p) => ({
+          topic: p.topic.trim(),
+          headline: p.headline.trim(),
+          keywords: Array.isArray(p.keywords) ? p.keywords.filter((k) => typeof k === 'string').slice(0, 3) : [],
+          rationale: typeof p.rationale === 'string' ? p.rationale.trim() : '',
+        }));
+    } catch {
+      roadmap = [];
+    }
+    if (!roadmap.length) return reply.code(503).send({ error: 'AI returned invalid roadmap format — try again' });
+
+    await db.collection('competitors').updateOne(
+      { _id: new ObjectId(request.params.id) },
+      { $set: { contentRoadmap: roadmap, updatedAt: new Date() } },
+    );
+    return { success: true, contentRoadmap: roadmap };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Roadmap generation failed', detail: err.message });
+  }
+});
+
 module.exports = app;
