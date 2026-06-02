@@ -55,6 +55,7 @@ export default {
     crawlMetrics: 'Crawl Metrics',
     crawling: 'Crawling…',
     crawlDone: 'Crawled {count} posts',
+    exportCsv: 'Export CSV',
 
     runAudit: 'Run Brand Audit',
     runningAudit: 'Auditing…',
@@ -112,6 +113,7 @@ export default {
     savingAll: 'Saving drafts…',
     draft: 'Draft',
     week: 'Week {n}',
+    exportCsv: 'Export CSV',
   },
 
   media: {

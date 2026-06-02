@@ -18,6 +18,13 @@
             {{ auditLoading ? $t('analytics.runningAudit') : $t('analytics.runAudit') }}
           </button>
           <button
+            @click="exportCsv"
+            class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm font-medium transition-colors"
+          >
+            <i class="fa-solid fa-file-csv text-xs"></i>
+            {{ $t('analytics.exportCsv') }}
+          </button>
+          <button
             @click="crawlMetrics"
             :disabled="crawling"
             class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
@@ -625,6 +632,18 @@ async function loadInsights() {
   } finally {
     insightsLoading.value = false
   }
+}
+
+function exportCsv() {
+  const params = new URLSearchParams()
+  if (selectedAccount.value) params.set('account', selectedAccount.value)
+  // Export current month by default
+  params.set('month', new Date().toISOString().slice(0, 7))
+  const url = `/api/analytics/export?${params.toString()}`
+  const a = document.createElement('a')
+  a.href = url
+  a.download = ''
+  a.click()
 }
 
 async function runAudit() {

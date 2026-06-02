@@ -81,14 +81,23 @@
               <h2 class="font-semibold text-white">{{ $t('calendarPlan.briefTitle') }}</h2>
               <p class="text-xs text-gray-500 mt-0.5">{{ calendar.monthName }}</p>
             </div>
-            <button
-              @click="saveAllDrafts"
-              :disabled="savingAll"
-              class="flex items-center gap-1.5 text-sm px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded-lg text-white transition-colors"
-            >
-              <i class="fa-solid fa-floppy-disk text-xs"></i>
-              {{ savingAll ? $t('calendarPlan.savingAll') : $t('calendarPlan.saveAllDrafts', { count: calendar.posts.length }) }}
-            </button>
+            <div class="flex gap-2">
+              <button
+                @click="exportCalendarCsv"
+                class="flex items-center gap-1.5 text-sm px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-200 transition-colors"
+              >
+                <i class="fa-solid fa-file-csv text-xs"></i>
+                {{ $t('calendarPlan.exportCsv') }}
+              </button>
+              <button
+                @click="saveAllDrafts"
+                :disabled="savingAll"
+                class="flex items-center gap-1.5 text-sm px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded-lg text-white transition-colors"
+              >
+                <i class="fa-solid fa-floppy-disk text-xs"></i>
+                {{ savingAll ? $t('calendarPlan.savingAll') : $t('calendarPlan.saveAllDrafts', { count: calendar.posts.length }) }}
+              </button>
+            </div>
           </div>
 
           <div class="p-4 bg-gray-800/50 rounded-xl mb-4">
@@ -248,6 +257,23 @@ async function generate() {
   } finally {
     loading.value = false
   }
+}
+
+function exportCalendarCsv() {
+  if (!calendar.value?.posts?.length) return
+  const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`
+  const header = ['Platform', 'Week', 'Suggested Day', 'Post Type', 'Content', 'Hashtags']
+  const rows = calendar.value.posts.map((p: any) => [
+    p.platform, p.week, p.suggestedDay || '', p.postType || '', escape(p.content), (p.hashtags || []).join(' '),
+  ].join(','))
+  const csv = '﻿' + [header.join(','), ...rows].join('\r\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `content-plan-${calendar.value.month}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function draftPost(content: string) {

@@ -55,6 +55,7 @@ export default {
     crawlMetrics: 'Metrikleri Getir',
     crawling: 'Getiriliyor…',
     crawlDone: '{count} gönderi getirildi',
+    exportCsv: 'CSV Dışa Aktar',
 
     runAudit: 'Marka Denetimi Yap',
     runningAudit: 'Denetleniyor…',
@@ -112,6 +113,7 @@ export default {
     savingAll: 'Taslaklar kaydediliyor…',
     draft: 'Taslağa al',
     week: '{n}. hafta',
+    exportCsv: 'CSV Dışa Aktar',
   },
 
   media: {

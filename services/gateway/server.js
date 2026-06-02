@@ -2173,6 +2173,79 @@ app.get('/analytics/posts', async (request) => {
   return { posts: normalised, total: schedTotal + immTotal };
 });
 
+// ─── Analytics Export ─────────────────────────────────────────────────────────
+
+// GET /analytics/export?format=csv&account=&month=YYYY-MM
+// Exports scheduled jobs + immediate posts as a downloadable CSV.
+app.get('/analytics/export', async (request, reply) => {
+  const { format = 'csv', account, month } = request.query;
+  const filter = parseAccountFilter(account);
+  const db = await getDb();
+
+  let dateFilter = {};
+  if (month) {
+    const start = new Date(`${month}-01T00:00:00.000Z`);
+    const end   = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+    dateFilter = { $gte: start, $lt: end };
+  }
+
+  const sjMatch = {
+    status: { $in: ['completed', 'failed'] },
+    ...sjFilter(filter),
+    ...(month ? { completedAt: dateFilter } : {}),
+  };
+  const ipMatch = {
+    type: 'immediate',
+    ...ipFilter(filter),
+    ...(month ? { publishedAt: dateFilter } : {}),
+  };
+
+  const [scheduledJobs, immediatePosts] = await Promise.all([
+    db.collection('scheduled_jobs')
+      .find(sjMatch)
+      .sort({ completedAt: -1 })
+      .project({ content: 1, destinations: 1, status: 1, completedAt: 1, scheduledAt: 1 })
+      .toArray(),
+    db.collection('posts')
+      .find(ipMatch)
+      .sort({ publishedAt: -1 })
+      .project({ content: 1, destinations: 1, platformResults: 1, status: 1, publishedAt: 1 })
+      .toArray(),
+  ]);
+
+  const rows = [
+    ...scheduledJobs.map((j) => ({
+      type: 'scheduled',
+      date: (j.completedAt || j.scheduledAt)?.toISOString()?.slice(0, 10) ?? '',
+      time: (j.completedAt || j.scheduledAt)?.toISOString()?.slice(11, 16) ?? '',
+      platforms: (j.destinations || []).map((d) => d.platform).join(' | '),
+      status: j.status === 'completed' ? 'published' : 'failed',
+      content: j.content || '',
+    })),
+    ...immediatePosts.map((p) => ({
+      type: 'immediate',
+      date: p.publishedAt?.toISOString()?.slice(0, 10) ?? '',
+      time: p.publishedAt?.toISOString()?.slice(11, 16) ?? '',
+      platforms: (p.destinations || []).map((d) => d.platform).join(' | '),
+      status: p.status,
+      content: p.content || '',
+    })),
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+
+  const escape = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  const header = ['Date', 'Time (UTC)', 'Type', 'Platforms', 'Status', 'Content'];
+  const lines  = [
+    header.join(','),
+    ...rows.map((r) => [r.date, r.time, r.type, r.platforms, r.status, escape(r.content)].join(',')),
+  ];
+
+  const filename = `posts-${month || 'all'}.csv`;
+  reply.header('Content-Type', 'text/csv; charset=utf-8');
+  reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+  return reply.send('﻿' + lines.join('\r\n'));
+});
+
 // ─── Brand / Account Audit ────────────────────────────────────────────────────
 
 app.post('/analytics/audit', async (request, reply) => {
