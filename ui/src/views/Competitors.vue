@@ -1,5 +1,5 @@
 <template>
-  <div class="p-6 max-w-3xl mx-auto">
+  <div class="p-6 mx-auto" :class="competitorStore.competitors.length === 2 ? 'max-w-6xl' : 'max-w-3xl'">
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-white">{{ t('competitors.sectionTitle') }}</h1>
       <p class="text-gray-400 mt-1">{{ t('competitors.sectionSubtitle') }}</p>
@@ -9,8 +9,17 @@
       {{ competitorStore.error }}
     </div>
 
-    <!-- Competitor cards -->
-    <div v-if="competitorStore.competitors.length" class="space-y-4 mb-6">
+    <!-- Side-by-side label -->
+    <div v-if="competitorStore.competitors.length === 2" class="mb-3 flex items-center gap-2 text-xs text-gray-500">
+      <i class="fa-solid fa-table-columns"></i>
+      {{ t('competitors.sideBySideMode') }}
+    </div>
+
+    <!-- Competitor cards — stacked for 1, side-by-side grid for 2 -->
+    <div
+      v-if="competitorStore.competitors.length"
+      :class="competitorStore.competitors.length === 2 ? 'grid grid-cols-2 gap-4 mb-6 items-start' : 'space-y-4 mb-6'"
+    >
       <div
         v-for="competitor in competitorStore.competitors"
         :key="competitor._id"
@@ -227,15 +236,29 @@
           <!-- Gap keywords (missing from your content) -->
           <div v-if="competitor.gapAnalysis.gaps.length" class="mb-3">
             <div class="text-xs text-gray-400 mb-1.5">{{ t('competitors.gapMissing') }}</div>
+            <!-- Double-danger note: keywords both competitors target -->
+            <div
+              v-if="sharedGapTerms.size > 0 && competitor.gapAnalysis.gaps.some(g => sharedGapTerms.has(g.term))"
+              class="mb-2 flex items-center gap-1.5 text-xs text-rose-400"
+            >
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              {{ t('competitors.sharedGapsNote', { name: otherCompetitorName(competitor._id) }) }}
+            </div>
             <div class="flex flex-wrap gap-1.5">
               <span
                 v-for="gap in competitor.gapAnalysis.gaps"
                 :key="gap.term"
-                :class="intentChipClass(gap.intent)"
-                :title="t(`competitors.intent_${gap.intent}`)"
+                :class="sharedGapTerms.has(gap.term)
+                  ? 'bg-rose-900/40 border-rose-600/70 text-rose-300'
+                  : intentChipClass(gap.intent)"
+                :title="sharedGapTerms.has(gap.term)
+                  ? t('competitors.sharedGapTitle', { name: otherCompetitorName(competitor._id) })
+                  : t(`competitors.intent_${gap.intent}`)"
                 class="inline-flex items-center gap-1 text-xs px-2 py-0.5 border rounded-full"
               >
-                <span class="opacity-60 text-[10px]">{{ gap.intent[0].toUpperCase() }}</span>{{ gap.term }}
+                <i v-if="sharedGapTerms.has(gap.term)" class="fa-solid fa-triangle-exclamation text-[9px]"></i>
+                <span v-else class="opacity-60 text-[10px]">{{ gap.intent[0].toUpperCase() }}</span>
+                {{ gap.term }}
               </span>
             </div>
           </div>
@@ -326,7 +349,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useCompetitorStore, type Competitor, type KeywordIntent } from '../stores/competitors'
@@ -340,6 +363,19 @@ const composeStore = useComposeStore()
 function draftPost(headline: string) {
   composeStore.content = headline
   router.push('/compose')
+}
+
+// Set of gap terms that appear in BOTH competitors' gap analyses — "double danger"
+const sharedGapTerms = computed<Set<string>>(() => {
+  const cs = competitorStore.competitors
+  if (cs.length < 2) return new Set()
+  const gaps0 = new Set(cs[0].gapAnalysis?.gaps.map((g) => g.term) ?? [])
+  const gaps1 = new Set(cs[1].gapAnalysis?.gaps.map((g) => g.term) ?? [])
+  return new Set([...gaps0].filter((t) => gaps1.has(t)))
+})
+
+function otherCompetitorName(currentId: string): string {
+  return competitorStore.competitors.find((c) => c._id !== currentId)?.name ?? ''
 }
 
 const KEYWORD_INTENTS = [
