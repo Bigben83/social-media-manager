@@ -2014,63 +2014,62 @@ function gradeHashtag(count, avgEngagement) {
   return 'D';
 }
 
-app.post('/hashtags/scrape', async () => {
+// POST /hashtags/scrape — scan YOUR published posts per-account.
+// Body: { accountKey?: string }  — omit to scan all accounts at once.
+app.post('/hashtags/scrape', async (request) => {
+  const { accountKey: filterAccount } = request.body || {};
   const db = await getDb();
 
-  // Collect hashtag → { count, totalEngagement, platforms }
+  // tagMap key: `${accountKey}||${hashtag}`
   const tagMap = {};
 
-  function touch(tag, platform, engagement) {
-    if (!tagMap[tag]) tagMap[tag] = { count: 0, totalEngagement: 0, platforms: new Set() };
-    tagMap[tag].count++;
-    tagMap[tag].totalEngagement += engagement;
-    tagMap[tag].platforms.add(platform);
+  function touch(tag, accountKey, platform, engagement) {
+    const key = `${accountKey}||${tag}`;
+    if (!tagMap[key]) tagMap[key] = { tag, accountKey, count: 0, totalEngagement: 0, platforms: new Set() };
+    tagMap[key].count++;
+    tagMap[key].totalEngagement += engagement;
+    tagMap[key].platforms.add(platform);
   }
 
-  // Scan published posts
-  const posts = await db.collection('posts').find({}, { projection: { content: 1, destinations: 1, platformResults: 1 } }).toArray();
+  // Engagement lookup keyed by content fingerprint
   const postMetrics = await db.collection('post_metrics').find({}).toArray();
-
-  // Build engagement lookup keyed by content fingerprint (first 100 chars)
   const metricsByContent = {};
   for (const m of postMetrics) {
     if (m.content) {
       const key = m.content.slice(0, 100).toLowerCase().trim();
-      metricsByContent[key] = (metricsByContent[key] || 0) + m.metrics.engagementTotal;
+      metricsByContent[key] = (metricsByContent[key] || 0) + (m.metrics?.engagementTotal || 0);
     }
   }
 
+  // Scan YOUR published posts only — feeds are others' content, not your performance
+  const posts = await db.collection('posts').find({}, { projection: { content: 1, destinations: 1 } }).toArray();
+
   for (const post of posts) {
     const tags = extractHashtags(post.content || '');
+    if (!tags.length) continue;
     const engagement = post.content
       ? (metricsByContent[post.content.slice(0, 100).toLowerCase().trim()] || 0)
       : 0;
-    const platforms = (post.destinations || []).map((d) => d.platform);
-    for (const tag of tags) {
-      for (const platform of platforms.length ? platforms : ['unknown']) {
-        touch(tag, platform, engagement / Math.max(tags.length, 1));
+    const destinations = post.destinations?.length ? post.destinations : [{ platform: 'unknown' }];
+
+    for (const dest of destinations) {
+      const acctKey = dest.accountId ? `${dest.platform}:${dest.accountId}` : dest.platform;
+      if (filterAccount && acctKey !== filterAccount) continue;
+      for (const tag of tags) {
+        touch(tag, acctKey, dest.platform, engagement / Math.max(tags.length, 1));
       }
     }
   }
 
-  // Also scan feed items
-  const feeds = await db.collection('feeds').find({}, { projection: { content: 1, platform: 1, metrics: 1 } }).toArray();
-  for (const item of feeds) {
-    const tags = extractHashtags(item.content || '');
-    const engagement = (item.metrics?.likes || 0) + (item.metrics?.comments || 0) + (item.metrics?.shares || 0);
-    for (const tag of tags) {
-      touch(tag, item.platform || 'unknown', engagement / Math.max(tags.length, 1));
-    }
-  }
-
-  // Upsert hashtag_stats
   let scraped = 0;
-  for (const [tag, data] of Object.entries(tagMap)) {
+  for (const [compoundKey, data] of Object.entries(tagMap)) {
     const avgEngagement = data.count > 0 ? data.totalEngagement / data.count : 0;
     await db.collection('hashtag_stats').updateOne(
-      { _id: tag },
+      { _id: compoundKey },
       {
         $set: {
+          hashtag: data.tag,
+          accountKey: data.accountKey,
           count: data.count,
           avgEngagement: Math.round(avgEngagement * 10) / 10,
           grade: gradeHashtag(data.count, avgEngagement),
@@ -2083,19 +2082,58 @@ app.post('/hashtags/scrape', async () => {
     scraped++;
   }
 
-  app.log.info({ action: 'hashtag_scrape', outcome: 'success', scraped });
+  log.info({ action: 'hashtag_scrape', accountKey: filterAccount || 'all', outcome: 'success', scraped });
   return { success: true, scraped };
 });
 
 app.get('/hashtags/stats', async (request) => {
-  const sortBy = request.query.sort || 'count';
+  const { sort, accountKey } = request.query;
   const db = await getDb();
-  const sortField = sortBy === 'engagement' ? 'avgEngagement' : 'count';
-  const stats = await db.collection('hashtag_stats')
-    .find({})
-    .sort({ [sortField]: -1 })
-    .limit(200)
-    .toArray();
+  const sortField = sort === 'engagement' ? 'avgEngagement' : 'count';
+
+  if (accountKey) {
+    // Per-account view
+    const stats = await db.collection('hashtag_stats')
+      .find({ accountKey })
+      .sort({ [sortField]: -1 })
+      .limit(200)
+      .toArray();
+    return { stats };
+  }
+
+  // Aggregate view: group by hashtag across all accounts
+  const allStats = await db.collection('hashtag_stats').find({ accountKey: { $exists: true } }).toArray();
+  const grouped = new Map();
+  for (const s of allStats) {
+    if (!s.hashtag) continue;
+    if (!grouped.has(s.hashtag)) {
+      grouped.set(s.hashtag, { count: 0, totalEngagement: 0, totalCount: 0, platforms: new Set(), lastScraped: null });
+    }
+    const g = grouped.get(s.hashtag);
+    g.count += s.count;
+    g.totalEngagement += s.avgEngagement * s.count;
+    g.totalCount += s.count;
+    for (const p of (s.platforms || [])) g.platforms.add(p);
+    if (!g.lastScraped || (s.lastScraped && new Date(s.lastScraped) > new Date(g.lastScraped))) g.lastScraped = s.lastScraped;
+  }
+
+  const stats = [...grouped.entries()]
+    .map(([tag, g]) => {
+      const avgEngagement = g.totalCount > 0 ? Math.round((g.totalEngagement / g.totalCount) * 10) / 10 : 0;
+      return {
+        _id: tag,
+        hashtag: tag,
+        accountKey: null,
+        count: g.count,
+        avgEngagement,
+        grade: gradeHashtag(g.count, avgEngagement),
+        platforms: [...g.platforms],
+        lastScraped: g.lastScraped,
+      };
+    })
+    .sort((a, b) => b[sortField] - a[sortField])
+    .slice(0, 200);
+
   return { stats };
 });
 
@@ -2512,11 +2550,14 @@ app.post('/competitors/:id/analyze-gaps', async (request, reply) => {
   const keywords = (competitor.keywords || []);
   if (!keywords.length) return reply.code(400).send({ error: 'Extract keywords first before analysing gaps' });
 
-  const hashtagDocs = await db.collection('hashtag_stats').find({}, { projection: { _id: 1 } }).toArray();
+  const hashtagDocs = await db.collection('hashtag_stats')
+    .find({ accountKey: { $exists: true } }, { projection: { _id: 0, hashtag: 1 } })
+    .toArray();
   const hashtagStatsEmpty = hashtagDocs.length === 0;
 
-  // Strip '#' prefix and lowercase each hashtag for substring matching
-  const hashtagTexts = hashtagDocs.map((h) => ({ id: h._id, text: h._id.replace(/^#/, '').toLowerCase() }));
+  // Deduplicate across accounts — same hashtag used by any account counts as covered
+  const uniqueTags = [...new Set(hashtagDocs.map((h) => h.hashtag).filter(Boolean))];
+  const hashtagTexts = uniqueTags.map((tag) => ({ id: tag, text: tag.replace(/^#/, '').toLowerCase() }));
 
   const INTENT_ORDER = { transactional: 0, commercial: 1, informational: 2, navigational: 3 };
 

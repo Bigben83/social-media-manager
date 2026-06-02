@@ -757,7 +757,7 @@
             </div>
           </div>
           <button
-            @click="showHashtagStats = !showHashtagStats; showHashtagStats && hashtagStore.stats.length === 0 && hashtagStore.fetchStats()"
+            @click="showHashtagStats = !showHashtagStats; showHashtagStats && hashtagStore.stats.length === 0 && hashtagStore.fetchStats('count', statsAccount || undefined)"
             class="text-xs px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors"
           >
             {{ showHashtagStats ? $t('settings.hashtags.hideStats') : $t('settings.hashtags.showStats') }}
@@ -868,16 +868,25 @@
 
             <!-- Controls row -->
             <div class="flex items-center flex-wrap gap-2">
-              <p class="text-sm font-semibold text-gray-300 mr-2">{{ $t('settings.hashtags.statsTitle') }}</p>
+              <p class="text-sm font-semibold text-gray-300 mr-1">{{ $t('settings.hashtags.statsTitle') }}</p>
+
+              <!-- Account filter — scopes view, scan, and AI suggest -->
+              <select
+                v-model="statsAccount"
+                class="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-gray-300 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">{{ $t('settings.hashtags.allAccounts') }}</option>
+                <option v-for="acc in allConnectedAccounts" :key="acc.key" :value="acc.key">{{ acc.label }}</option>
+              </select>
 
               <button
-                @click="statsSort = 'count'; hashtagStore.fetchStats('count')"
+                @click="statsSort = 'count'; hashtagStore.fetchStats('count', statsAccount || undefined)"
                 class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
                 :class="statsSort === 'count' ? 'border-emerald-600 text-emerald-300 bg-emerald-900/20' : 'border-gray-700 text-gray-400 hover:bg-gray-800'"
               >{{ $t('settings.hashtags.sortByUsage') }}</button>
 
               <button
-                @click="statsSort = 'engagement'; hashtagStore.fetchStats('engagement')"
+                @click="statsSort = 'engagement'; hashtagStore.fetchStats('engagement', statsAccount || undefined)"
                 class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
                 :class="statsSort === 'engagement' ? 'border-emerald-600 text-emerald-300 bg-emerald-900/20' : 'border-gray-700 text-gray-400 hover:bg-gray-800'"
               >{{ $t('settings.hashtags.sortByEngagement') }}</button>
@@ -897,13 +906,9 @@
 
             <!-- AI Suggest row -->
             <div class="flex items-center gap-2 flex-wrap">
-              <select
-                v-model="aiSuggestAccount"
-                class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-violet-500 flex-1 min-w-0"
-              >
-                <option value="">{{ $t('settings.hashtags.allAccounts') }}</option>
-                <option v-for="acc in allConnectedAccounts" :key="acc.key" :value="acc.key">{{ acc.label }}</option>
-              </select>
+              <p class="text-xs text-gray-500">
+                {{ statsAccount ? $t('settings.hashtags.aiSuggestForAccount') : $t('settings.hashtags.aiSuggestAllAccounts') }}
+              </p>
               <button
                 @click="handleAiSuggest"
                 :disabled="hashtagStore.aiSuggesting"
@@ -967,7 +972,7 @@
                     :key="stat._id"
                     class="hover:bg-gray-800/30 transition-colors"
                   >
-                    <td class="py-1.5 pr-4 font-mono text-emerald-400">{{ stat._id }}</td>
+                    <td class="py-1.5 pr-4 font-mono text-emerald-400">{{ stat.hashtag || stat._id }}</td>
                     <td class="py-1.5 pr-4 text-right text-gray-300">{{ stat.count }}</td>
                     <td class="py-1.5 pr-4 text-right text-gray-300">{{ stat.avgEngagement }}</td>
                     <td class="py-1.5 pr-4 text-center">
@@ -1220,7 +1225,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
@@ -1363,7 +1368,12 @@ const editGroupName = ref('')
 const editGroupHashtags = ref('')
 const showHashtagStats = ref(false)
 const statsSort = ref<'count' | 'engagement'>('count')
-const aiSuggestAccount = ref('')
+const statsAccount = ref('')
+
+// Auto-reload stats when account filter changes
+watch(statsAccount, (acct) => {
+  if (showHashtagStats.value) hashtagStore.fetchStats(statsSort.value, acct || undefined)
+})
 const selectedAiTags = ref(new Set<string>())
 const aiGroupName = ref('')
 
@@ -1408,12 +1418,12 @@ async function handleDeleteGroup(id: string) {
 }
 
 async function scrapeHashtagsNow() {
-  await hashtagStore.scrapeHashtags()
+  await hashtagStore.scrapeHashtags(statsAccount.value || undefined)
   statsSort.value = 'count'
 }
 
 async function handleAiSuggest() {
-  await hashtagStore.aiSuggest(aiSuggestAccount.value || undefined)
+  await hashtagStore.aiSuggest(statsAccount.value || undefined)
 }
 
 async function createGroupFromAi() {

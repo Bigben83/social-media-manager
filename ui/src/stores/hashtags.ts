@@ -11,7 +11,9 @@ export interface HashtagGroup {
 }
 
 export interface HashtagStat {
-  _id: string        // the hashtag e.g. '#photography'
+  _id: string             // compound key e.g. 'facebook:PAGE_ID||#photography', or hashtag in aggregate view
+  hashtag: string         // e.g. '#photography'
+  accountKey: string | null  // null in aggregate view
   count: number
   avgEngagement: number
   grade: 'A' | 'B' | 'C' | 'D'
@@ -58,12 +60,12 @@ export const useHashtagStore = defineStore('hashtags', () => {
     groups.value = groups.value.filter((g) => g._id !== id)
   }
 
-  async function scrapeHashtags() {
+  async function scrapeHashtags(accountKey?: string) {
     scraping.value = true
     error.value = ''
     try {
-      await axios.post('/api/hashtags/scrape')
-      await fetchStats()
+      await axios.post('/api/hashtags/scrape', accountKey ? { accountKey } : {})
+      await fetchStats('count', accountKey)
     } catch (err: any) {
       error.value = err.response?.data?.error || err.message
     } finally {
@@ -71,10 +73,12 @@ export const useHashtagStore = defineStore('hashtags', () => {
     }
   }
 
-  async function fetchStats(sort: 'count' | 'engagement' = 'count') {
+  async function fetchStats(sort: 'count' | 'engagement' = 'count', accountKey?: string) {
     statsLoading.value = true
     try {
-      const res = await axios.get('/api/hashtags/stats', { params: { sort } })
+      const params: Record<string, string> = { sort }
+      if (accountKey) params.accountKey = accountKey
+      const res = await axios.get('/api/hashtags/stats', { params })
       stats.value = res.data.stats || []
     } catch (err: any) {
       error.value = err.response?.data?.error || err.message
@@ -88,6 +92,7 @@ export const useHashtagStore = defineStore('hashtags', () => {
     aiSuggestions.value = []
     error.value = ''
     try {
+      // Pass top tags from whichever account is currently in view
       const topTags = stats.value.slice(0, 15)
       const res = await axios.post('/api/hashtags/ai-suggest', { accountKey, topTags, count })
       aiSuggestions.value = res.data.hashtags || []

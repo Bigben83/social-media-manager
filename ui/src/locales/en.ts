@@ -284,7 +284,7 @@ export default {
 
     hashtags: {
       sectionTitle: 'Hashtag Groups',
-      sectionSubtitle: 'Save hashtag presets and analyse performance from your published posts.',
+      sectionSubtitle: 'Save hashtag presets and analyse per-account performance from your published posts.',
       addGroup: 'Add Group',
       createGroup: 'Create Group',
       noGroups: 'No hashtag groups yet.',
@@ -305,6 +305,8 @@ export default {
       loadingStats: 'Loading stats…',
       noStats: 'No hashtag stats yet — scan your posts to analyse performance.',
       allAccounts: 'All accounts',
+      aiSuggestForAccount: 'AI suggestions for selected account:',
+      aiSuggestAllAccounts: 'AI suggestions across all accounts:',
       aiSuggest: 'AI Suggest',
       suggesting: 'Generating…',
       selectToGroup: 'Click tags to select, then save as a group:',

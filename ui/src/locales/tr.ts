@@ -284,7 +284,7 @@ export default {
 
     hashtags: {
       sectionTitle: 'Hashtag Grupları',
-      sectionSubtitle: 'Hashtag ön ayarlarını kaydet ve yayınlanan gönderilerden performansı analiz et.',
+      sectionSubtitle: 'Hashtag ön ayarlarını kaydet ve hesap bazlı performansı yayınlanan gönderilerden analiz et.',
       addGroup: 'Grup Ekle',
       createGroup: 'Grup Oluştur',
       noGroups: 'Henüz hashtag grubu yok.',
@@ -305,6 +305,8 @@ export default {
       loadingStats: 'İstatistikler yükleniyor…',
       noStats: 'Henüz istatistik yok — performansı analiz etmek için gönderileri tarayın.',
       allAccounts: 'Tüm hesaplar',
+      aiSuggestForAccount: 'Seçili hesap için YZ önerileri:',
+      aiSuggestAllAccounts: 'Tüm hesaplar için YZ önerileri:',
       aiSuggest: 'YZ ile Öner',
       suggesting: 'Oluşturuluyor…',
       selectToGroup: 'Etiketlere tıklayarak seç, ardından grup olarak kaydet:',
