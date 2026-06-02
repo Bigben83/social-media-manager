@@ -728,6 +728,14 @@
                   {{ $t('settings.profiles.saved') }}
                 </span>
                 <button
+                  @click="diagnoseIndustry(account.key)"
+                  :disabled="industryDiagnosing === account.key"
+                  class="px-3 py-2 bg-sky-800 hover:bg-sky-700 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
+                >
+                  <i class="fa-solid fa-flask text-xs" :class="{ 'animate-pulse': industryDiagnosing === account.key }"></i>
+                  {{ industryDiagnosing === account.key ? $t('settings.profiles.diagnosing') : $t('settings.profiles.diagnoseIndustry') }}
+                </button>
+                <button
                   @click="auditProfile(account.key)"
                   :disabled="profileAuditing === account.key"
                   class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
@@ -778,6 +786,61 @@
                       <span class="text-green-400 shrink-0">✓</span>{{ s }}
                     </li>
                   </ul>
+                </div>
+              </div>
+
+              <!-- Industry diagnosis results -->
+              <div v-if="industryDiagnoses[account.key]" class="mt-4 border-t border-gray-700 pt-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-flask text-xs text-sky-400"></i>
+                    <span class="text-sm font-medium text-white">{{ $t('settings.profiles.diagnosisTitle') }}</span>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-900/50 border border-sky-700 text-sky-300">
+                      {{ industryDiagnoses[account.key].diagnosedType }}
+                    </span>
+                    <span class="text-xs text-gray-500">{{ industryDiagnoses[account.key].confidence }}% confidence</span>
+                  </div>
+                  <button @click="industryDiagnoses[account.key] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+                </div>
+                <p class="text-xs text-gray-400 mb-3 leading-relaxed">{{ industryDiagnoses[account.key].summary }}</p>
+
+                <!-- Characteristics -->
+                <div v-if="industryDiagnoses[account.key].characteristics?.length" class="mb-3">
+                  <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.diagnosisCharacteristics') }}</div>
+                  <ul class="space-y-0.5">
+                    <li v-for="c in industryDiagnoses[account.key].characteristics" :key="c" class="flex gap-1.5 text-xs text-gray-300">
+                      <span class="text-sky-400 shrink-0">›</span>{{ c }}
+                    </li>
+                  </ul>
+                </div>
+
+                <!-- Content mix -->
+                <div v-if="industryDiagnoses[account.key].contentMix" class="mb-3">
+                  <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.diagnosisContentMix') }}</div>
+                  <div class="flex gap-1 h-3 rounded-full overflow-hidden">
+                    <div class="bg-blue-500" :style="{ width: industryDiagnoses[account.key].contentMix.educational + '%' }" :title="'Educational: ' + industryDiagnoses[account.key].contentMix.educational + '%'"></div>
+                    <div class="bg-green-500" :style="{ width: industryDiagnoses[account.key].contentMix.social_proof + '%' }" :title="'Social proof: ' + industryDiagnoses[account.key].contentMix.social_proof + '%'"></div>
+                    <div class="bg-amber-500" :style="{ width: industryDiagnoses[account.key].contentMix.promotional + '%' }" :title="'Promotional: ' + industryDiagnoses[account.key].contentMix.promotional + '%'"></div>
+                    <div class="bg-purple-500" :style="{ width: industryDiagnoses[account.key].contentMix.engagement + '%' }" :title="'Engagement: ' + industryDiagnoses[account.key].contentMix.engagement + '%'"></div>
+                  </div>
+                  <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-blue-500 inline-block"></span>Educational {{ industryDiagnoses[account.key].contentMix.educational }}%</span>
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-green-500 inline-block"></span>Social proof {{ industryDiagnoses[account.key].contentMix.social_proof }}%</span>
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-amber-500 inline-block"></span>Promotional {{ industryDiagnoses[account.key].contentMix.promotional }}%</span>
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-purple-500 inline-block"></span>Engagement {{ industryDiagnoses[account.key].contentMix.engagement }}%</span>
+                  </div>
+                </div>
+
+                <!-- Tactics -->
+                <div v-if="industryDiagnoses[account.key].tactics?.length">
+                  <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.diagnosisTactics') }}</div>
+                  <div class="space-y-2">
+                    <div v-for="tactic in industryDiagnoses[account.key].tactics" :key="tactic.title" class="p-2.5 bg-gray-800 border border-gray-700 rounded-lg text-xs">
+                      <div class="font-medium text-sky-300 mb-0.5">{{ tactic.title }}</div>
+                      <p class="text-gray-400 mb-1">{{ tactic.rationale }}</p>
+                      <p class="text-gray-200 italic">→ {{ tactic.action }}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1607,8 +1670,10 @@ const expandedProfileKey = ref<string | null>(null)
 const editingProfiles = ref<Record<string, AccountProfile>>({})
 const profileSaving   = ref<string | null>(null)
 const profileSavedKey = ref<string | null>(null)
-const profileAuditing = ref<string | null>(null)
-const profileAudits   = ref<Record<string, any>>({})
+const profileAuditing    = ref<string | null>(null)
+const profileAudits      = ref<Record<string, any>>({})
+const industryDiagnosing = ref<string | null>(null)
+const industryDiagnoses  = ref<Record<string, any>>({})
 
 const allConnectedAccounts = computed((): ProfileAccount[] => {
   const accounts: ProfileAccount[] = []
@@ -1700,6 +1765,18 @@ async function removePlacesKey() {
   await axios.delete('/api/credentials/google-places')
   placesConfigured.value = false
   placesKeyHint.value = null
+}
+
+async function diagnoseIndustry(key: string) {
+  industryDiagnosing.value = key
+  try {
+    const res = await axios.post('/api/ai/industry-diagnosis', { accountKey: key })
+    industryDiagnoses.value = { ...industryDiagnoses.value, [key]: res.data }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Industry diagnosis failed')
+  } finally {
+    industryDiagnosing.value = null
+  }
 }
 
 async function auditProfile(key: string) {

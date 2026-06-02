@@ -337,6 +337,12 @@ export default {
       auditing: 'Denetleniyor…',
       auditTitle: 'Strateji Tutarlılık Denetimi',
       auditStrengths: 'Güçlü Yönler',
+      diagnoseIndustry: 'Sektör Tanı',
+      diagnosing: 'Tanılanıyor…',
+      diagnosisTitle: 'Sektör Arketipi',
+      diagnosisCharacteristics: 'Özellikler',
+      diagnosisTactics: 'Önerilen Taktikler',
+      diagnosisContentMix: 'Önerilen İçerik Karması',
     },
 
     hashtags: {

@@ -3666,6 +3666,105 @@ No explanation, no markdown.`;
   }
 });
 
+// ─── Industry Type Diagnosis ─────────────────────────────────────────────────
+
+app.post('/ai/industry-diagnosis', async (request, reply) => {
+  const { accountKey } = request.body || {};
+  if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
+
+  const db = await getDb();
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  if (!profile) return reply.code(404).send({ error: 'Account profile not found. Save the profile first.' });
+
+  const fields = [profile.businessName, profile.description, profile.industry, profile.toneOfVoice].filter(Boolean);
+  if (fields.length < 2) return reply.code(400).send({ error: 'Fill in at least a business name and description before running diagnosis.' });
+
+  const profileBlock = [
+    profile.businessName ? `Business name: ${profile.businessName}` : '',
+    profile.description  ? `Description: ${profile.description}` : '',
+    profile.industry     ? `Self-reported industry: ${profile.industry}` : '',
+    profile.targetAudience ? `Target audience: ${profile.targetAudience}` : '',
+    profile.toneOfVoice  ? `Brand tone: ${profile.toneOfVoice}` : '',
+    profile.keywords     ? `Keywords: ${profile.keywords}` : '',
+    profile.postingGuidelines ? `Posting guidelines: ${profile.postingGuidelines}` : '',
+  ].filter(Boolean).join('\n');
+
+  const system = 'You are a social media strategy expert. Return only valid JSON with no markdown or explanation.';
+  const prompt = `Diagnose this brand's industry archetype based on the profile below and return strategic recommendations.
+
+${profileBlock}
+
+Industry archetypes to choose from (pick the closest fit):
+B2B SaaS, B2B Services, E-commerce (Product), Retail / Local Business, Hospitality / Food & Beverage,
+Personal Brand / Creator, Health & Wellness, Finance / Fintech, Education / EdTech, Non-profit,
+Media / Entertainment, Real Estate, Professional Services (Law / Consulting / Accounting).
+
+Return this exact JSON:
+{
+  "diagnosedType": "<archetype name>",
+  "confidence": <0-100>,
+  "summary": "<2-sentence explanation of why this archetype fits>",
+  "characteristics": ["<trait 1>", "<trait 2>", "<trait 3>"],
+  "tactics": [
+    { "title": "<tactic name>", "rationale": "<why it works for this archetype>", "action": "<specific concrete action>" },
+    { "title": "<tactic name>", "rationale": "<why it works>", "action": "<specific action>" },
+    { "title": "<tactic name>", "rationale": "<why it works>", "action": "<specific action>" }
+  ],
+  "contentMix": { "educational": <pct>, "social_proof": <pct>, "promotional": <pct>, "engagement": <pct> }
+}
+
+The contentMix percentages must sum to 100.
+Return ONLY valid JSON.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+    let result = null;
+    try {
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      result = JSON.parse(jsonStr);
+      if (!result.diagnosedType) throw new Error();
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid diagnosis format — try again' });
+    }
+
+    // Persist the diagnosis on the account profile for future use
+    await db.collection('account_profiles').updateOne(
+      { _id: accountKey },
+      { $set: { industryDiagnosis: result, industryDiagnosedAt: new Date(), updatedAt: new Date() } },
+    );
+
+    log.info({ action: 'industry_diagnosis', account: accountKey, diagnosedType: result.diagnosedType, outcome: 'success' });
+    return { success: true, ...result, diagnosedAt: new Date() };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Industry diagnosis failed', detail: err.message });
+  }
+});
+
 // ─── Social Channel Audit ────────────────────────────────────────────────────
 
 app.post('/ai/channel-audit', async (request, reply) => {

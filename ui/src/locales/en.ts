@@ -337,6 +337,12 @@ export default {
       auditing: 'Auditing…',
       auditTitle: 'Strategy Consistency Audit',
       auditStrengths: 'Strengths',
+      diagnoseIndustry: 'Diagnose Industry',
+      diagnosing: 'Diagnosing…',
+      diagnosisTitle: 'Industry Archetype',
+      diagnosisCharacteristics: 'Characteristics',
+      diagnosisTactics: 'Recommended Tactics',
+      diagnosisContentMix: 'Recommended Content Mix',
     },
 
     hashtags: {
