@@ -17,6 +17,10 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi']);
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
+// In-memory job state for async competitor scrapes.
+// Max 2 competitors, scrapes complete in seconds — no persistence needed.
+const activeScrapeJobs = new Map();
+
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 app.register(multipart, { limits: { fileSize: MAX_FILE_SIZE } });
@@ -2302,14 +2306,32 @@ app.delete('/competitors/:id', async (request, reply) => {
   return { success: true };
 });
 
-// Scrape one competitor
+// Scrape one competitor — returns jobId immediately, runs in background
 app.post('/competitors/:id/scrape', async (request, reply) => {
-  try {
-    const result = await runCompetitorScrape(request.params.id);
-    return { success: result.ok, sources: result.sources, message: result.message };
-  } catch (err) {
-    return reply.code(500).send({ error: 'Scrape failed', detail: err.message });
-  }
+  const jobId = new ObjectId().toString();
+  activeScrapeJobs.set(jobId, { status: 'running', sources: 0, message: '' });
+
+  (async () => {
+    try {
+      const result = await runCompetitorScrape(request.params.id);
+      activeScrapeJobs.set(jobId, {
+        status: result.ok ? 'done' : 'failed',
+        sources: result.sources,
+        message: result.message,
+      });
+    } catch (err) {
+      activeScrapeJobs.set(jobId, { status: 'failed', sources: 0, message: err.message });
+    }
+  })();
+
+  return reply.code(202).send({ jobId });
+});
+
+// Poll scrape job status
+app.get('/competitors/:id/scrape-status/:jobId', async (request, reply) => {
+  const job = activeScrapeJobs.get(request.params.jobId);
+  if (!job) return reply.code(404).send({ error: 'Job not found or expired' });
+  return job;
 });
 
 // Scrape all competitors (called by scheduler)

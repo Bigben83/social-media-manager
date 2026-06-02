@@ -100,14 +100,32 @@ export const useCompetitorStore = defineStore('competitors', () => {
     }
   }
 
+  async function pollScrapeJob(competitorId: string, jobId: string): Promise<{ ok: boolean; sources: number; message: string }> {
+    return new Promise((resolve) => {
+      const check = async () => {
+        try {
+          const res = await axios.get(`/api/competitors/${competitorId}/scrape-status/${jobId}`)
+          const { status, sources, message } = res.data
+          if (status === 'done' || status === 'failed') {
+            resolve({ ok: status === 'done', sources: sources ?? 0, message: message || '' })
+          } else {
+            setTimeout(check, 2000)
+          }
+        } catch {
+          resolve({ ok: false, sources: 0, message: 'Status check failed' })
+        }
+      }
+      check()
+    })
+  }
+
   async function scrapeCompetitor(id: string): Promise<void> {
     scraping.value = { ...scraping.value, [id]: true }
     try {
       const res = await axios.post(`/api/competitors/${id}/scrape`)
-      scrapeResults.value = {
-        ...scrapeResults.value,
-        [id]: { sources: res.data.sources ?? 0, ok: res.data.success, message: res.data.message || '' },
-      }
+      const { jobId } = res.data
+      const result = await pollScrapeJob(id, jobId)
+      scrapeResults.value = { ...scrapeResults.value, [id]: result }
       await fetchCompetitors()
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.response?.data?.error || err.message
