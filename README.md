@@ -12,15 +12,20 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 - **Per-account Timezone** — Each account stores its own timezone; the compose view converts scheduled times correctly
 - **Media Library** — Upload images and videos from your device; pick from the library in Compose
 - **Draft Saving** — Save posts and return to them later from the Drafts tab
+- **Bulk AI Draft Generation** — Generate dozens of drafts at once from a topic list; progress bar with "run in background" option; AI-badged drafts in the Drafts tab
 - **Content Calendar** — Month/week calendar view of scheduled posts in the Scheduler
-- **Account Profiles** — Store business context (name, industry, audience, tone, hashtags) per account for AI context injection
-- **AI Assistance** — Multi-provider: local [Ollama](https://ollama.ai) (llama3.2, llava, etc.), OpenAI (GPT-4o), Groq (Llama, Mixtral), or Google Gemini; draft generation, hashtag suggestions, image captions; streams directly into the editor
-- **Competitor Intelligence** — Track up to 5 competitors; AI-powered structured analysis (themes, tone, positioning, gaps, moves); keyword extraction with intent classification (informational / commercial / transactional / navigational); content gap analysis against your own hashtag history; 5-post content roadmap with one-click "Draft this post"; side-by-side card layout with double-danger gap highlighting when both competitors target the same keyword you're missing
-- **Per-account Hashtag Performance** — Hashtag stats tracked separately per business account (Facebook page, Instagram account, etc.) so multi-client or multi-brand instances stay cleanly separated; account filter in the Settings stats panel; per-account AI hashtag suggestions
-- **Analytics & Insights** — Publishing stats, 30-day activity chart, platform breakdown, per-account filtering, engagement heatmap, best posting times, and top posts (crawled from platform APIs)
+- **AI Content Plan** — Generate a full month of platform-native posts with a narrative brief (theme, pillars, tone) at `/calendar-plan`; save all posts as drafts or export to CSV
+- **Account Profiles** — Store business context (name, industry, audience, tone, hashtags) per account for AI context injection; built-in **Strategy Consistency Audit** checks your profile against recent posts
+- **AI Assistance** — Multi-provider: local [Ollama](https://ollama.ai) (llama3.2, llava, etc.), OpenAI (GPT-4o), Groq (Llama, Mixtral), or Google Gemini; draft generation with platform-native writing rules, hashtag suggestions, image captions; streams directly into the editor
+- **Platform-native Writing Rules** — When platforms are selected in Compose, the AI automatically applies platform-specific length, tone, and format rules (Twitter brevity, LinkedIn professional depth, Instagram visual storytelling, etc.)
+- **Competitor Intelligence** — Track up to 5 competitors; AI-powered structured analysis (themes, tone, positioning, gaps, moves); Porter-style **market signal detection** (7 signal types, 3 severity levels); **response prediction** (next moves, vulnerabilities, retaliation triggers); **competitor profile fact-sheet** (pricing, key features, channels, target customer); keyword extraction with intent classification; content gap analysis against your own hashtag history; 5-post content roadmap; side-by-side card layout with double-danger gap highlighting
+- **Competitor Discovery** — "Find Competitors Automatically" uses AI + your account profile to suggest competitors; "Find Nearby" uses Google Places API to discover local competitors by address or area (requires free Google Cloud API key)
+- **Per-account Hashtag Performance** — Hashtag stats tracked separately per business account so multi-client or multi-brand instances stay cleanly separated; account filter in Settings; per-account AI hashtag suggestions
+- **Analytics & Insights** — Publishing stats, **Brand Health Audit** (AI-scored posting frequency / engagement / content mix), 30-day activity chart, platform breakdown, per-account filtering, engagement heatmap, best posting times, top posts; **Export to CSV** for any month
 - **Scheduling Suggestions** — Optimal posting times suggested in Compose, based on your engagement history or industry defaults
-- **Token Expiry Warnings** — Dashboard banner when Meta tokens are within 7 days of expiry
-- **Token Encryption** — OAuth tokens stored AES-256-GCM encrypted at rest
+- **First Comment** — Post a first comment immediately after publishing (Instagram, Facebook, Mastodon, Bluesky); keep captions clean by putting hashtags in the comment
+- **Token Expiry Warnings** — Dashboard banner when Meta tokens are within 7 days of expiry; auto-refresh via daily BullMQ job
+- **Token Encryption** — OAuth tokens and API keys stored AES-256-GCM encrypted at rest
 - **Structured Logging** — Pino JSON logging across all services with consistent fields
 - **Multi-language UI** — English and Turkish built-in; adding a new language is a single file
 - **Microservices** — Each platform is an independent service, easy to add or remove
@@ -353,6 +358,33 @@ After submitting for review, note your **Client Key** and **Client Secret** from
 
 ---
 
+## Google Places Setup (Local Competitor Discovery)
+
+The **Find Nearby** feature on the Competitors page uses the Google Places API to search for local businesses near a given address or area — useful for brick-and-mortar businesses, agencies managing local clients, or anyone wanting to track nearby competition.
+
+### Google Places Prerequisites
+
+- A [Google Cloud](https://console.cloud.google.com/) account (free tier is sufficient for light use)
+
+### Enable the required APIs
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create or select a project
+2. Enable both of these APIs:
+   - **Places API** (or **Places API (New)**)
+   - **Geocoding API**
+3. Go to **APIs & Services → Credentials** and click **Create Credentials → API Key**
+4. (Recommended) Restrict the key to the two APIs above and your server IP
+
+### Add the key in Settings
+
+1. Open <http://localhost:8081/settings>
+2. Scroll to the **Google Places** card at the bottom
+3. Paste your API key → **Save Key**
+
+The key is stored AES-256-GCM encrypted in MongoDB. Once configured, the **Find Nearby** button appears in the Competitors page. Enter a location (city, suburb, postcode, or street address) and an optional business type, then click **Search** to get up to 5 local competitor suggestions with websites pre-filled.
+
+---
+
 ## Adding a New Language
 
 1. Create `ui/src/locales/xx.ts` (copy `en.ts` and translate)
@@ -393,7 +425,7 @@ After submitting for review, note your **Client Key** and **Client Secret** from
 │   │   ├── RabbitMQProducer.js
 │   │   ├── logger.js        # Pino createLogger(service) factory
 │   │   └── crypto.js        # AES-256-GCM encryptToken / decryptToken
-│   ├── gateway/             # API gateway (credentials, OAuth, post dispatch, AI, media, drafts)
+│   ├── gateway/             # API gateway (credentials, OAuth, AI, analytics, competitors, calendars)
 │   ├── socket/              # WebSocket server
 │   ├── feed-aggregator/     # Periodic feed polling
 │   ├── scheduler/           # BullMQ scheduled post worker
@@ -403,12 +435,14 @@ After submitting for review, note your **Client Key** and **Client Secret** from
 │   ├── bluesky/
 │   ├── instagram/
 │   ├── facebook/
-│   └── pinterest/
+│   ├── pinterest/
+│   └── tiktok/
 ├── ui/
 │   └── src/
-│       ├── views/           # Dashboard, Compose, Scheduler (+ calendar/drafts), Settings, Media
+│       ├── views/           # Dashboard, Compose, Scheduler, Settings, Media, Analytics,
+│       │                    # CalendarPlan, Competitors
 │       ├── components/
-│       ├── stores/          # Pinia: feed, compose, platforms, ai
+│       ├── stores/          # Pinia: feed, compose, platforms, ai, hashtags, competitors
 │       ├── utils/           # timezone.ts (IANA list + UTC conversion)
 │       ├── locales/         # i18n: en, tr
 │       └── router/
