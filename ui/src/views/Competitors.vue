@@ -249,6 +249,40 @@
               </li>
             </ul>
           </div>
+
+          <!-- Response Prediction -->
+          <div v-if="competitor.aiAnalysis.prediction?.likelyNextMoves?.length" class="p-3 bg-gray-700/30 rounded border border-gray-700 space-y-2">
+            <div class="flex items-center gap-2">
+              <div class="text-xs text-sky-400 font-medium">{{ t('competitors.predictionLabel') }}</div>
+              <span class="text-xs px-1.5 py-0.5 rounded" :class="competitor.aiAnalysis.prediction.satisfiedWithPosition ? 'bg-gray-700 text-gray-400' : 'bg-orange-900/40 text-orange-300'">
+                {{ competitor.aiAnalysis.prediction.satisfiedWithPosition ? t('competitors.predictionSatisfied') : t('competitors.predictionPushing') }}
+              </span>
+            </div>
+            <div v-if="competitor.aiAnalysis.prediction.likelyNextMoves?.length">
+              <div class="text-xs text-gray-400 mb-1">{{ t('competitors.predictionNextMoves') }}</div>
+              <ul class="space-y-0.5">
+                <li v-for="move in competitor.aiAnalysis.prediction.likelyNextMoves" :key="move" class="text-xs text-sky-200 flex gap-1.5">
+                  <span class="text-sky-400 shrink-0">→</span>{{ move }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="competitor.aiAnalysis.prediction.vulnerabilities?.length">
+              <div class="text-xs text-gray-400 mb-1">{{ t('competitors.predictionVulnerabilities') }}</div>
+              <ul class="space-y-0.5">
+                <li v-for="v in competitor.aiAnalysis.prediction.vulnerabilities" :key="v" class="text-xs text-amber-200 flex gap-1.5">
+                  <span class="text-amber-400 shrink-0">⚡</span>{{ v }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="competitor.aiAnalysis.prediction.retaliationTriggers?.length">
+              <div class="text-xs text-gray-400 mb-1">{{ t('competitors.predictionRetaliationTriggers') }}</div>
+              <ul class="space-y-0.5">
+                <li v-for="rt in competitor.aiAnalysis.prediction.retaliationTriggers" :key="rt" class="text-xs text-red-300 flex gap-1.5">
+                  <span class="text-red-400 shrink-0">⚠</span>{{ rt }}
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
 
         <!-- Legacy plain-text summary (for competitors analysed before this update) -->

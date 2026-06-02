@@ -18,6 +18,13 @@ export interface CompetitorSignal {
   detectedAt: string
 }
 
+export interface CompetitorPrediction {
+  satisfiedWithPosition: boolean
+  likelyNextMoves: string[]
+  vulnerabilities: string[]
+  retaliationTriggers: string[]
+}
+
 export interface AiAnalysis {
   themes: string[]
   tone: string
@@ -25,6 +32,7 @@ export interface AiAnalysis {
   gaps: string[]
   moves: string[]
   profile?: CompetitorProfile
+  prediction?: CompetitorPrediction
 }
 
 export type KeywordIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'

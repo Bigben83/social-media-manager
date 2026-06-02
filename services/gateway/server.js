@@ -2728,6 +2728,12 @@ app.post('/competitors/:id/summarize', async (request, reply) => {
     "keyFeatures": ["3-5 core product or service features they emphasise"],
     "marketingChannels": ["2-4 social/marketing channels they actively use based on content"],
     "targetCustomer": "one sentence describing their apparent ideal customer"
+  },
+  "prediction": {
+    "satisfiedWithPosition": <true if they appear content with their current position, false if they seem to be pushing for growth>,
+    "likelyNextMoves": ["2-3 strategic moves they will probably make based on current trajectory"],
+    "vulnerabilities": ["2-3 specific weaknesses or blind spots visible in their content"],
+    "retaliationTriggers": ["1-2 moves by a competitor that would most likely provoke a strong response from them"]
   }
 }
 
@@ -2777,6 +2783,12 @@ Return ONLY the JSON object. No explanation, no markdown.`;
       if (!Array.isArray(aiAnalysis.profile.keyFeatures)) aiAnalysis.profile.keyFeatures = [];
       if (!Array.isArray(aiAnalysis.profile.marketingChannels)) aiAnalysis.profile.marketingChannels = [];
       if (typeof aiAnalysis.profile.targetCustomer !== 'string') aiAnalysis.profile.targetCustomer = '';
+      // Validate prediction block
+      if (!aiAnalysis.prediction || typeof aiAnalysis.prediction !== 'object') aiAnalysis.prediction = {};
+      if (typeof aiAnalysis.prediction.satisfiedWithPosition !== 'boolean') aiAnalysis.prediction.satisfiedWithPosition = true;
+      if (!Array.isArray(aiAnalysis.prediction.likelyNextMoves)) aiAnalysis.prediction.likelyNextMoves = [];
+      if (!Array.isArray(aiAnalysis.prediction.vulnerabilities)) aiAnalysis.prediction.vulnerabilities = [];
+      if (!Array.isArray(aiAnalysis.prediction.retaliationTriggers)) aiAnalysis.prediction.retaliationTriggers = [];
     } catch {
       aiAnalysis = null;
     }
