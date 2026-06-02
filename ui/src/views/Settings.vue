@@ -728,12 +728,57 @@
                   {{ $t('settings.profiles.saved') }}
                 </span>
                 <button
+                  @click="auditProfile(account.key)"
+                  :disabled="profileAuditing === account.key"
+                  class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
+                >
+                  <i class="fa-solid fa-magnifying-glass-chart text-xs" :class="{ 'animate-pulse': profileAuditing === account.key }"></i>
+                  {{ profileAuditing === account.key ? $t('settings.profiles.auditing') : $t('settings.profiles.auditProfile') }}
+                </button>
+                <button
                   @click="saveProfile(account.key)"
                   :disabled="profileSaving === account.key"
                   class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
                 >
                   {{ profileSaving === account.key ? $t('settings.profiles.saving') : $t('settings.profiles.save') }}
                 </button>
+              </div>
+
+              <!-- Profile audit results -->
+              <div v-if="profileAudits[account.key]" class="mt-4 border-t border-gray-700 pt-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-white">{{ $t('settings.profiles.auditTitle') }}</span>
+                    <span
+                      class="text-sm font-bold px-2 py-0.5 rounded-lg"
+                      :class="profileAudits[account.key].score >= 70 ? 'text-green-300 bg-green-900/40' : profileAudits[account.key].score >= 40 ? 'text-amber-300 bg-amber-900/40' : 'text-red-300 bg-red-900/40'"
+                    >{{ profileAudits[account.key].score }}/100</span>
+                  </div>
+                  <button @click="profileAudits[account.key] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+                </div>
+                <p class="text-xs text-gray-400 mb-3">{{ profileAudits[account.key].summary }}</p>
+                <div v-if="profileAudits[account.key].issues?.length" class="space-y-2 mb-3">
+                  <div
+                    v-for="issue in profileAudits[account.key].issues"
+                    :key="issue.field"
+                    class="p-2.5 rounded-lg text-xs"
+                    :class="issue.severity === 'high' ? 'bg-red-900/30 border border-red-800/50' : issue.severity === 'medium' ? 'bg-amber-900/30 border border-amber-800/50' : 'bg-gray-800 border border-gray-700'"
+                  >
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <span class="font-medium" :class="issue.severity === 'high' ? 'text-red-300' : issue.severity === 'medium' ? 'text-amber-300' : 'text-gray-300'">{{ issue.field }}</span>
+                    </div>
+                    <p class="text-gray-300 mb-1">{{ issue.issue }}</p>
+                    <p class="text-gray-400 italic">→ {{ issue.fix }}</p>
+                  </div>
+                </div>
+                <div v-if="profileAudits[account.key].strengths?.length">
+                  <div class="text-xs text-green-400 font-medium mb-1">{{ $t('settings.profiles.auditStrengths') }}</div>
+                  <ul class="space-y-0.5">
+                    <li v-for="s in profileAudits[account.key].strengths" :key="s" class="flex gap-1.5 text-xs text-green-200">
+                      <span class="text-green-400 shrink-0">✓</span>{{ s }}
+                    </li>
+                  </ul>
+                </div>
               </div>
 
             </div>
@@ -1518,8 +1563,10 @@ function emptyProfile(): AccountProfile {
 
 const expandedProfileKey = ref<string | null>(null)
 const editingProfiles = ref<Record<string, AccountProfile>>({})
-const profileSaving = ref<string | null>(null)
+const profileSaving   = ref<string | null>(null)
 const profileSavedKey = ref<string | null>(null)
+const profileAuditing = ref<string | null>(null)
+const profileAudits   = ref<Record<string, any>>({})
 
 const allConnectedAccounts = computed((): ProfileAccount[] => {
   const accounts: ProfileAccount[] = []
@@ -1575,6 +1622,18 @@ async function toggleProfile(key: string) {
     } catch {
       editingProfiles.value[key] = emptyProfile()
     }
+  }
+}
+
+async function auditProfile(key: string) {
+  profileAuditing.value = key
+  try {
+    const res = await axios.post(`/api/profiles/${encodeURIComponent(key)}/audit`)
+    profileAudits.value = { ...profileAudits.value, [key]: res.data }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Profile audit failed')
+  } finally {
+    profileAuditing.value = null
   }
 }
 

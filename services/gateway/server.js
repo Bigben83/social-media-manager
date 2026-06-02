@@ -506,6 +506,102 @@ app.put('/profiles/:accountKey', async (request, reply) => {
   return { success: true };
 });
 
+// Strategy consistency audit — check if a profile's fields are internally coherent
+app.post('/profiles/:accountKey/audit', async (request, reply) => {
+  const { accountKey } = request.params;
+  const db = await getDb();
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  if (!profile) return reply.code(404).send({ error: 'Profile not found' });
+
+  const filled = [
+    profile.businessName, profile.description, profile.industry,
+    profile.toneOfVoice, profile.targetAudience, profile.keywords,
+    profile.hashtags, profile.postingGuidelines,
+  ].filter(Boolean);
+  if (filled.length < 3) {
+    return reply.code(400).send({ error: 'Fill in at least 3 profile fields before running an audit' });
+  }
+
+  const profileBlock = [
+    profile.businessName   && `Business: ${profile.businessName}`,
+    profile.description    && `Description: ${profile.description}`,
+    profile.industry       && `Industry: ${profile.industry}`,
+    profile.toneOfVoice    && `Tone of voice: ${profile.toneOfVoice}`,
+    profile.targetAudience && `Target audience: ${profile.targetAudience}`,
+    profile.keywords       && `Keywords: ${profile.keywords}`,
+    profile.hashtags       && `Preferred hashtags: ${profile.hashtags}`,
+    profile.postingGuidelines && `Posting guidelines: ${profile.postingGuidelines}`,
+  ].filter(Boolean).join('\n');
+
+  const system = 'You are a brand strategy consultant. Return only valid JSON with no explanation, no markdown code blocks.';
+  const prompt = `Audit the internal consistency of this social media account profile and identify any conflicts or misalignments.
+
+PROFILE:
+${profileBlock}
+
+Check for these issues:
+1. Audience-tone mismatch (e.g. B2B business using casual/Gen-Z tone)
+2. Industry-keyword misalignment (keywords don't reflect stated industry)
+3. Hashtag-audience misalignment (hashtags target a different audience than described)
+4. Tone-guideline conflicts (tone of voice contradicts posting guidelines)
+5. Missing critical context (fields that are vague and would hurt AI content quality)
+
+Return a JSON object:
+{
+  "score": <consistency score 0-100>,
+  "summary": "<2-3 sentence overall assessment>",
+  "issues": [
+    { "severity": "<high|medium|low>", "field": "<which field(s)>", "issue": "<what the conflict is>", "fix": "<specific recommendation>" }
+  ],
+  "strengths": ["<1-3 things the profile does well>"]
+}
+
+Return [] for issues if no problems found. Return ONLY the JSON object.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 90000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let result = null;
+    try {
+      const jsonStr = (text.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      result = JSON.parse(jsonStr);
+      if (typeof result.score !== 'number') throw new Error();
+      if (!Array.isArray(result.issues)) result.issues = [];
+      if (!Array.isArray(result.strengths)) result.strengths = [];
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid audit format — try again' });
+    }
+
+    log.info({ action: 'profile_audit', accountKey, score: result.score, issues: result.issues.length, outcome: 'success' });
+    return { success: true, ...result };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Profile audit failed', detail: err.message });
+  }
+});
+
 // ─── AI / Multi-provider ─────────────────────────────────────────────────────
 
 const DEFAULT_OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://ollama:11434';

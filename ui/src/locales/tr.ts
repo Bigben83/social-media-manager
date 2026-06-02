@@ -315,6 +315,10 @@ export default {
       timezone: 'Saat Dilimi',
       timezoneHint: 'Bu hesap için gönderilerin doğru yerel saatte zamanlanması için kullanılır.',
       timezoneAuto: 'Tarayıcı saat dilimini kullan',
+      auditProfile: 'Profil Denetle',
+      auditing: 'Denetleniyor…',
+      auditTitle: 'Strateji Tutarlılık Denetimi',
+      auditStrengths: 'Güçlü Yönler',
     },
 
     hashtags: {

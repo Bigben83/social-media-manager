@@ -315,6 +315,10 @@ export default {
       timezone: 'Timezone',
       timezoneHint: 'Used to schedule posts at the correct local time for this account.',
       timezoneAuto: 'Use browser timezone',
+      auditProfile: 'Audit Profile',
+      auditing: 'Auditing…',
+      auditTitle: 'Strategy Consistency Audit',
+      auditStrengths: 'Strengths',
     },
 
     hashtags: {
