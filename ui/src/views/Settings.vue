@@ -1257,6 +1257,48 @@
         </div>
       </template>
 
+      <!-- ═══════════════════════════════════════════════════════════════════
+           GOOGLE PLACES — local competitor discovery
+      ════════════════════════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-location-dot text-white text-sm"></i>
+          </div>
+          <div>
+            <p class="font-semibold">{{ $t('settings.googlePlaces.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.googlePlaces.sectionSubtitle') }}</p>
+          </div>
+        </div>
+
+        <div class="p-5 space-y-4">
+          <div v-if="placesConfigured" class="flex items-center justify-between">
+            <span class="text-sm text-gray-300">{{ $t('settings.googlePlaces.keyConfigured', { hint: placesKeyHint }) }}</span>
+            <button @click="removePlacesKey" class="text-xs px-3 py-1.5 border border-red-800/60 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors">
+              {{ $t('settings.googlePlaces.disconnect') }}
+            </button>
+          </div>
+          <div v-else class="space-y-3">
+            <p class="text-xs text-gray-500">{{ $t('settings.googlePlaces.getKeyHint') }}</p>
+            <div class="flex gap-2">
+              <input
+                v-model="placesApiKey"
+                type="password"
+                :placeholder="$t('settings.googlePlaces.keyPlaceholder')"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-green-500"
+              />
+              <button
+                @click="savePlacesKey"
+                :disabled="!placesApiKey.trim() || placesSaving"
+                class="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
+              >
+                {{ placesSaving ? $t('settings.googlePlaces.saving') : $t('settings.googlePlaces.save') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Refresh button -->
       <button
         @click="platformsStore.fetchStatuses()"
@@ -1625,6 +1667,41 @@ async function toggleProfile(key: string) {
   }
 }
 
+// ─── Google Places ────────────────────────────────────────────────────────────
+
+const placesApiKey    = ref('')
+const placesSaving    = ref(false)
+const placesConfigured = ref(false)
+const placesKeyHint   = ref<string | null>(null)
+
+async function loadPlacesConfig() {
+  try {
+    const res = await axios.get('/api/credentials/google-places')
+    placesConfigured.value = res.data.configured
+    placesKeyHint.value = res.data.keyHint
+  } catch { /* not configured */ }
+}
+
+async function savePlacesKey() {
+  if (!placesApiKey.value.trim()) return
+  placesSaving.value = true
+  try {
+    await axios.post('/api/credentials/google-places', { apiKey: placesApiKey.value.trim() })
+    placesConfigured.value = true
+    placesKeyHint.value = `****${placesApiKey.value.trim().slice(-4)}`
+    placesApiKey.value = ''
+  } finally {
+    placesSaving.value = false
+  }
+}
+
+async function removePlacesKey() {
+  if (!confirm(t('settings.googlePlaces.disconnectConfirm'))) return
+  await axios.delete('/api/credentials/google-places')
+  placesConfigured.value = false
+  placesKeyHint.value = null
+}
+
 async function auditProfile(key: string) {
   profileAuditing.value = key
   try {
@@ -1769,6 +1846,7 @@ onMounted(async () => {
     aiStore.fetchConfig(),
     aiStore.fetchProviders(),
     hashtagStore.fetchGroups(),
+    loadPlacesConfig(),
   ])
 
   // Seed board checkboxes from current selection

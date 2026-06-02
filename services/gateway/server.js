@@ -2853,6 +2853,99 @@ async function buildCompetitorSystemSuffix() {
   }
 }
 
+// Save Google Places API key (used for local competitor discovery)
+app.post('/credentials/google-places', async (request, reply) => {
+  const { apiKey } = request.body || {};
+  if (!apiKey?.trim()) return reply.code(400).send({ error: 'apiKey is required' });
+  const db = await getDb();
+  await db.collection('platform_credentials').updateOne(
+    { _id: 'google_places' },
+    { $set: { apiKey: apiKey.trim(), updatedAt: new Date() } },
+    { upsert: true },
+  );
+  return { success: true };
+});
+
+app.get('/credentials/google-places', async () => {
+  const db = await getDb();
+  const cred = await db.collection('platform_credentials').findOne({ _id: 'google_places' });
+  return { configured: !!cred?.apiKey, keyHint: cred?.apiKey ? `****${cred.apiKey.slice(-4)}` : null };
+});
+
+app.delete('/credentials/google-places', async () => {
+  const db = await getDb();
+  await db.collection('platform_credentials').deleteOne({ _id: 'google_places' });
+  return { success: true };
+});
+
+// Discover local competitors via Google Places API
+app.post('/competitors/discover-local', async (request, reply) => {
+  const { location, businessType, radiusMeters = 5000 } = request.body || {};
+  if (!location) return reply.code(400).send({ error: 'location is required' });
+
+  const db = await getDb();
+  const cred = await db.collection('platform_credentials').findOne({ _id: 'google_places' });
+  if (!cred?.apiKey) return reply.code(400).send({ error: 'Google Places API key not configured — add it in Settings.' });
+
+  // Step 1: Geocode the location string to coordinates
+  let lat, lng;
+  try {
+    const geoRes = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+      params: { address: location, key: cred.apiKey },
+      timeout: 10000,
+    });
+    const loc = geoRes.data.results?.[0]?.geometry?.location;
+    if (!loc) return reply.code(400).send({ error: `Could not geocode location: "${location}"` });
+    lat = loc.lat;
+    lng = loc.lng;
+  } catch (err) {
+    return reply.code(503).send({ error: 'Geocoding failed', detail: err.message });
+  }
+
+  // Step 2: Text Search for nearby businesses of the given type
+  try {
+    const query = businessType ? `${businessType} near ${location}` : location;
+    const searchRes = await axios.get('https://maps.googleapis.com/maps/api/place/textsearch/json', {
+      params: {
+        query,
+        location: `${lat},${lng}`,
+        radius: Math.min(radiusMeters, 50000),
+        key: cred.apiKey,
+      },
+      timeout: 10000,
+    });
+
+    const places = (searchRes.data.results || []).slice(0, 10);
+    if (!places.length) return { success: true, suggestions: [] };
+
+    // Step 3: Fetch website URLs for places that have them
+    const suggestions = [];
+    for (const place of places.slice(0, 8)) {
+      try {
+        const detailRes = await axios.get('https://maps.googleapis.com/maps/api/place/details/json', {
+          params: { place_id: place.place_id, fields: 'name,website,formatted_address,rating', key: cred.apiKey },
+          timeout: 8000,
+        });
+        const detail = detailRes.data.result || {};
+        suggestions.push({
+          name: detail.name || place.name,
+          websiteUrl: detail.website || null,
+          address: detail.formatted_address || '',
+          rating: detail.rating || null,
+          reason: `Local ${businessType || 'business'} near ${location}${detail.rating ? ` · ${detail.rating}★` : ''}`,
+        });
+      } catch {
+        suggestions.push({ name: place.name, websiteUrl: null, address: '', rating: null, reason: `Local ${businessType || 'business'} near ${location}` });
+      }
+    }
+
+    log.info({ action: 'discover_local_competitors', location, count: suggestions.length, outcome: 'success' });
+    return { success: true, suggestions };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Google Places search failed', detail: err.message });
+  }
+});
+
 // Discover competitors automatically using AI + account profile context
 app.post('/competitors/discover', async (request, reply) => {
   const db = await getDb();

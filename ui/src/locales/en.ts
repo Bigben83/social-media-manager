@@ -446,6 +446,18 @@ export default {
       expiryReconnect: 'Reconnect',
       expiryDismiss: 'Dismiss',
     },
+
+    googlePlaces: {
+      sectionTitle: 'Google Places',
+      sectionSubtitle: 'Discover local competitors by searching businesses near an address or area.',
+      keyConfigured: 'API key configured ({hint})',
+      keyPlaceholder: 'Google Places API key',
+      getKeyHint: 'Get a free API key from Google Cloud Console — enable the Places API and Geocoding API.',
+      save: 'Save Key',
+      saving: 'Saving…',
+      disconnect: 'Remove',
+      disconnectConfirm: 'Remove the Google Places API key?',
+    },
   },
 
   ai: {
@@ -548,6 +560,11 @@ export default {
     profileFeatures: 'Key features',
     profileChannels: 'Channels',
     discoverButton: 'Find Competitors Automatically',
+    discoverLocalButton: 'Find Nearby',
+    discoverLocalSearch: 'Search',
+    localDiscoveryLabel: 'Find local competitors by location',
+    localLocationPlaceholder: 'e.g. New York, NY  or  123 Main St, Chicago',
+    localBusinessTypePlaceholder: 'Business type (optional) — e.g. coffee shop, gym',
     discovering: 'Discovering…',
     discoverySuggestionsLabel: 'AI-suggested competitors — click Add to track them:',
     discoverAccept: 'Add',

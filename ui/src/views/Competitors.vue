@@ -453,16 +453,48 @@
     <div v-if="competitorStore.competitors.length < 5" class="bg-gray-800 border border-gray-700 rounded-lg p-5 max-w-xl">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-semibold text-white">{{ t('competitors.addCompetitor') }}</h2>
+        <div class="flex gap-1.5" v-if="!competitorStore.discoverySuggestions.length">
+          <button
+            @click="competitorStore.discoverCompetitors()"
+            :disabled="competitorStore.discoveringCompetitors"
+            class="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-50"
+          >
+            <i class="fa-solid fa-magnifying-glass text-[10px]" :class="{ 'animate-pulse': competitorStore.discoveringCompetitors }"></i>
+            {{ competitorStore.discoveringCompetitors ? t('competitors.discovering') : t('competitors.discoverButton') }}
+          </button>
+          <button
+            v-if="placesConfigured"
+            @click="showLocalForm = !showLocalForm"
+            class="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-800 hover:bg-green-700 text-green-200 rounded"
+          >
+            <i class="fa-solid fa-location-dot text-[10px]"></i>
+            {{ t('competitors.discoverLocalButton') }}
+          </button>
+        </div>
+      </div>
+      <!-- Local discovery form -->
+      <div v-if="showLocalForm && placesConfigured" class="mb-3 p-3 bg-green-900/20 border border-green-800/50 rounded-lg space-y-2">
+        <div class="text-xs text-green-400 font-medium mb-1">{{ t('competitors.localDiscoveryLabel') }}</div>
+        <input
+          v-model="localLocation"
+          class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-green-500"
+          :placeholder="t('competitors.localLocationPlaceholder')"
+        />
+        <input
+          v-model="localBusinessType"
+          class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-green-500"
+          :placeholder="t('competitors.localBusinessTypePlaceholder')"
+        />
         <button
-          v-if="!competitorStore.discoverySuggestions.length"
-          @click="competitorStore.discoverCompetitors()"
-          :disabled="competitorStore.discoveringCompetitors"
-          class="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-50"
+          @click="discoverLocal"
+          :disabled="discoveringLocal || !localLocation.trim()"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-green-700 hover:bg-green-600 text-white rounded disabled:opacity-50"
         >
-          <i class="fa-solid fa-magnifying-glass text-[10px]" :class="{ 'animate-pulse': competitorStore.discoveringCompetitors }"></i>
-          {{ competitorStore.discoveringCompetitors ? t('competitors.discovering') : t('competitors.discoverButton') }}
+          <i class="fa-solid fa-location-dot" :class="{ 'animate-pulse': discoveringLocal }"></i>
+          {{ discoveringLocal ? t('competitors.discovering') : t('competitors.discoverLocalSearch') }}
         </button>
       </div>
+
       <div class="space-y-2">
         <input
           v-model="newForm.name"
@@ -491,7 +523,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useCompetitorStore, type Competitor, type KeywordIntent } from '../stores/competitors'
+import axios from 'axios'
+import { useCompetitorStore, type Competitor, type KeywordIntent, type CompetitorSuggestion } from '../stores/competitors'
 import { useComposeStore } from '../stores/compose'
 
 const { t } = useI18n()
@@ -605,6 +638,41 @@ async function createCompetitor() {
   }
 }
 
+// ─── Local competitor discovery via Google Places ─────────────────────────────
+
+const placesConfigured  = ref(false)
+const showLocalForm     = ref(false)
+const localLocation     = ref('')
+const localBusinessType = ref('')
+const discoveringLocal  = ref(false)
+
+async function checkPlacesConfig() {
+  try {
+    const res = await axios.get('/api/credentials/google-places')
+    placesConfigured.value = res.data.configured
+  } catch { /* not configured */ }
+}
+
+async function discoverLocal() {
+  if (!localLocation.value.trim()) return
+  discoveringLocal.value = true
+  competitorStore.error = null
+  try {
+    const res = await axios.post('/api/competitors/discover-local', {
+      location: localLocation.value.trim(),
+      businessType: localBusinessType.value.trim() || undefined,
+    })
+    const withWebsite = (res.data.suggestions || []).filter((s: any) => s.websiteUrl)
+    competitorStore.discoverySuggestions.splice(0, Infinity, ...withWebsite)
+    if (!withWebsite.length) competitorStore.error = 'No businesses with websites found — try a broader location or business type.'
+    showLocalForm.value = false
+  } catch (err: any) {
+    competitorStore.error = err.response?.data?.error || 'Local discovery failed'
+  } finally {
+    discoveringLocal.value = false
+  }
+}
+
 async function acceptSuggestion(s: { name: string; websiteUrl: string }) {
   const ok = await competitorStore.addCompetitor({ name: s.name, websiteUrl: s.websiteUrl })
   if (ok) {
@@ -637,5 +705,6 @@ async function confirmDelete(id: string) {
 
 onMounted(() => {
   competitorStore.fetchCompetitors()
+  checkPlacesConfig()
 })
 </script>

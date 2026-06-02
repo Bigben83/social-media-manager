@@ -446,6 +446,18 @@ export default {
       expiryReconnect: 'Yeniden Bağlan',
       expiryDismiss: 'Kapat',
     },
+
+    googlePlaces: {
+      sectionTitle: 'Google Places',
+      sectionSubtitle: 'Bir adres veya bölge yakınındaki işletmeleri arayarak yerel rakipleri keşfedin.',
+      keyConfigured: 'API anahtarı yapılandırıldı ({hint})',
+      keyPlaceholder: 'Google Places API anahtarı',
+      getKeyHint: 'Google Cloud Console\'dan ücretsiz API anahtarı alın — Places API ve Geocoding API\'yi etkinleştirin.',
+      save: 'Anahtarı Kaydet',
+      saving: 'Kaydediliyor…',
+      disconnect: 'Kaldır',
+      disconnectConfirm: 'Google Places API anahtarı kaldırılsın mı?',
+    },
   },
 
   ai: {
@@ -548,6 +560,11 @@ export default {
     profileFeatures: 'Önemli özellikler',
     profileChannels: 'Kanallar',
     discoverButton: 'Rakipleri Otomatik Bul',
+    discoverLocalButton: 'Yakınlarda Bul',
+    discoverLocalSearch: 'Ara',
+    localDiscoveryLabel: 'Konuma göre yerel rakip bul',
+    localLocationPlaceholder: 'ör. İstanbul, Kadıköy  veya  Bağdat Caddesi, İstanbul',
+    localBusinessTypePlaceholder: 'İşletme türü (isteğe bağlı) — ör. kafe, spor salonu',
     discovering: 'Aranıyor…',
     discoverySuggestionsLabel: 'YZ tarafından önerilen rakipler — eklemek için Ekle\'ye tıklayın:',
     discoverAccept: 'Ekle',
