@@ -2230,11 +2230,16 @@ async function runCompetitorScrape(competitorId) {
   }
 
   const existing = competitor.scrapedContent || [];
+
+  // Detect whether any newly scraped content differs from what was previously stored
+  const existingFingerprints = new Set(existing.map((s) => s.url + '||' + s.text.slice(0, 200)));
+  const contentChanged = newItems.some((item) => !existingFingerprints.has(item.url + '||' + item.text.slice(0, 200)));
+
   const combined = [...newItems, ...existing].slice(0, 20);
 
   await db.collection('competitors').updateOne(
     { _id: new ObjectId(competitorId) },
-    { $set: { scrapedContent: combined, lastScraped: new Date(), updatedAt: new Date() } },
+    { $set: { scrapedContent: combined, contentChanged, lastScraped: new Date(), updatedAt: new Date() } },
   );
 
   return { ok: true, sources: newItems.length, message: newItems.length ? `Scraped ${newItems.length} source(s)` : 'No content found' };
@@ -2275,7 +2280,7 @@ app.get('/competitors', async (request, reply) => {
 app.post('/competitors', async (request, reply) => {
   const db = await getDb();
   const count = await db.collection('competitors').countDocuments();
-  if (count >= 2) return reply.code(400).send({ error: 'Maximum 2 competitors allowed' });
+  if (count >= 5) return reply.code(400).send({ error: 'Maximum 5 competitors allowed' });
   const { name, websiteUrl, socialUrls = {} } = request.body || {};
   if (!name || !websiteUrl) return reply.code(400).send({ error: 'name and websiteUrl are required' });
   const now = new Date();

@@ -1,5 +1,5 @@
 <template>
-  <div class="p-6 mx-auto" :class="competitorStore.competitors.length === 2 ? 'max-w-6xl' : 'max-w-3xl'">
+  <div class="p-6 mx-auto" :class="competitorStore.competitors.length >= 2 ? 'max-w-6xl' : 'max-w-3xl'">
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-white">{{ t('competitors.sectionTitle') }}</h1>
       <p class="text-gray-400 mt-1">{{ t('competitors.sectionSubtitle') }}</p>
@@ -10,15 +10,15 @@
     </div>
 
     <!-- Side-by-side label -->
-    <div v-if="competitorStore.competitors.length === 2" class="mb-3 flex items-center gap-2 text-xs text-gray-500">
+    <div v-if="competitorStore.competitors.length >= 2" class="mb-3 flex items-center gap-2 text-xs text-gray-500">
       <i class="fa-solid fa-table-columns"></i>
       {{ t('competitors.sideBySideMode') }}
     </div>
 
-    <!-- Competitor cards — stacked for 1, side-by-side grid for 2 -->
+    <!-- Competitor cards — stacked for 1, side-by-side grid for 2+ -->
     <div
       v-if="competitorStore.competitors.length"
-      :class="competitorStore.competitors.length === 2 ? 'grid grid-cols-2 gap-4 mb-6 items-start' : 'space-y-4 mb-6'"
+      :class="competitorStore.competitors.length >= 2 ? 'grid grid-cols-2 gap-4 mb-6 items-start' : 'space-y-4 mb-6'"
     >
       <div
         v-for="competitor in competitorStore.competitors"
@@ -127,9 +127,21 @@
             : competitorStore.scrapeResults[competitor._id].message }}
         </div>
 
-        <!-- Last scraped -->
-        <div v-if="competitor.lastScraped" class="text-xs text-gray-500 mb-3">
-          {{ t('competitors.lastScraped') }}: {{ new Date(competitor.lastScraped).toLocaleString() }}
+        <!-- Freshness row -->
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <span :class="freshnessBadge(competitor.lastScraped).cls" class="text-xs px-2 py-0.5 rounded-full font-medium">
+            {{ freshnessBadge(competitor.lastScraped).label }}
+          </span>
+          <span v-if="competitor.lastScraped" class="text-xs text-gray-500">
+            {{ t('competitors.lastScraped') }}: {{ new Date(competitor.lastScraped).toLocaleString() }}
+          </span>
+          <span
+            v-if="competitor.contentChanged"
+            class="flex items-center gap-1 text-xs px-2 py-0.5 bg-blue-900/50 border border-blue-700/50 text-blue-300 rounded-full"
+          >
+            <i class="fa-solid fa-circle-dot text-[8px] animate-pulse"></i>
+            {{ t('competitors.newActivity') }}
+          </span>
         </div>
 
         <!-- Structured AI Analysis -->
@@ -242,7 +254,7 @@
               class="mb-2 flex items-center gap-1.5 text-xs text-rose-400"
             >
               <i class="fa-solid fa-triangle-exclamation"></i>
-              {{ t('competitors.sharedGapsNote', { name: otherCompetitorName(competitor._id) }) }}
+              {{ t('competitors.sharedGapsNote', { name: otherCompetitorNames(competitor._id) }) }}
             </div>
             <div class="flex flex-wrap gap-1.5">
               <span
@@ -252,7 +264,7 @@
                   ? 'bg-rose-900/40 border-rose-600/70 text-rose-300'
                   : intentChipClass(gap.intent)"
                 :title="sharedGapTerms.has(gap.term)
-                  ? t('competitors.sharedGapTitle', { name: otherCompetitorName(competitor._id) })
+                  ? t('competitors.sharedGapTitle', { name: otherCompetitorNames(competitor._id) })
                   : t(`competitors.intent_${gap.intent}`)"
                 class="inline-flex items-center gap-1 text-xs px-2 py-0.5 border rounded-full"
               >
@@ -322,7 +334,7 @@
     </div>
 
     <!-- Add competitor form -->
-    <div v-if="competitorStore.competitors.length < 2" class="bg-gray-800 border border-gray-700 rounded-lg p-5">
+    <div v-if="competitorStore.competitors.length < 5" class="bg-gray-800 border border-gray-700 rounded-lg p-5">
       <h2 class="text-sm font-semibold text-white mb-3">{{ t('competitors.addCompetitor') }}</h2>
       <div class="space-y-2">
         <input
@@ -365,17 +377,32 @@ function draftPost(headline: string) {
   router.push('/compose')
 }
 
-// Set of gap terms that appear in BOTH competitors' gap analyses — "double danger"
+// Gap terms targeted by 2+ competitors simultaneously — "double danger"
 const sharedGapTerms = computed<Set<string>>(() => {
   const cs = competitorStore.competitors
   if (cs.length < 2) return new Set()
-  const gaps0 = new Set(cs[0].gapAnalysis?.gaps.map((g) => g.term) ?? [])
-  const gaps1 = new Set(cs[1].gapAnalysis?.gaps.map((g) => g.term) ?? [])
-  return new Set([...gaps0].filter((t) => gaps1.has(t)))
+  const counts = new Map<string, number>()
+  for (const c of cs) {
+    for (const g of c.gapAnalysis?.gaps ?? []) {
+      counts.set(g.term, (counts.get(g.term) ?? 0) + 1)
+    }
+  }
+  return new Set([...counts.entries()].filter(([, n]) => n >= 2).map(([term]) => term))
 })
 
-function otherCompetitorName(currentId: string): string {
-  return competitorStore.competitors.find((c) => c._id !== currentId)?.name ?? ''
+function otherCompetitorNames(currentId: string): string {
+  const others = competitorStore.competitors.filter((c) => c._id !== currentId).map((c) => c.name)
+  if (others.length === 0) return ''
+  if (others.length === 1) return others[0]
+  return others.slice(0, -1).join(', ') + ' & ' + others.at(-1)
+}
+
+function freshnessBadge(lastScraped: string | null) {
+  if (!lastScraped) return { label: t('competitors.freshnessNever'), cls: 'bg-gray-700/80 text-gray-400' }
+  const days = (Date.now() - new Date(lastScraped).getTime()) / 86400000
+  if (days <= 7)  return { label: t('competitors.freshnessFresh'),    cls: 'bg-green-900/60 border border-green-700/50 text-green-300' }
+  if (days <= 30) return { label: t('competitors.freshnessStale'),    cls: 'bg-amber-900/60 border border-amber-700/50 text-amber-300' }
+  return           { label: t('competitors.freshnessOutdated'), cls: 'bg-red-900/60 border border-red-700/50 text-red-300' }
 }
 
 const KEYWORD_INTENTS = [

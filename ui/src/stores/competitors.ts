@@ -51,6 +51,7 @@ export interface Competitor {
   aiSummary: string
   aiAnalysis?: AiAnalysis
   keywords: CompetitorKeyword[]
+  contentChanged?: boolean
   gapAnalysis?: GapAnalysis
   contentRoadmap?: RoadmapPost[]
   lastScraped: string | null
