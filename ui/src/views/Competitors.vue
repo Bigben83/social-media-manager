@@ -329,13 +329,55 @@
     </div>
 
     <!-- Empty state -->
-    <div v-else-if="!competitorStore.loading" class="mb-6 p-8 text-center bg-gray-800 border border-gray-700 rounded-lg text-gray-400 max-w-xl">
-      {{ t('competitors.emptyState') }}
+    <div v-else-if="!competitorStore.loading" class="mb-6 p-8 text-center bg-gray-800 border border-gray-700 rounded-lg max-w-xl">
+      <p class="text-gray-400 mb-4">{{ t('competitors.emptyState') }}</p>
+      <button
+        @click="competitorStore.discoverCompetitors()"
+        :disabled="competitorStore.discoveringCompetitors"
+        class="inline-flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-sm rounded disabled:opacity-50"
+      >
+        <i class="fa-solid fa-magnifying-glass" :class="{ 'animate-pulse': competitorStore.discoveringCompetitors }"></i>
+        {{ competitorStore.discoveringCompetitors ? t('competitors.discovering') : t('competitors.discoverButton') }}
+      </button>
+    </div>
+
+    <!-- Discovery suggestions -->
+    <div v-if="competitorStore.discoverySuggestions.length" class="mb-6 max-w-xl">
+      <div class="text-xs text-gray-400 mb-2">{{ t('competitors.discoverySuggestionsLabel') }}</div>
+      <div class="space-y-2">
+        <div
+          v-for="s in competitorStore.discoverySuggestions"
+          :key="s.websiteUrl"
+          class="flex items-start gap-3 p-3 bg-gray-800 border border-gray-700 rounded-lg"
+        >
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-white">{{ s.name }}</div>
+            <a :href="s.websiteUrl" target="_blank" rel="noopener" class="text-xs text-violet-400 hover:underline truncate block">{{ s.websiteUrl }}</a>
+            <p v-if="s.reason" class="text-xs text-gray-400 mt-0.5">{{ s.reason }}</p>
+          </div>
+          <button
+            @click="acceptSuggestion(s)"
+            :disabled="competitorStore.competitors.length >= 5"
+            class="shrink-0 text-xs px-3 py-1.5 bg-violet-700 hover:bg-violet-600 text-white rounded disabled:opacity-40"
+          >{{ t('competitors.discoverAccept') }}</button>
+        </div>
+      </div>
     </div>
 
     <!-- Add competitor form -->
     <div v-if="competitorStore.competitors.length < 5" class="bg-gray-800 border border-gray-700 rounded-lg p-5 max-w-xl">
-      <h2 class="text-sm font-semibold text-white mb-3">{{ t('competitors.addCompetitor') }}</h2>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-white">{{ t('competitors.addCompetitor') }}</h2>
+        <button
+          v-if="!competitorStore.discoverySuggestions.length"
+          @click="competitorStore.discoverCompetitors()"
+          :disabled="competitorStore.discoveringCompetitors"
+          class="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-50"
+        >
+          <i class="fa-solid fa-magnifying-glass text-[10px]" :class="{ 'animate-pulse': competitorStore.discoveringCompetitors }"></i>
+          {{ competitorStore.discoveringCompetitors ? t('competitors.discovering') : t('competitors.discoverButton') }}
+        </button>
+      </div>
       <div class="space-y-2">
         <input
           v-model="newForm.name"
@@ -475,6 +517,15 @@ async function createCompetitor() {
   if (ok) {
     newForm.name = ''
     newForm.websiteUrl = ''
+  }
+}
+
+async function acceptSuggestion(s: { name: string; websiteUrl: string }) {
+  const ok = await competitorStore.addCompetitor({ name: s.name, websiteUrl: s.websiteUrl })
+  if (ok) {
+    competitorStore.discoverySuggestions.splice(
+      competitorStore.discoverySuggestions.findIndex((x) => x.websiteUrl === s.websiteUrl), 1,
+    )
   }
 }
 

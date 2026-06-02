@@ -2541,6 +2541,89 @@ async function buildCompetitorSystemSuffix() {
   }
 }
 
+// Discover competitors automatically using AI + account profile context
+app.post('/competitors/discover', async (request, reply) => {
+  const db = await getDb();
+
+  // Use the first account profile for business context
+  const profile = await db.collection('account_profiles').findOne({});
+  const contextParts = [];
+  if (profile) {
+    if (profile.businessName)   contextParts.push(`Business: ${profile.businessName}`);
+    if (profile.description)    contextParts.push(`Description: ${profile.description}`);
+    if (profile.industry)       contextParts.push(`Industry: ${profile.industry}`);
+    if (profile.websiteUrl)     contextParts.push(`Website: ${profile.websiteUrl}`);
+    if (profile.targetAudience) contextParts.push(`Target audience: ${profile.targetAudience}`);
+  }
+
+  if (!contextParts.length) {
+    return reply.code(400).send({ error: 'Set up at least one Account Profile in Settings before discovering competitors.' });
+  }
+
+  const system = 'You are a market research analyst. Return only valid JSON with no explanation, no markdown code blocks.';
+  const prompt = `Based on the following business profile, identify the top 5 direct competitors.
+
+${contextParts.join('\n')}
+
+Return ONLY a JSON array of objects, e.g.:
+[{"name":"Competitor Name","websiteUrl":"https://example.com","reason":"One sentence on why they compete directly"}]
+
+Rules:
+- Return real, existing businesses only.
+- Include only direct competitors (same product/service category, same target audience).
+- websiteUrl must be a valid https URL to the competitor's main website.
+- No explanation outside the JSON array.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let suggestions = [];
+    try {
+      const jsonStr = (text.match(/\[[\s\S]*\]/) || ['[]'])[0];
+      const parsed = JSON.parse(jsonStr);
+      if (!Array.isArray(parsed)) throw new Error();
+      suggestions = parsed
+        .filter((s) => s && typeof s.name === 'string' && typeof s.websiteUrl === 'string')
+        .slice(0, 5)
+        .map((s) => ({
+          name: s.name.trim(),
+          websiteUrl: s.websiteUrl.trim(),
+          reason: typeof s.reason === 'string' ? s.reason.trim() : '',
+        }));
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid format — try again' });
+    }
+
+    log.info({ action: 'competitor_discover', count: suggestions.length, outcome: 'success' });
+    return { success: true, suggestions };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Discovery failed', detail: err.message });
+  }
+});
+
 // List competitors
 app.get('/competitors', async (request, reply) => {
   const db = await getDb();

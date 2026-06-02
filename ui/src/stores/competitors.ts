@@ -42,6 +42,12 @@ export interface RoadmapPost {
   rationale: string
 }
 
+export interface CompetitorSuggestion {
+  name: string
+  websiteUrl: string
+  reason: string
+}
+
 export interface Competitor {
   _id: string
   name: string
@@ -226,9 +232,27 @@ export const useCompetitorStore = defineStore('competitors', () => {
     }
   }
 
+  const discoveringCompetitors = ref(false)
+  const discoverySuggestions = ref<CompetitorSuggestion[]>([])
+
+  async function discoverCompetitors(): Promise<void> {
+    discoveringCompetitors.value = true
+    error.value = null
+    discoverySuggestions.value = []
+    try {
+      const res = await axios.post('/api/competitors/discover')
+      discoverySuggestions.value = res.data.suggestions || []
+    } catch (err: any) {
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Discovery failed'
+    } finally {
+      discoveringCompetitors.value = false
+    }
+  }
+
   return {
-    competitors, loading, scraping, summarizing, extractingKeywords, analyzingGaps, generatingRoadmap, scrapeResults, error,
+    competitors, loading, scraping, summarizing, extractingKeywords, analyzingGaps, generatingRoadmap, scrapeResults,
+    discoveringCompetitors, discoverySuggestions, error,
     fetchCompetitors, addCompetitor, updateCompetitor, deleteCompetitor,
-    scrapeCompetitor, summarizeCompetitor, extractKeywords, analyzeGaps, generateRoadmap,
+    scrapeCompetitor, summarizeCompetitor, extractKeywords, analyzeGaps, generateRoadmap, discoverCompetitors,
   }
 })
