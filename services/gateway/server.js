@@ -2722,7 +2722,13 @@ app.post('/competitors/:id/summarize', async (request, reply) => {
   "tone": "one sentence describing their voice and communication style",
   "positioning": "one sentence on how they position themselves in the market",
   "gaps": ["2-3 topics or angles they ignore or handle poorly — opportunities for you"],
-  "moves": ["3 specific content angles you could use to stand out against them"]
+  "moves": ["3 specific content angles you could use to stand out against them"],
+  "profile": {
+    "pricing": "one sentence on their pricing model or tier (e.g. 'Freemium with $49/mo Pro plan', 'Premium only, starts at $99/mo', or 'Pricing not visible' if unclear)",
+    "keyFeatures": ["3-5 core product or service features they emphasise"],
+    "marketingChannels": ["2-4 social/marketing channels they actively use based on content"],
+    "targetCustomer": "one sentence describing their apparent ideal customer"
+  }
 }
 
 Content:
@@ -2765,6 +2771,12 @@ Return ONLY the JSON object. No explanation, no markdown.`;
       if (typeof aiAnalysis.positioning !== 'string') aiAnalysis.positioning = '';
       if (!Array.isArray(aiAnalysis.gaps)) aiAnalysis.gaps = [];
       if (!Array.isArray(aiAnalysis.moves)) aiAnalysis.moves = [];
+      // Validate profile block
+      if (!aiAnalysis.profile || typeof aiAnalysis.profile !== 'object') aiAnalysis.profile = {};
+      if (typeof aiAnalysis.profile.pricing !== 'string') aiAnalysis.profile.pricing = '';
+      if (!Array.isArray(aiAnalysis.profile.keyFeatures)) aiAnalysis.profile.keyFeatures = [];
+      if (!Array.isArray(aiAnalysis.profile.marketingChannels)) aiAnalysis.profile.marketingChannels = [];
+      if (typeof aiAnalysis.profile.targetCustomer !== 'string') aiAnalysis.profile.targetCustomer = '';
     } catch {
       aiAnalysis = null;
     }

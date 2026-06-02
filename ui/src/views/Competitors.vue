@@ -144,6 +144,26 @@
           </span>
         </div>
 
+        <!-- Structured Profile Fact-sheet -->
+        <div v-if="competitor.aiAnalysis?.profile?.pricing || competitor.aiAnalysis?.profile?.keyFeatures?.length" class="mb-3 p-3 bg-gray-900/50 border border-gray-700/60 rounded-lg text-xs space-y-1.5">
+          <div v-if="competitor.aiAnalysis.profile.pricing" class="flex gap-1.5">
+            <span class="text-gray-500 shrink-0">{{ t('competitors.profilePricing') }}:</span>
+            <span class="text-gray-300">{{ competitor.aiAnalysis.profile.pricing }}</span>
+          </div>
+          <div v-if="competitor.aiAnalysis.profile.targetCustomer" class="flex gap-1.5">
+            <span class="text-gray-500 shrink-0">{{ t('competitors.profileTarget') }}:</span>
+            <span class="text-gray-300">{{ competitor.aiAnalysis.profile.targetCustomer }}</span>
+          </div>
+          <div v-if="competitor.aiAnalysis.profile.keyFeatures?.length" class="flex gap-1.5 flex-wrap">
+            <span class="text-gray-500 shrink-0">{{ t('competitors.profileFeatures') }}:</span>
+            <span v-for="f in competitor.aiAnalysis.profile.keyFeatures" :key="f" class="px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded">{{ f }}</span>
+          </div>
+          <div v-if="competitor.aiAnalysis.profile.marketingChannels?.length" class="flex gap-1.5 flex-wrap">
+            <span class="text-gray-500 shrink-0">{{ t('competitors.profileChannels') }}:</span>
+            <span v-for="c in competitor.aiAnalysis.profile.marketingChannels" :key="c" class="px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded">{{ c }}</span>
+          </div>
+        </div>
+
         <!-- Structured AI Analysis -->
         <div v-if="competitor.aiAnalysis" class="mt-3 space-y-3">
           <!-- Tone & Positioning -->

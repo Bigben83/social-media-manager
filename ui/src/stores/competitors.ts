@@ -2,12 +2,20 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import axios from 'axios'
 
+export interface CompetitorProfile {
+  pricing: string
+  keyFeatures: string[]
+  marketingChannels: string[]
+  targetCustomer: string
+}
+
 export interface AiAnalysis {
   themes: string[]
   tone: string
   positioning: string
   gaps: string[]
   moves: string[]
+  profile?: CompetitorProfile
 }
 
 export type KeywordIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'
