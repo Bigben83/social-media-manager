@@ -18,6 +18,23 @@ export interface CompetitorKeyword {
   extractedAt?: string
 }
 
+export interface GapItem {
+  term: string
+  intent: KeywordIntent
+}
+
+export interface CoveredItem extends GapItem {
+  matchedHashtags: string[]
+}
+
+export interface GapAnalysis {
+  gaps: GapItem[]
+  covered: CoveredItem[]
+  totalKeywords: number
+  hashtagStatsEmpty: boolean
+  lastAnalyzed: string
+}
+
 export interface RoadmapPost {
   topic: string
   headline: string
@@ -34,6 +51,7 @@ export interface Competitor {
   aiSummary: string
   aiAnalysis?: AiAnalysis
   keywords: CompetitorKeyword[]
+  gapAnalysis?: GapAnalysis
   contentRoadmap?: RoadmapPost[]
   lastScraped: string | null
   createdAt: string
@@ -46,6 +64,7 @@ export const useCompetitorStore = defineStore('competitors', () => {
   const scraping = ref<Record<string, boolean>>({})
   const summarizing = ref<Record<string, boolean>>({})
   const extractingKeywords = ref<Record<string, boolean>>({})
+  const analyzingGaps = ref<Record<string, boolean>>({})
   const generatingRoadmap = ref<Record<string, boolean>>({})
   const scrapeResults = ref<Record<string, { sources: number; ok: boolean; message: string }>>({})
   const error = ref<string | null>(null)
@@ -166,6 +185,20 @@ export const useCompetitorStore = defineStore('competitors', () => {
     }
   }
 
+  async function analyzeGaps(id: string): Promise<void> {
+    analyzingGaps.value = { ...analyzingGaps.value, [id]: true }
+    error.value = null
+    try {
+      const res = await axios.post(`/api/competitors/${id}/analyze-gaps`)
+      const idx = competitors.value.findIndex((c) => c._id === id)
+      if (idx !== -1) competitors.value[idx].gapAnalysis = res.data
+    } catch (err: any) {
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Gap analysis failed'
+    } finally {
+      analyzingGaps.value = { ...analyzingGaps.value, [id]: false }
+    }
+  }
+
   async function generateRoadmap(id: string): Promise<void> {
     generatingRoadmap.value = { ...generatingRoadmap.value, [id]: true }
     error.value = null
@@ -181,8 +214,8 @@ export const useCompetitorStore = defineStore('competitors', () => {
   }
 
   return {
-    competitors, loading, scraping, summarizing, extractingKeywords, generatingRoadmap, scrapeResults, error,
+    competitors, loading, scraping, summarizing, extractingKeywords, analyzingGaps, generatingRoadmap, scrapeResults, error,
     fetchCompetitors, addCompetitor, updateCompetitor, deleteCompetitor,
-    scrapeCompetitor, summarizeCompetitor, extractKeywords, generateRoadmap,
+    scrapeCompetitor, summarizeCompetitor, extractKeywords, analyzeGaps, generateRoadmap,
   }
 })

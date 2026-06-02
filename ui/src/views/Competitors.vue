@@ -92,6 +92,14 @@
             {{ competitorStore.extractingKeywords[competitor._id] ? t('competitors.extractingKeywords') : t('competitors.extractKeywords') }}
           </button>
           <button
+            @click="competitorStore.analyzeGaps(competitor._id)"
+            :disabled="competitorStore.analyzingGaps[competitor._id] || !competitor.keywords?.length"
+            class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <i class="fa-solid fa-code-compare" :class="{ 'animate-pulse': competitorStore.analyzingGaps[competitor._id] }"></i>
+            {{ competitorStore.analyzingGaps[competitor._id] ? t('competitors.analyzingGaps') : t('competitors.analyzeGaps') }}
+          </button>
+          <button
             @click="competitorStore.generateRoadmap(competitor._id)"
             :disabled="competitorStore.generatingRoadmap[competitor._id] || (!competitor.keywords?.length && !competitor.scrapedContent.length)"
             class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
@@ -196,6 +204,59 @@
               class="inline-block text-xs px-2 py-0.5 border rounded-full cursor-default"
             >{{ typeof kw === 'string' ? kw : kw.term }}</span>
           </div>
+        </div>
+
+        <!-- Gap Analysis -->
+        <div v-if="competitor.gapAnalysis" class="mt-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs text-orange-400 font-medium">{{ t('competitors.gapAnalysisLabel') }}</div>
+            <div class="flex items-center gap-2 text-xs text-gray-500">
+              <span class="text-orange-300">{{ competitor.gapAnalysis.gaps.length }} {{ t('competitors.gapCount') }}</span>
+              <span>·</span>
+              <span class="text-green-400">{{ competitor.gapAnalysis.covered.length }} {{ t('competitors.coveredCount') }}</span>
+              <span>·</span>
+              <span>{{ new Date(competitor.gapAnalysis.lastAnalyzed).toLocaleDateString() }}</span>
+            </div>
+          </div>
+
+          <!-- Warning when no hashtag data exists -->
+          <div v-if="competitor.gapAnalysis.hashtagStatsEmpty" class="mb-2 p-2.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
+            {{ t('competitors.gapNoHashtagStats') }}
+          </div>
+
+          <!-- Gap keywords (missing from your content) -->
+          <div v-if="competitor.gapAnalysis.gaps.length" class="mb-3">
+            <div class="text-xs text-gray-400 mb-1.5">{{ t('competitors.gapMissing') }}</div>
+            <div class="flex flex-wrap gap-1.5">
+              <span
+                v-for="gap in competitor.gapAnalysis.gaps"
+                :key="gap.term"
+                :class="intentChipClass(gap.intent)"
+                :title="t(`competitors.intent_${gap.intent}`)"
+                class="inline-flex items-center gap-1 text-xs px-2 py-0.5 border rounded-full"
+              >
+                <span class="opacity-60 text-[10px]">{{ gap.intent[0].toUpperCase() }}</span>{{ gap.term }}
+              </span>
+            </div>
+          </div>
+          <div v-else class="mb-3 text-xs text-green-400">{{ t('competitors.gapNoneFound') }}</div>
+
+          <!-- Covered keywords (you already have these) -->
+          <details v-if="competitor.gapAnalysis.covered.length" class="group">
+            <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-200 select-none">
+              {{ t('competitors.gapCoveredToggle', { count: competitor.gapAnalysis.covered.length }) }}
+            </summary>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              <span
+                v-for="item in competitor.gapAnalysis.covered"
+                :key="item.term"
+                class="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-green-900/30 border border-green-700/40 text-green-300 rounded-full"
+                :title="item.matchedHashtags.join(', ')"
+              >
+                <i class="fa-solid fa-check text-[9px]"></i>{{ item.term }}
+              </span>
+            </div>
+          </details>
         </div>
 
         <!-- Content Roadmap -->

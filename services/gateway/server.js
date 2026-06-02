@@ -2498,6 +2498,55 @@ No explanation, no markdown.`;
   }
 });
 
+// Analyse content gaps — compare competitor keywords against user's hashtag_stats
+app.post('/competitors/:id/analyze-gaps', async (request, reply) => {
+  const db = await getDb();
+  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
+
+  const keywords = (competitor.keywords || []);
+  if (!keywords.length) return reply.code(400).send({ error: 'Extract keywords first before analysing gaps' });
+
+  const hashtagDocs = await db.collection('hashtag_stats').find({}, { projection: { _id: 1 } }).toArray();
+  const hashtagStatsEmpty = hashtagDocs.length === 0;
+
+  // Strip '#' prefix and lowercase each hashtag for substring matching
+  const hashtagTexts = hashtagDocs.map((h) => ({ id: h._id, text: h._id.replace(/^#/, '').toLowerCase() }));
+
+  const INTENT_ORDER = { transactional: 0, commercial: 1, informational: 2, navigational: 3 };
+
+  function findMatchingHashtags(term) {
+    const words = term.toLowerCase().split(/\s+/).filter((w) => w.length >= 4);
+    return hashtagTexts
+      .filter(({ text }) => words.some((w) => text.includes(w)))
+      .map(({ id }) => id);
+  }
+
+  const gaps = [];
+  const covered = [];
+
+  for (const kw of keywords) {
+    const term = typeof kw === 'string' ? kw : kw.term;
+    const intent = typeof kw === 'string' ? 'informational' : (kw.intent || 'informational');
+    const matched = findMatchingHashtags(term);
+    if (matched.length) {
+      covered.push({ term, intent, matchedHashtags: matched.slice(0, 4) });
+    } else {
+      gaps.push({ term, intent });
+    }
+  }
+
+  gaps.sort((a, b) => (INTENT_ORDER[a.intent] ?? 99) - (INTENT_ORDER[b.intent] ?? 99));
+
+  const gapAnalysis = { gaps, covered, totalKeywords: keywords.length, hashtagStatsEmpty, lastAnalyzed: new Date() };
+
+  await db.collection('competitors').updateOne(
+    { _id: new ObjectId(request.params.id) },
+    { $set: { gapAnalysis, updatedAt: new Date() } },
+  );
+  return { success: true, ...gapAnalysis };
+});
+
 // Generate a 5-post content roadmap from competitor keywords and gaps
 app.post('/competitors/:id/content-roadmap', async (request, reply) => {
   const db = await getDb();
