@@ -21,6 +21,86 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 // Max 2 competitors, scrapes complete in seconds — no persistence needed.
 const activeScrapeJobs = new Map();
 
+// ─── Platform-native writing rules ────────────────────────────────────────────
+// Injected into the AI system prompt when destinations are known.
+const PLATFORM_WRITING_RULES = {
+  twitter: [
+    'Keep the post under 200 characters for maximum retweetability.',
+    'Use zero to one hashtag — more than one significantly hurts reach.',
+    'End with a question or provocation to drive replies.',
+    'No slow intros — the hook must land in the opening clause.',
+  ],
+  linkedin: [
+    'Only the first 2–3 lines are visible before "see more" — the hook must grab immediately.',
+    'Put external links in the first comment, not the post body — links in copy reduce reach.',
+    'Use 2–3 hashtags maximum, placed at the very end of the post.',
+    'Write for practitioners and decision-makers using clear, direct language.',
+  ],
+  instagram: [
+    'Only the first ~125 characters show before "more" — front-load the hook.',
+    'For Reels: hook text must appear on-screen within the first 1 second; assume silent viewing, so text overlays are essential.',
+    'Carousels get the highest saves — use them for educational or step-by-step content.',
+    'End with a clear call-to-action.',
+  ],
+  facebook: [
+    'First 3 lines visible before "See more" — lead with the most engaging line.',
+    'Conversational tone outperforms corporate language.',
+    'Questions and polls significantly boost comments and reach.',
+    'External links reduce reach — consider placing the link in the first comment.',
+  ],
+  tiktok: [
+    'The very first spoken word or on-screen text must hook the viewer at second 0 — no slow intros.',
+    'Creator-native feel performs far better than polished corporate openers.',
+    'End every script with a comment-bait line (a question or debate prompt).',
+    'Optimal caption length: short and punchy; the hook lives in the video, not the caption.',
+  ],
+  youtube: [
+    'Title must be written for search — include the primary keyword near the front.',
+    'Open the script with a 15-second hook that states the value proposition immediately.',
+    'First 2 lines of the description appear in search results — write them for click-through.',
+    'Always include timestamps/chapters in longer-form descriptions.',
+  ],
+  pinterest: [
+    'Pinterest is a search engine — descriptions must be keyword-rich prose, not hashtag fragments.',
+    'Every pin should link somewhere relevant; linkless pins underperform.',
+    'Vertical 2:3 format is optimal for feed visibility.',
+    'Use natural-language keyword phrases (e.g. "easy weeknight dinner ideas") not isolated keywords.',
+  ],
+  reddit: [
+    'Reddit is a community channel, not a publishing channel — never pitch directly.',
+    'Write like a practitioner who works at the brand, not a marketer who works for it.',
+    'Lead with value: useful data, a genuine question, or an interesting observation.',
+    'Match the subreddit tone exactly — formal communities reject casual posts and vice versa.',
+  ],
+  mastodon: [
+    'Mastodon users value authenticity — corporate marketing tone is poorly received.',
+    'Use 3–5 relevant hashtags; they are the primary discovery mechanism on Mastodon.',
+    'Longer posts should use a CW (content warning) as a brief summary — this is a community norm.',
+    'Engagement comes from genuine conversation, not broadcast-style posting.',
+  ],
+  bluesky: [
+    'Bluesky rewards original perspectives — repurposed content from other platforms underperforms.',
+    'Threads work well for longer ideas; each post in the thread should stand alone.',
+    'Use 1–2 hashtags if any — hashtag culture is still developing on Bluesky.',
+    'Substance drives sharing here more than engagement-bait does.',
+  ],
+};
+
+function buildPlatformRulesBlock(destinations) {
+  if (!destinations?.length) return '';
+  const platforms = [...new Set(destinations.map((d) => d.platform).filter(Boolean))];
+  const blocks = platforms
+    .map((p) => {
+      const rules = PLATFORM_WRITING_RULES[p];
+      if (!rules?.length) return null;
+      const name = p.charAt(0).toUpperCase() + p.slice(1);
+      return `${name} rules:\n${rules.map((r) => `- ${r}`).join('\n')}`;
+    })
+    .filter(Boolean);
+  if (!blocks.length) return '';
+  return '\n\nPLATFORM-SPECIFIC WRITING RULES (follow these for every post on this platform):\n' + blocks.join('\n\n');
+}
+
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 app.register(multipart, { limits: { fileSize: MAX_FILE_SIZE } });
@@ -639,11 +719,12 @@ app.get('/ai/models', async (request, reply) => {
 });
 
 app.post('/ai/generate', async (request, reply) => {
-  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext } = request.body || {};
+  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, destinations } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
   const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
-  const system = rawSystem ? rawSystem + competitorSuffix : (competitorSuffix || undefined);
+  const platformRules = buildPlatformRulesBlock(destinations);
+  const system = rawSystem ? rawSystem + competitorSuffix + platformRules : ((competitorSuffix + platformRules) || undefined);
 
   const pconf = await getActiveProviderConfig();
   const model = reqModel || pconf.model;
@@ -751,11 +832,12 @@ app.post('/ai/caption', async (request, reply) => {
 
 // SSE streaming endpoint — normalized data: { token, done } format for all providers
 app.post('/ai/stream', async (request, reply) => {
-  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext } = request.body || {};
+  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, destinations } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
   const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
-  const system = rawSystem ? rawSystem + competitorSuffix : (competitorSuffix || undefined);
+  const platformRules = buildPlatformRulesBlock(destinations);
+  const system = rawSystem ? rawSystem + competitorSuffix + platformRules : ((competitorSuffix + platformRules) || undefined);
 
   const pconf = await getActiveProviderConfig();
   const model = reqModel || pconf.model;
@@ -862,7 +944,8 @@ app.post('/ai/bulk-draft', async (request, reply) => {
 
   const selectedDests = destinations.filter((d) => d.selected);
   const toneClause = tone ? `Write in a ${tone} tone.` : '';
-  const system = `You are a social media content writer. Create engaging, concise posts that perform well. ${toneClause} Write only the post text with relevant hashtags. No explanations or preamble.`;
+  const platformRules = buildPlatformRulesBlock(selectedDests);
+  const system = `You are a social media content writer. Create engaging, concise posts that perform well. ${toneClause} Write only the post text with relevant hashtags. No explanations or preamble.${platformRules}`;
 
   // Fire-and-forget — process topics sequentially in the background
   (async () => {

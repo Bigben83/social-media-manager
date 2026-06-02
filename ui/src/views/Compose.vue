@@ -789,7 +789,7 @@ async function generatePost() {
   composeStore.content = ''
 
   try {
-    const gen = aiStore.streamGenerate(prompt, system, undefined, abortController.value.signal, useCompetitorContext.value)
+    const gen = aiStore.streamGenerate(prompt, system, undefined, abortController.value.signal, useCompetitorContext.value, composeStore.selectedDestinations)
     for await (const token of gen) {
       composeStore.content += token
     }
