@@ -1152,10 +1152,96 @@ app.post('/ai/stream', async (request, reply) => {
 
 // ─── Monthly Content Calendar ─────────────────────────────────────────────────
 
-// POST /ai/content-calendar — generate a monthly content plan with narrative brief + sample posts
+// POST /ai/content-brief — generate a narrative brief only (step 1 of 2-step calendar flow)
 // Body: { accountKey?, platforms[], month? (YYYY-MM) }
-app.post('/ai/content-calendar', async (request, reply) => {
+app.post('/ai/content-brief', async (request, reply) => {
   const { accountKey, platforms = [], month } = request.body || {};
+  if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
+
+  const db = await getDb();
+  const calMonth = month || new Date().toISOString().slice(0, 7);
+  const monthName = new Date(`${calMonth}-01`).toLocaleString('en', { month: 'long', year: 'numeric' });
+
+  const profileKey = accountKey || null;
+  const profile = profileKey
+    ? await db.collection('account_profiles').findOne({ _id: profileKey })
+    : await db.collection('account_profiles').findOne({});
+
+  const contextParts = [];
+  if (profile) {
+    if (profile.businessName)   contextParts.push(`Business: ${profile.businessName}`);
+    if (profile.description)    contextParts.push(`Description: ${profile.description}`);
+    if (profile.industry)       contextParts.push(`Industry: ${profile.industry}`);
+    if (profile.toneOfVoice)    contextParts.push(`Tone: ${profile.toneOfVoice}`);
+    if (profile.targetAudience) contextParts.push(`Audience: ${profile.targetAudience}`);
+    if (profile.keywords)       contextParts.push(`Keywords: ${profile.keywords}`);
+  }
+
+  const platformList = platforms.slice(0, 5).join(', ');
+  const platformNoteKeys = platforms.slice(0, 5).map((p) => `"${p}": "<one-sentence strategy>"`).join(', ');
+
+  const system = 'You are a social media content strategist. Return ONLY a valid JSON object with no markdown or explanation.';
+  const prompt = `${contextParts.length ? contextParts.join('\n') + '\n\n' : ''}Create a brief for the ${monthName} content calendar. Platforms: ${platformList}.
+
+Return this exact JSON:
+{
+  "theme": "<one compelling sentence that defines the month's narrative — the red thread across all content>",
+  "pillars": ["<content pillar 1>", "<content pillar 2>", "<content pillar 3>"],
+  "toneGuidance": "<one sentence describing the voice and energy for this month>",
+  "platformNotes": { ${platformNoteKeys} }
+}
+
+Return ONLY valid JSON.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 90000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let brief = null;
+    try {
+      const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      brief = JSON.parse(jsonStr);
+      if (typeof brief.theme !== 'string' || !brief.theme) throw new Error('Missing theme');
+      if (!Array.isArray(brief.pillars)) brief.pillars = [];
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid brief format — try again' });
+    }
+
+    log.info({ action: 'content_brief', month: calMonth, platforms: platforms.join(','), outcome: 'success' });
+    return { success: true, brief, monthName, month: calMonth };
+  } catch (err) {
+    log.error({ action: 'content_brief', outcome: 'failure', err: err.message });
+    return reply.code(503).send({ error: `Brief generation failed: ${err.message}` });
+  }
+});
+
+// POST /ai/content-calendar — generate a monthly content plan with narrative brief + sample posts
+// Body: { accountKey?, platforms[], month? (YYYY-MM), approvedBrief? }
+app.post('/ai/content-calendar', async (request, reply) => {
+  const { accountKey, platforms = [], month, approvedBrief } = request.body || {};
   if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
 
   const db = await getDb();
@@ -1190,8 +1276,19 @@ app.post('/ai/content-calendar', async (request, reply) => {
   const platformNoteKeys = activePlatforms.map((p) => `"${p}"`).join(', ');
   const postSchema = `{ "platform": "<one of: ${platformList}>", "week": <1 or 2>, "content": "<ready-to-publish post>", "hashtags": ["<tag>"], "postType": "<educational|promotional|engagement|storytelling>", "suggestedDay": "<day>" }`;
 
+  // If an approved brief was passed, use it directly — only generate posts
+  const briefSection = approvedBrief
+    ? `The content brief has already been approved — do NOT change it. Use this brief exactly:
+Theme: "${approvedBrief.theme}"
+Pillars: ${(approvedBrief.pillars || []).join(', ')}
+Tone: ${approvedBrief.toneGuidance || ''}
+
+Generate posts that faithfully follow this approved brief.`
+    : '';
+
   const prompt = `${brandContext}
 
+${briefSection}
 Create a ${monthName} content calendar for: ${platformList}.
 Generate ${postsPerPlatform} posts per platform (${totalPosts} posts total across weeks 1 and 2).
 
@@ -1206,12 +1303,12 @@ Platform conventions to follow:
 
 Return a single JSON object:
 {
-  "brief": {
+  "brief": ${approvedBrief ? JSON.stringify(approvedBrief) : `{
     "theme": "<one-sentence monthly narrative>",
     "pillars": ["<pillar 1>", "<pillar 2>", "<pillar 3>"],
     "toneGuidance": "<one sentence>",
     "platformNotes": { ${platformNoteKeys.split(', ').map((k) => `${k}: "<strategy>"`).join(', ')} }
-  },
+  }`},
   "posts": [<${totalPosts} post objects using schema: ${postSchema}>]
 }
 

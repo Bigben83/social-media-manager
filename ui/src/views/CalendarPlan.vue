@@ -33,12 +33,20 @@
             </select>
           </div>
 
-          <!-- Generate button -->
-          <div class="flex items-end">
+          <!-- Step buttons -->
+          <div class="flex items-end gap-2">
+            <button
+              @click="generateBrief"
+              :disabled="briefLoading || loading || !selectedPlatforms.length"
+              class="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-sky-700 hover:bg-sky-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
+            >
+              <i class="fa-solid fa-file-lines text-xs" :class="{ 'animate-pulse': briefLoading }"></i>
+              {{ briefLoading ? $t('calendarPlan.generatingBrief') : $t('calendarPlan.generateBrief') }}
+            </button>
             <button
               @click="generate"
               :disabled="loading || !selectedPlatforms.length"
-              class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
+              class="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
             >
               <i class="fa-solid fa-calendar-days text-xs" :class="{ 'animate-pulse': loading }"></i>
               {{ loading ? $t('calendarPlan.generating') : $t('calendarPlan.generate') }}
@@ -63,6 +71,55 @@
               <i :class="p.icon" class="text-[11px]"></i>
               {{ p.label }}
             </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Brief preview (approval step) -->
+      <div v-if="pendingBrief && !calendar" class="bg-gray-900 border border-sky-800/50 rounded-2xl p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <i class="fa-solid fa-file-lines text-sky-400 text-sm"></i>
+            <h2 class="font-semibold text-white">{{ $t('calendarPlan.briefPreviewTitle') }}</h2>
+            <span class="text-xs text-gray-500">{{ pendingBriefMonthName }}</span>
+          </div>
+          <div class="flex gap-2">
+            <button
+              @click="generateBrief"
+              :disabled="briefLoading"
+              class="flex items-center gap-1.5 text-xs px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-gray-200 transition-colors"
+            >
+              <i class="fa-solid fa-rotate-right text-[10px]" :class="{ 'animate-spin': briefLoading }"></i>
+              {{ $t('calendarPlan.regenerateBrief') }}
+            </button>
+            <button
+              @click="approveAndGenerate"
+              :disabled="loading"
+              class="flex items-center gap-1.5 text-sm px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-lg text-white font-medium transition-colors"
+            >
+              <i class="fa-solid fa-check text-xs" :class="{ 'animate-pulse': loading }"></i>
+              {{ loading ? $t('calendarPlan.generating') : $t('calendarPlan.approveBrief') }}
+            </button>
+          </div>
+        </div>
+
+        <div class="p-4 bg-sky-950/40 border border-sky-800/30 rounded-xl mb-4">
+          <div class="text-xs text-sky-400 font-medium mb-1">{{ $t('calendarPlan.theme') }}</div>
+          <p class="text-sm text-gray-200">{{ pendingBrief.theme }}</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div v-if="pendingBrief.pillars?.length">
+            <div class="text-xs text-gray-400 mb-2">{{ $t('calendarPlan.pillars') }}</div>
+            <ul class="space-y-1">
+              <li v-for="p in pendingBrief.pillars" :key="p" class="flex gap-1.5 text-xs text-gray-300">
+                <span class="text-sky-400">▪</span>{{ p }}
+              </li>
+            </ul>
+          </div>
+          <div v-if="pendingBrief.toneGuidance">
+            <div class="text-xs text-gray-400 mb-2">{{ $t('calendarPlan.toneGuidance') }}</div>
+            <p class="text-xs text-gray-300 italic">{{ pendingBrief.toneGuidance }}</p>
           </div>
         </div>
       </div>
@@ -212,6 +269,10 @@ const savingAll  = ref(false)
 const error      = ref('')
 const calendar   = ref<any>(null)
 
+const briefLoading       = ref(false)
+const pendingBrief       = ref<any>(null)
+const pendingBriefMonthName = ref('')
+
 interface ProfileAccount { key: string; label: string }
 const connectedAccounts = computed((): ProfileAccount[] => {
   const list: ProfileAccount[] = []
@@ -241,10 +302,51 @@ function postsForPlatform(platform: string) {
   return (calendar.value?.posts ?? []).filter((p: any) => p.platform === platform)
 }
 
+async function generateBrief() {
+  if (!selectedPlatforms.value.length) return
+  briefLoading.value = true
+  error.value = ''
+  calendar.value = null
+  try {
+    const res = await axios.post('/api/ai/content-brief', {
+      accountKey: selectedAccount.value || undefined,
+      platforms: selectedPlatforms.value,
+      month: selectedMonth.value,
+    })
+    pendingBrief.value = res.data.brief
+    pendingBriefMonthName.value = res.data.monthName
+  } catch (err: any) {
+    error.value = err.response?.data?.error || 'Brief generation failed'
+  } finally {
+    briefLoading.value = false
+  }
+}
+
+async function approveAndGenerate() {
+  if (!pendingBrief.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await axios.post('/api/ai/content-calendar', {
+      accountKey: selectedAccount.value || undefined,
+      platforms: selectedPlatforms.value,
+      month: selectedMonth.value,
+      approvedBrief: pendingBrief.value,
+    })
+    calendar.value = res.data
+    pendingBrief.value = null
+  } catch (err: any) {
+    error.value = err.response?.data?.error || 'Calendar generation failed'
+  } finally {
+    loading.value = false
+  }
+}
+
 async function generate() {
   if (!selectedPlatforms.value.length) return
   loading.value = true
   error.value = ''
+  pendingBrief.value = null
   try {
     const res = await axios.post('/api/ai/content-calendar', {
       accountKey: selectedAccount.value || undefined,
