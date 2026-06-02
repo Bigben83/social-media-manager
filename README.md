@@ -15,6 +15,8 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 - **Content Calendar** — Month/week calendar view of scheduled posts in the Scheduler
 - **Account Profiles** — Store business context (name, industry, audience, tone, hashtags) per account for AI context injection
 - **AI Assistance** — Multi-provider: local [Ollama](https://ollama.ai) (llama3.2, llava, etc.), OpenAI (GPT-4o), Groq (Llama, Mixtral), or Google Gemini; draft generation, hashtag suggestions, image captions; streams directly into the editor
+- **Competitor Intelligence** — Track up to 5 competitors; AI-powered structured analysis (themes, tone, positioning, gaps, moves); keyword extraction with intent classification (informational / commercial / transactional / navigational); content gap analysis against your own hashtag history; 5-post content roadmap with one-click "Draft this post"; side-by-side card layout with double-danger gap highlighting when both competitors target the same keyword you're missing
+- **Per-account Hashtag Performance** — Hashtag stats tracked separately per business account (Facebook page, Instagram account, etc.) so multi-client or multi-brand instances stay cleanly separated; account filter in the Settings stats panel; per-account AI hashtag suggestions
 - **Analytics & Insights** — Publishing stats, 30-day activity chart, platform breakdown, per-account filtering, engagement heatmap, best posting times, and top posts (crawled from platform APIs)
 - **Scheduling Suggestions** — Optimal posting times suggested in Compose, based on your engagement history or industry defaults
 - **Token Expiry Warnings** — Dashboard banner when Meta tokens are within 7 days of expiry
