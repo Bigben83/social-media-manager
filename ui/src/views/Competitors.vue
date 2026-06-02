@@ -1,5 +1,5 @@
 <template>
-  <div class="p-6 mx-auto" :class="competitorStore.competitors.length >= 2 ? 'max-w-6xl' : 'max-w-3xl'">
+  <div class="p-6" :class="competitorStore.competitors.length >= 2 ? '' : 'max-w-3xl mx-auto'">
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-white">{{ t('competitors.sectionTitle') }}</h1>
       <p class="text-gray-400 mt-1">{{ t('competitors.sectionSubtitle') }}</p>
@@ -15,10 +15,10 @@
       {{ t('competitors.sideBySideMode') }}
     </div>
 
-    <!-- Competitor cards — stacked for 1, side-by-side grid for 2+ -->
+    <!-- Competitor cards — stacked for 1, responsive grid for 2+ -->
     <div
       v-if="competitorStore.competitors.length"
-      :class="competitorStore.competitors.length >= 2 ? 'grid grid-cols-2 gap-4 mb-6 items-start' : 'space-y-4 mb-6'"
+      :class="gridClass"
     >
       <div
         v-for="competitor in competitorStore.competitors"
@@ -329,12 +329,12 @@
     </div>
 
     <!-- Empty state -->
-    <div v-else-if="!competitorStore.loading" class="mb-6 p-8 text-center bg-gray-800 border border-gray-700 rounded-lg text-gray-400">
+    <div v-else-if="!competitorStore.loading" class="mb-6 p-8 text-center bg-gray-800 border border-gray-700 rounded-lg text-gray-400 max-w-xl">
       {{ t('competitors.emptyState') }}
     </div>
 
     <!-- Add competitor form -->
-    <div v-if="competitorStore.competitors.length < 5" class="bg-gray-800 border border-gray-700 rounded-lg p-5">
+    <div v-if="competitorStore.competitors.length < 5" class="bg-gray-800 border border-gray-700 rounded-lg p-5 max-w-xl">
       <h2 class="text-sm font-semibold text-white mb-3">{{ t('competitors.addCompetitor') }}</h2>
       <div class="space-y-2">
         <input
@@ -376,6 +376,16 @@ function draftPost(headline: string) {
   composeStore.content = headline
   router.push('/compose')
 }
+
+// Grid layout: full-width multi-column for 2+ competitors
+const gridClass = computed(() => {
+  const n = competitorStore.competitors.length
+  if (n <= 1) return 'space-y-4 mb-6'
+  if (n === 2) return 'grid grid-cols-2 gap-4 mb-6 items-start'
+  if (n === 3) return 'grid grid-cols-3 gap-4 mb-6 items-start'
+  if (n === 4) return 'grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6 items-start'
+  return 'grid grid-cols-2 xl:grid-cols-5 gap-4 mb-6 items-start'
+})
 
 // Gap terms targeted by 2+ competitors simultaneously — "double danger"
 const sharedGapTerms = computed<Set<string>>(() => {
