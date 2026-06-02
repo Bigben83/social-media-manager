@@ -9,10 +9,75 @@
       {{ competitorStore.error }}
     </div>
 
-    <!-- Side-by-side label -->
-    <div v-if="competitorStore.competitors.length >= 2" class="mb-3 flex items-center gap-2 text-xs text-gray-500">
-      <i class="fa-solid fa-table-columns"></i>
-      {{ t('competitors.sideBySideMode') }}
+    <!-- Side-by-side label + matrix toggle -->
+    <div v-if="competitorStore.competitors.length >= 2" class="mb-3 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 text-xs text-gray-500">
+        <i class="fa-solid fa-table-columns"></i>
+        {{ t('competitors.sideBySideMode') }}
+      </div>
+      <button
+        v-if="analyzedCompetitors.length >= 2"
+        @click="matrixOpen = !matrixOpen"
+        class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors"
+        :class="matrixOpen ? 'bg-violet-900/50 border-violet-700 text-violet-300' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'"
+      >
+        <i class="fa-solid fa-table text-[10px]"></i>
+        {{ t('competitors.compareMatrix') }}
+      </button>
+    </div>
+
+    <!-- Competitor comparison matrix -->
+    <div v-if="matrixOpen && analyzedCompetitors.length >= 2" class="mb-6 bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+      <!-- Matrix header -->
+      <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-table text-xs text-violet-400"></i>
+          <span class="text-sm font-semibold text-white">{{ t('competitors.matrixTitle') }}</span>
+        </div>
+        <button
+          @click="generateMatrixSynthesis"
+          :disabled="matrixLoading"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-violet-800 hover:bg-violet-700 disabled:opacity-40 border border-violet-700 rounded-lg transition-colors text-violet-200"
+        >
+          <i class="fa-solid fa-wand-magic-sparkles text-[10px]" :class="{ 'animate-pulse': matrixLoading }"></i>
+          {{ matrixLoading ? t('competitors.matrixSynthesizing') : t('competitors.matrixSynthesize') }}
+        </button>
+      </div>
+
+      <!-- AI synthesis banner -->
+      <div v-if="matrixSynthesis" class="px-5 py-3 bg-violet-950/40 border-b border-violet-800/30 text-sm text-gray-300 leading-relaxed">
+        <i class="fa-solid fa-lightbulb text-violet-400 mr-2 text-xs"></i>{{ matrixSynthesis }}
+      </div>
+
+      <!-- Comparison table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="border-b border-gray-800">
+              <th class="text-left px-4 py-2.5 text-gray-500 font-medium w-32 shrink-0">Dimension</th>
+              <th
+                v-for="c in analyzedCompetitors"
+                :key="c._id"
+                class="text-left px-4 py-2.5 text-violet-300 font-semibold"
+              >{{ c.name }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in MATRIX_ROWS"
+              :key="row.key"
+              class="border-b border-gray-800/60 hover:bg-gray-800/30 transition-colors"
+            >
+              <td class="px-4 py-2.5 text-gray-500 font-medium align-top shrink-0">{{ row.label }}</td>
+              <td
+                v-for="c in analyzedCompetitors"
+                :key="c._id"
+                class="px-4 py-2.5 text-gray-300 align-top"
+              >{{ row.get(c) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Competitor cards — stacked for 1, responsive grid for 2+ -->
@@ -535,6 +600,36 @@ const composeStore = useComposeStore()
 function draftPost(headline: string) {
   composeStore.content = headline
   router.push('/compose')
+}
+
+// ── Competitor matrix ─────────────────────────────────────────────────────────
+const matrixOpen     = ref(false)
+const matrixLoading  = ref(false)
+const matrixSynthesis = ref<string | null>(null)
+
+const analyzedCompetitors = computed(() =>
+  competitorStore.competitors.filter((c) => c.aiAnalysis),
+)
+
+const MATRIX_ROWS = [
+  { key: 'positioning',  label: 'Positioning',          get: (c: Competitor) => c.aiAnalysis?.positioning || '—' },
+  { key: 'tone',         label: 'Brand Tone',           get: (c: Competitor) => c.aiAnalysis?.tone || '—' },
+  { key: 'themes',       label: 'Content Themes',       get: (c: Competitor) => (c.aiAnalysis?.themes || []).join(', ') || '—' },
+  { key: 'gaps',         label: 'Weaknesses / Gaps',    get: (c: Competitor) => (c.aiAnalysis?.gaps || []).join(', ') || '—' },
+  { key: 'moves',        label: 'Differentiation Moves',get: (c: Competitor) => (c.aiAnalysis?.moves || []).join(', ') || '—' },
+  { key: 'keywords',     label: 'Top Keywords',         get: (c: Competitor) => ((c.keywords || []).slice(0, 5).map((k: any) => k.term).join(', ') || '—') },
+] as const
+
+async function generateMatrixSynthesis() {
+  matrixLoading.value = true
+  try {
+    const res = await axios.post('/api/competitors/social-matrix')
+    matrixSynthesis.value = res.data.synthesis
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Matrix synthesis failed')
+  } finally {
+    matrixLoading.value = false
+  }
 }
 
 // Grid layout: full-width multi-column for 2+ competitors

@@ -3666,6 +3666,76 @@ No explanation, no markdown.`;
   }
 });
 
+// ─── Competitor Social Matrix ────────────────────────────────────────────────
+
+app.post('/competitors/social-matrix', async (request, reply) => {
+  const db = await getDb();
+  const competitors = await db.collection('competitors')
+    .find({ aiAnalysis: { $exists: true } })
+    .toArray();
+
+  if (competitors.length < 2) {
+    return reply.code(400).send({ error: 'Run "Summarise with AI" on at least 2 competitors first.' });
+  }
+
+  const competitorBlocks = competitors.map((c) => {
+    const a = c.aiAnalysis || {};
+    return [
+      `Competitor: ${c.name}`,
+      `  Positioning: ${a.positioning || 'unknown'}`,
+      `  Tone: ${a.tone || 'unknown'}`,
+      `  Themes: ${(a.themes || []).join(', ') || 'none'}`,
+      `  Weaknesses/Gaps: ${(a.gaps || []).join(', ') || 'none'}`,
+      `  Top keywords: ${(c.keywords || []).slice(0, 5).map((k) => k.term).join(', ') || 'none'}`,
+    ].join('\n');
+  }).join('\n\n');
+
+  const system = 'You are a competitive intelligence analyst. Write in plain text, no markdown or bullet points.';
+  const prompt = `Here are ${competitors.length} competitors you are analysing:
+
+${competitorBlocks}
+
+Write a concise competitive landscape synthesis (3–4 sentences) that:
+1. Identifies the dominant positioning gap none of them own (the white space).
+2. Names the competitor with the weakest differentiation.
+3. States the single highest-leverage content angle for someone competing against all of them.
+
+Write as direct, specific analysis. No fluff.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 90000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    if (!text.trim()) return reply.code(503).send({ error: 'AI returned empty response — try again' });
+    log.info({ action: 'competitor_matrix', count: competitors.length, outcome: 'success' });
+    return { success: true, synthesis: text.trim(), generatedAt: new Date() };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Matrix synthesis failed', detail: err.message });
+  }
+});
+
 // ─── Industry Type Diagnosis ─────────────────────────────────────────────────
 
 app.post('/ai/industry-diagnosis', async (request, reply) => {
