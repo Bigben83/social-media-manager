@@ -15,15 +15,115 @@
         <i class="fa-solid fa-table-columns"></i>
         {{ t('competitors.sideBySideMode') }}
       </div>
-      <button
-        v-if="analyzedCompetitors.length >= 2"
-        @click="matrixOpen = !matrixOpen"
-        class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors"
-        :class="matrixOpen ? 'bg-violet-900/50 border-violet-700 text-violet-300' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'"
-      >
-        <i class="fa-solid fa-table text-[10px]"></i>
-        {{ t('competitors.compareMatrix') }}
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          v-if="analyzedCompetitors.length >= 1"
+          @click="mapOpen = !mapOpen; matrixOpen = false"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors"
+          :class="mapOpen ? 'bg-emerald-900/50 border-emerald-700 text-emerald-300' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'"
+        >
+          <i class="fa-solid fa-map text-[10px]"></i>
+          {{ t('competitors.strategicMap') }}
+        </button>
+        <button
+          v-if="analyzedCompetitors.length >= 2"
+          @click="matrixOpen = !matrixOpen; mapOpen = false"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors"
+          :class="matrixOpen ? 'bg-violet-900/50 border-violet-700 text-violet-300' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'"
+        >
+          <i class="fa-solid fa-table text-[10px]"></i>
+          {{ t('competitors.compareMatrix') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Strategic Group Map -->
+    <div v-if="mapOpen" class="mb-6 bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+      <!-- Header + axis selectors -->
+      <div class="px-5 py-3 border-b border-gray-800 flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-2 mr-auto">
+          <i class="fa-solid fa-map text-xs text-emerald-400"></i>
+          <span class="text-sm font-semibold text-white">{{ t('competitors.mapTitle') }}</span>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-gray-500">X:</span>
+          <select v-model="mapXAxis" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200 text-xs focus:outline-none focus:border-emerald-500">
+            <option v-for="d in STRATEGIC_DIMENSIONS" :key="d" :value="d" :disabled="d === mapYAxis">{{ d }}</option>
+          </select>
+          <span class="text-gray-500">Y:</span>
+          <select v-model="mapYAxis" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200 text-xs focus:outline-none focus:border-emerald-500">
+            <option v-for="d in STRATEGIC_DIMENSIONS" :key="d" :value="d" :disabled="d === mapXAxis">{{ d }}</option>
+          </select>
+        </div>
+        <button
+          @click="generateStrategicMap"
+          :disabled="mapLoading"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 border border-emerald-700 rounded-lg transition-colors text-emerald-200"
+        >
+          <i class="fa-solid fa-wand-magic-sparkles text-[10px]" :class="{ 'animate-pulse': mapLoading }"></i>
+          {{ mapLoading ? t('competitors.mapGenerating') : t('competitors.mapGenerate') }}
+        </button>
+      </div>
+
+      <!-- Map canvas -->
+      <div v-if="mapResult" class="p-5">
+        <!-- Insight banner -->
+        <div class="mb-4 p-3 bg-emerald-950/40 border border-emerald-800/30 rounded-xl text-sm text-gray-300 leading-relaxed">
+          <i class="fa-solid fa-lightbulb text-emerald-400 mr-2 text-xs"></i>{{ mapResult.insight }}
+        </div>
+
+        <!-- 2D scatter plot -->
+        <div class="relative bg-gray-800/40 border border-gray-700 rounded-xl" style="height: 320px; margin-bottom: 1rem;">
+          <!-- Axis labels -->
+          <div class="absolute bottom-1 left-1/2 -translate-x-1/2 text-xs text-gray-500">{{ mapResult.xAxis }} →</div>
+          <div class="absolute top-1/2 left-1 -translate-y-1/2 text-xs text-gray-500" style="writing-mode: vertical-rl; text-orientation: mixed; transform: translateY(-50%) rotate(180deg);">↑ {{ mapResult.yAxis }}</div>
+          <!-- Grid lines -->
+          <div class="absolute inset-6 border border-gray-700/40 rounded">
+            <div v-for="i in 4" :key="i" class="absolute border-t border-gray-700/20 w-full" :style="{ top: (i * 20) + '%' }"></div>
+            <div v-for="i in 4" :key="i" class="absolute border-l border-gray-700/20 h-full" :style="{ left: (i * 20) + '%' }"></div>
+          </div>
+          <!-- Players -->
+          <div
+            v-for="player in mapResult.players"
+            :key="player.name"
+            class="absolute flex flex-col items-center gap-0.5 -translate-x-1/2 translate-y-1/2"
+            :style="{ left: `calc(6% + ${(player.x - 1) / 9 * 88}%)`, bottom: `calc(6% + ${(player.y - 1) / 9 * 88}%)` }"
+          >
+            <div
+              class="w-3 h-3 rounded-full border-2 shadow-lg"
+              :class="player.isYou ? 'bg-emerald-400 border-emerald-300' : 'bg-violet-400 border-violet-300'"
+            ></div>
+            <span
+              class="text-[10px] font-medium px-1 rounded whitespace-nowrap"
+              :class="player.isYou ? 'text-emerald-300 bg-emerald-950/80' : 'text-gray-200 bg-gray-900/80'"
+            >{{ player.name }}</span>
+          </div>
+        </div>
+
+        <!-- Whitespace opportunities -->
+        <div v-if="mapResult.whitespace?.length" class="mb-3">
+          <div class="text-xs font-medium text-gray-400 mb-1.5">{{ t('competitors.mapWhitespace') }}</div>
+          <div class="flex flex-wrap gap-2">
+            <span v-for="w in mapResult.whitespace" :key="w" class="text-xs px-2 py-1 bg-emerald-900/30 border border-emerald-700/40 text-emerald-300 rounded-full">
+              <i class="fa-solid fa-circle-plus mr-1 text-[9px]"></i>{{ w }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Clusters -->
+        <div v-if="mapResult.clusters?.length">
+          <div class="text-xs font-medium text-gray-400 mb-1.5">{{ t('competitors.mapClusters') }}</div>
+          <ul class="space-y-0.5">
+            <li v-for="c in mapResult.clusters" :key="c" class="flex gap-1.5 text-xs text-gray-400">
+              <span class="text-violet-400 shrink-0">›</span>{{ c }}
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div v-else class="px-5 py-8 text-center text-sm text-gray-500">
+        {{ t('competitors.mapEmpty') }}
+      </div>
     </div>
 
     <!-- Competitor comparison matrix -->
@@ -600,6 +700,39 @@ const composeStore = useComposeStore()
 function draftPost(headline: string) {
   composeStore.content = headline
   router.push('/compose')
+}
+
+// ── Strategic group map ───────────────────────────────────────────────────────
+const STRATEGIC_DIMENSIONS = [
+  'Price level',
+  'Product / service breadth',
+  'Brand strength',
+  'Technology leadership',
+  'Market coverage',
+  'Service quality',
+  'Marketing intensity',
+  'Geographic reach',
+]
+
+const mapOpen    = ref(false)
+const mapLoading = ref(false)
+const mapXAxis   = ref(STRATEGIC_DIMENSIONS[0])
+const mapYAxis   = ref(STRATEGIC_DIMENSIONS[2])
+const mapResult  = ref<{ xAxis: string; yAxis: string; players: any[]; clusters: string[]; whitespace: string[]; insight: string } | null>(null)
+
+async function generateStrategicMap() {
+  mapLoading.value = true
+  try {
+    const res = await axios.post('/api/competitors/strategic-map', {
+      xAxis: mapXAxis.value,
+      yAxis: mapYAxis.value,
+    })
+    mapResult.value = res.data
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Strategic map failed')
+  } finally {
+    mapLoading.value = false
+  }
 }
 
 // ── Competitor matrix ─────────────────────────────────────────────────────────

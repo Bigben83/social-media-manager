@@ -3763,6 +3763,109 @@ No explanation, no markdown.`;
   }
 });
 
+// ─── Strategic Group Map ─────────────────────────────────────────────────────
+
+const STRATEGIC_DIMENSIONS = [
+  'Price level',
+  'Product / service breadth',
+  'Brand strength',
+  'Technology leadership',
+  'Market coverage',
+  'Service quality',
+  'Marketing intensity',
+  'Geographic reach',
+];
+
+app.post('/competitors/strategic-map', async (request, reply) => {
+  const { xAxis, yAxis, accountKey } = request.body || {};
+  if (!xAxis || !yAxis) return reply.code(400).send({ error: 'xAxis and yAxis are required' });
+  if (xAxis === yAxis) return reply.code(400).send({ error: 'xAxis and yAxis must be different dimensions' });
+
+  const db = await getDb();
+  const competitors = await db.collection('competitors')
+    .find({ aiAnalysis: { $exists: true } })
+    .toArray();
+
+  if (competitors.length < 1) {
+    return reply.code(400).send({ error: 'Run "Summarise with AI" on at least one competitor first.' });
+  }
+
+  const profile = accountKey
+    ? await db.collection('account_profiles').findOne({ _id: accountKey })
+    : await db.collection('account_profiles').findOne({});
+
+  const competitorBlocks = competitors.map((c) => {
+    const a = c.aiAnalysis || {};
+    return `${c.name}: positioning="${a.positioning || 'unknown'}", tone="${a.tone || 'unknown'}", themes=[${(a.themes || []).join(', ')}]`;
+  }).join('\n');
+
+  const yourBrand = profile
+    ? `Your brand: "${profile.businessName || 'Your brand'}" — ${profile.description || ''} — ${profile.toneOfVoice || ''}`
+    : 'Your brand: unknown';
+
+  const system = 'You are a Porter strategy analyst. Return only valid JSON with no markdown or explanation.';
+  const prompt = `Plot these players on a strategic group map using two dimensions: X = "${xAxis}", Y = "${yAxis}".
+
+${yourBrand}
+${competitorBlocks}
+
+Assign each player a score 1–10 on each axis. 1 = lowest/weakest on that dimension, 10 = highest/strongest.
+
+Return:
+{
+  "players": [
+    { "name": "<name>", "x": <1-10>, "y": <1-10>, "isYou": <true if your brand, false otherwise>, "note": "<one phrase describing their position>" }
+  ],
+  "clusters": ["<describe a cluster group if 2+ players are close together>"],
+  "whitespace": ["<opportunity in a part of the map with no players>", "<second opportunity>"],
+  "insight": "<2-sentence strategic insight from the map>"
+}
+
+Include your brand as a player with isYou: true. Return ONLY valid JSON.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 90000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+    let result = null;
+    try {
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      result = JSON.parse(jsonStr);
+      if (!Array.isArray(result.players)) throw new Error('Missing players array');
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid strategic map format — try again' });
+    }
+
+    log.info({ action: 'strategic_map', xAxis, yAxis, players: result.players.length, outcome: 'success' });
+    return { success: true, xAxis, yAxis, ...result, generatedAt: new Date() };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Strategic map failed', detail: err.message });
+  }
+});
+
 // ─── Competitor Social Matrix ────────────────────────────────────────────────
 
 app.post('/competitors/social-matrix', async (request, reply) => {
