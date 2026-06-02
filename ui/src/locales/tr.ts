@@ -70,6 +70,16 @@ export default {
     auditStats: '{count} gönderi · haftada {freq}x · %{rate} başarı',
     auditError: 'Denetim başarısız — önce en az 3 gönderi yayınlayın.',
 
+    runChannelAudit: 'Kanal Denetimi',
+    runningChannelAudit: 'Denetleniyor…',
+    channelAuditTitle: 'Sosyal Kanal Denetimi',
+    channelAuditScore: 'Kanal Puanı',
+    channelAuditDismiss: 'Kapat',
+    channelAuditTopActions: 'Öncelikli Eylemler',
+    channelAuditRecommendations: 'Öneriler',
+    channelAuditError: 'Kanal denetimi başarısız — önce en az 2 gönderi yayınlayın.',
+    channelAuditGeneratedAt: 'Oluşturuldu',
+
     insightsTitle: 'Gelişmiş İçgörüler',
     insightsSubtitle: 'Bağlı platformlardan etkileşim metrikleri',
     insightsEmpty: 'Henüz etkileşim verisi yok.',

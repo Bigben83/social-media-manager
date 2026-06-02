@@ -3666,4 +3666,164 @@ No explanation, no markdown.`;
   }
 });
 
+// ─── Social Channel Audit ────────────────────────────────────────────────────
+
+app.post('/ai/channel-audit', async (request, reply) => {
+  const { accountKey } = request.body || {};
+  const db = await getDb();
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  // Load profile (optional — enriches completeness & bio quality sections)
+  let profile = null;
+  if (accountKey) {
+    profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  }
+
+  // Load recent posts, optionally filtered by account
+  const postFilter = accountKey
+    ? { publishedAt: { $gte: thirtyDaysAgo }, 'destinations.key': accountKey }
+    : { publishedAt: { $gte: thirtyDaysAgo } };
+  const recentPosts = await db.collection('posts')
+    .find(postFilter, { projection: { content: 1, destinations: 1, publishedAt: 1, status: 1 } })
+    .toArray();
+
+  if (recentPosts.length < 2) {
+    return reply.code(400).send({ error: 'Not enough publishing history. Publish at least 2 posts first.' });
+  }
+
+  // ── Local stats computation ──────────────────────────────────────────────
+  const totalPosts = recentPosts.length;
+
+  // Format diversity: posts with imageUrl/videoUrl in any destination
+  const postsWithMedia = recentPosts.filter((p) =>
+    (p.destinations || []).some((d) => d.imageUrl || d.videoUrl),
+  ).length;
+  const mediaRatio = Math.round((postsWithMedia / totalPosts) * 100);
+
+  // CTA detection
+  const ctaWords = ['click', 'link in bio', 'shop', 'buy', 'register', 'sign up', 'subscribe', 'follow', 'comment', 'share', 'tag', 'dm'];
+  const postsWithCta = recentPosts.filter((p) =>
+    ctaWords.some((w) => (p.content || '').toLowerCase().includes(w)),
+  ).length;
+  const ctaRatio = Math.round((postsWithCta / totalPosts) * 100);
+
+  // Hashtag stats
+  const hashtagCounts = recentPosts.map((p) => ((p.content || '').match(/#\w+/g) || []).length);
+  const avgHashtags = Math.round((hashtagCounts.reduce((s, c) => s + c, 0) / totalPosts) * 10) / 10;
+
+  // Caption length
+  const avgCaptionLength = Math.round(recentPosts.reduce((s, p) => s + (p.content || '').length, 0) / totalPosts);
+
+  // Posting consistency: days between posts
+  const dates = recentPosts.map((p) => new Date(p.publishedAt).getTime()).sort((a, b) => a - b);
+  const gaps = dates.slice(1).map((d, i) => (d - dates[i]) / (1000 * 60 * 60 * 24));
+  const avgGap = gaps.length > 0 ? Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length * 10) / 10 : 30;
+  const maxGap = gaps.length > 0 ? Math.round(Math.max(...gaps) * 10) / 10 : 30;
+
+  // Engagement from post_metrics
+  const metricsFilter = accountKey
+    ? { accountKey }
+    : {};
+  const metrics = await db.collection('post_metrics')
+    .find({ ...metricsFilter, createdAt: { $gte: thirtyDaysAgo } })
+    .toArray();
+  const avgEngagement = metrics.length > 0
+    ? Math.round((metrics.reduce((s, m) => s + (m.metrics?.engagementTotal || 0), 0) / metrics.length) * 10) / 10
+    : null;
+
+  // Profile completeness score (0-100)
+  let profileScore = 0;
+  let profileNote = 'No profile configured for this account.';
+  if (profile) {
+    const fields = [profile.businessName, profile.description, profile.industry, profile.toneOfVoice, profile.targetAudience, profile.keywords, profile.websiteUrl];
+    const filled = fields.filter((f) => f && (Array.isArray(f) ? f.length > 0 : String(f).trim().length > 0)).length;
+    profileScore = Math.round((filled / fields.length) * 100);
+    profileNote = `${filled}/${fields.length} profile fields completed. Business name: ${profile.businessName || 'missing'}, industry: ${profile.industry || 'missing'}.`;
+  }
+
+  const statsBlock = [
+    `Total posts (last 30 days): ${totalPosts}`,
+    `Posts with media (images/video): ${mediaRatio}%`,
+    `Posts with a CTA (click, shop, follow, etc.): ${ctaRatio}%`,
+    `Average hashtags per post: ${avgHashtags}`,
+    `Average caption length: ${avgCaptionLength} characters`,
+    `Average days between posts: ${avgGap} (max gap: ${maxGap} days)`,
+    `Average engagement per post: ${avgEngagement !== null ? avgEngagement : 'no data'}`,
+    `Account profile completeness: ${profileScore}% — ${profileNote}`,
+    profile?.description ? `Bio/description: "${profile.description.slice(0, 200)}"` : 'No bio/description set.',
+    profile?.toneOfVoice ? `Brand tone: ${profile.toneOfVoice}` : '',
+  ].filter(Boolean).join('\n');
+
+  const system = 'You are a professional social media channel auditor. Return only valid JSON with no markdown or explanation.';
+  const prompt = `Audit this social media channel and return a quality score report.
+
+${statsBlock}
+
+Score each dimension 0-10 and return this exact JSON:
+{
+  "score": <overall 0-100>,
+  "sections": [
+    { "name": "Profile Completeness", "score": <0-10>, "assessment": "<one sentence>", "recommendations": ["<action>", "<action>"] },
+    { "name": "Posting Consistency", "score": <0-10>, "assessment": "<one sentence>", "recommendations": ["<action>", "<action>"] },
+    { "name": "Visual Content", "score": <0-10>, "assessment": "<one sentence>", "recommendations": ["<action>", "<action>"] },
+    { "name": "CTA Usage", "score": <0-10>, "assessment": "<one sentence>", "recommendations": ["<action>", "<action>"] },
+    { "name": "Hashtag Strategy", "score": <0-10>, "assessment": "<one sentence>", "recommendations": ["<action>", "<action>"] },
+    { "name": "Engagement Quality", "score": <0-10>, "assessment": "<one sentence>", "recommendations": ["<action>", "<action>"] }
+  ],
+  "topActions": ["<highest-impact action 1>", "<highest-impact action 2>", "<highest-impact action 3>"]
+}
+
+Scoring benchmarks:
+- Profile Completeness: 100% filled = 10, 70%+ = 7, 50%+ = 5, below = 2
+- Posting Consistency: daily = 10, every 2-3 days = 7, weekly = 5, less = 2; long gaps hurt the score
+- Visual Content: 80%+ posts with media = 10, 50%+ = 7, 25%+ = 4, 0% = 1
+- CTA Usage: 60%+ posts with CTA = 10, 40%+ = 7, 20%+ = 4, none = 2
+- Hashtag Strategy: 3-10 hashtags avg = 10, 1-2 or 11-20 = 7, 0 or 21+ = 3
+- Engagement Quality: avg engagement >5 = 10, 3-5 = 7, 1-3 = 5, <1 = 2, no data = 5 (neutral)
+Return ONLY valid JSON.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+    let result = null;
+    try {
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      result = JSON.parse(jsonStr);
+      if (!Array.isArray(result.sections)) throw new Error();
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid channel audit format — try again' });
+    }
+
+    log.info({ action: 'channel_audit', account: accountKey || 'all', outcome: 'success' });
+    return { success: true, ...result, generatedAt: new Date() };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Channel audit failed', detail: err.message });
+  }
+});
+
 module.exports = app;

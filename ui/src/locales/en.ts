@@ -70,6 +70,16 @@ export default {
     auditStats: '{count} posts · {freq}x/week · {rate}% success rate',
     auditError: 'Audit failed — publish at least 3 posts first, then try again.',
 
+    runChannelAudit: 'Channel Audit',
+    runningChannelAudit: 'Auditing…',
+    channelAuditTitle: 'Social Channel Audit',
+    channelAuditScore: 'Channel Score',
+    channelAuditDismiss: 'Dismiss',
+    channelAuditTopActions: 'Top Actions',
+    channelAuditRecommendations: 'Recommendations',
+    channelAuditError: 'Channel audit failed — publish at least 2 posts first, then try again.',
+    channelAuditGeneratedAt: 'Generated',
+
     insightsTitle: 'Advanced Insights',
     insightsSubtitle: 'Engagement metrics from connected platforms',
     insightsEmpty: 'No engagement data yet.',

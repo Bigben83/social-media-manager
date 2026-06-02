@@ -18,6 +18,14 @@
             {{ auditLoading ? $t('analytics.runningAudit') : $t('analytics.runAudit') }}
           </button>
           <button
+            @click="runChannelAudit"
+            :disabled="channelAuditLoading"
+            class="flex items-center gap-2 px-4 py-2 bg-sky-800 hover:bg-sky-700 border border-sky-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
+          >
+            <i class="fa-solid fa-chart-bar text-xs" :class="{ 'animate-pulse': channelAuditLoading }"></i>
+            {{ channelAuditLoading ? $t('analytics.runningChannelAudit') : $t('analytics.runChannelAudit') }}
+          </button>
+          <button
             @click="exportCsv"
             class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm font-medium transition-colors"
           >
@@ -124,6 +132,63 @@
           <ol class="space-y-1.5">
             <li v-for="(rec, i) in audit.recommendations" :key="i" class="flex gap-2 text-sm text-gray-200">
               <span class="text-violet-400 font-semibold shrink-0">{{ i + 1 }}.</span>{{ rec }}
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- Channel audit error -->
+      <div v-if="channelAuditError" class="mb-6 p-3 bg-red-900/40 border border-red-700 rounded-xl text-red-300 text-sm flex items-center justify-between gap-3">
+        {{ $t('analytics.channelAuditError') }}
+        <button @click="channelAuditError = false" class="text-red-400 hover:text-red-200 shrink-0">✕</button>
+      </div>
+
+      <!-- Channel audit results card -->
+      <div v-if="channelAudit" class="mb-8 bg-gray-900 border border-sky-800/50 rounded-2xl overflow-hidden">
+        <!-- Header -->
+        <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <i class="fa-solid fa-chart-bar text-sky-400"></i>
+            <span class="font-semibold text-white">{{ $t('analytics.channelAuditTitle') }}</span>
+            <span v-if="selectedAccount" class="text-xs text-gray-500">{{ selectedAccount }}</span>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-400">{{ $t('analytics.channelAuditScore') }}</span>
+              <span
+                class="text-lg font-bold px-2 py-0.5 rounded-lg"
+                :class="channelAudit.score >= 70 ? 'text-green-300 bg-green-900/40' : channelAudit.score >= 40 ? 'text-amber-300 bg-amber-900/40' : 'text-red-300 bg-red-900/40'"
+              >{{ channelAudit.score }}/100</span>
+            </div>
+            <button @click="channelAudit = null" class="text-gray-500 hover:text-gray-300 text-sm">{{ $t('analytics.channelAuditDismiss') }}</button>
+          </div>
+        </div>
+
+        <!-- Section grid -->
+        <div class="grid grid-cols-2 lg:grid-cols-3 divide-x divide-y divide-gray-800 border-b border-gray-800">
+          <div v-for="section in channelAudit.sections" :key="section.name" class="px-5 py-4">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs text-gray-400 font-medium">{{ section.name }}</span>
+              <span class="text-sm font-semibold" :class="scoreColor(section.score)">{{ section.score }}/10</span>
+            </div>
+            <div class="w-full h-1.5 bg-gray-800 rounded-full mb-2">
+              <div class="h-1.5 rounded-full transition-all" :class="scoreBarColor(section.score)" :style="{ width: (section.score * 10) + '%' }"></div>
+            </div>
+            <p class="text-xs text-gray-400 leading-relaxed mb-2">{{ section.assessment }}</p>
+            <ul class="space-y-0.5">
+              <li v-for="(rec, i) in section.recommendations" :key="i" class="flex gap-1.5 text-xs text-gray-500">
+                <span class="text-sky-500 shrink-0">›</span>{{ rec }}
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Top actions -->
+        <div class="px-6 py-4">
+          <div class="text-xs font-medium text-gray-400 mb-2">{{ $t('analytics.channelAuditTopActions') }}</div>
+          <ol class="space-y-1.5">
+            <li v-for="(action, i) in channelAudit.topActions" :key="i" class="flex gap-2 text-sm text-gray-200">
+              <span class="text-sky-400 font-semibold shrink-0">{{ i + 1 }}.</span>{{ action }}
             </li>
           </ol>
         </div>
@@ -593,6 +658,22 @@ const audit        = ref<Audit | null>(null)
 const auditLoading = ref(false)
 const auditError   = ref(false)
 
+interface ChannelAuditSection {
+  name: string
+  score: number
+  assessment: string
+  recommendations: string[]
+}
+interface ChannelAudit {
+  score: number
+  sections: ChannelAuditSection[]
+  topActions: string[]
+  generatedAt: string
+}
+const channelAudit        = ref<ChannelAudit | null>(null)
+const channelAuditLoading = ref(false)
+const channelAuditError   = ref(false)
+
 // ── Data loading ──────────────────────────────────────────────────────────────
 
 function accountParams(extra: Record<string, unknown> = {}) {
@@ -656,6 +737,19 @@ async function runAudit() {
     auditError.value = true
   } finally {
     auditLoading.value = false
+  }
+}
+
+async function runChannelAudit() {
+  channelAuditLoading.value = true
+  channelAuditError.value = false
+  try {
+    const res = await axios.post('/api/ai/channel-audit', { accountKey: selectedAccount.value || undefined })
+    channelAudit.value = res.data
+  } catch {
+    channelAuditError.value = true
+  } finally {
+    channelAuditLoading.value = false
   }
 }
 
