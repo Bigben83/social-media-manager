@@ -728,6 +728,14 @@
                   {{ $t('settings.profiles.saved') }}
                 </span>
                 <button
+                  @click="runFiveForces(account.key)"
+                  :disabled="fiveForcesRunning === account.key"
+                  class="px-3 py-2 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
+                >
+                  <i class="fa-solid fa-star-of-david text-xs" :class="{ 'animate-pulse': fiveForcesRunning === account.key }"></i>
+                  {{ fiveForcesRunning === account.key ? $t('settings.profiles.fiveForcesRunning') : $t('settings.profiles.fiveForces') }}
+                </button>
+                <button
                   @click="diagnoseIndustry(account.key)"
                   :disabled="industryDiagnosing === account.key"
                   class="px-3 py-2 bg-sky-800 hover:bg-sky-700 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
@@ -841,6 +849,51 @@
                       <p class="text-gray-200 italic">→ {{ tactic.action }}</p>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              <!-- Five Forces results -->
+              <div v-if="fiveForcesResults[account.key]" class="mt-4 border-t border-gray-700 pt-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-star-of-david text-xs text-emerald-400"></i>
+                    <span class="text-sm font-medium text-white">{{ $t('settings.profiles.fiveForcesTitle') }}</span>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold"
+                      :class="fiveForcesResults[account.key].overallScore >= 60 ? 'bg-green-900/50 border border-green-700 text-green-300' : fiveForcesResults[account.key].overallScore >= 40 ? 'bg-amber-900/50 border border-amber-700 text-amber-300' : 'bg-red-900/50 border border-red-700 text-red-300'"
+                    >{{ fiveForcesResults[account.key].overallScore }}/100</span>
+                  </div>
+                  <button @click="fiveForcesResults[account.key] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+                </div>
+                <p class="text-xs text-gray-400 mb-3 leading-relaxed italic">{{ fiveForcesResults[account.key].attractiveness }}</p>
+                <p v-if="fiveForcesResults[account.key].governingForce" class="text-xs text-emerald-400 font-medium mb-3">
+                  {{ $t('settings.profiles.fiveForcesGoverning') }}: {{ fiveForcesResults[account.key].governingForce }}
+                </p>
+
+                <!-- Force rows -->
+                <div class="space-y-2 mb-3">
+                  <div v-for="force in fiveForcesResults[account.key].forces" :key="force.name" class="p-2.5 bg-gray-800 border border-gray-700 rounded-lg text-xs">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="font-medium text-gray-200">{{ force.name }}</span>
+                      <span class="font-semibold" :class="force.score <= 3 ? 'text-green-400' : force.score <= 6 ? 'text-amber-400' : 'text-red-400'">{{ force.score }}/10</span>
+                    </div>
+                    <div class="w-full h-1 bg-gray-700 rounded-full mb-1.5">
+                      <div class="h-1 rounded-full" :class="force.score <= 3 ? 'bg-green-500' : force.score <= 6 ? 'bg-amber-500' : 'bg-red-500'" :style="{ width: (force.score * 10) + '%' }"></div>
+                    </div>
+                    <p class="text-gray-400 mb-1">{{ force.assessment }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="d in force.drivers" :key="d" class="px-1.5 py-0.5 bg-gray-700 rounded text-gray-300">{{ d }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Positioning recommendations -->
+                <div v-if="fiveForcesResults[account.key].positioning?.length">
+                  <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.fiveForcesPositioning') }}</div>
+                  <ul class="space-y-0.5">
+                    <li v-for="p in fiveForcesResults[account.key].positioning" :key="p" class="flex gap-1.5 text-xs text-gray-300">
+                      <span class="text-emerald-400 shrink-0">›</span>{{ p }}
+                    </li>
+                  </ul>
                 </div>
               </div>
 
@@ -1674,6 +1727,8 @@ const profileAuditing    = ref<string | null>(null)
 const profileAudits      = ref<Record<string, any>>({})
 const industryDiagnosing = ref<string | null>(null)
 const industryDiagnoses  = ref<Record<string, any>>({})
+const fiveForcesRunning  = ref<string | null>(null)
+const fiveForcesResults  = ref<Record<string, any>>({})
 
 const allConnectedAccounts = computed((): ProfileAccount[] => {
   const accounts: ProfileAccount[] = []
@@ -1765,6 +1820,18 @@ async function removePlacesKey() {
   await axios.delete('/api/credentials/google-places')
   placesConfigured.value = false
   placesKeyHint.value = null
+}
+
+async function runFiveForces(key: string) {
+  fiveForcesRunning.value = key
+  try {
+    const res = await axios.post('/api/ai/five-forces', { accountKey: key })
+    fiveForcesResults.value = { ...fiveForcesResults.value, [key]: res.data }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Five Forces analysis failed')
+  } finally {
+    fiveForcesRunning.value = null
+  }
 }
 
 async function diagnoseIndustry(key: string) {

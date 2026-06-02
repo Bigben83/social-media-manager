@@ -348,6 +348,11 @@ export default {
       diagnosisCharacteristics: 'Özellikler',
       diagnosisTactics: 'Önerilen Taktikler',
       diagnosisContentMix: 'Önerilen İçerik Karması',
+      fiveForces: 'Beş Kuvvet',
+      fiveForcesRunning: 'Analiz ediliyor…',
+      fiveForcesTitle: "Porter'ın Beş Kuvveti",
+      fiveForcesGoverning: 'Belirleyici kuvvet',
+      fiveForcesPositioning: 'Stratejik konumlandırma önerileri',
     },
 
     hashtags: {

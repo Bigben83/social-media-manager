@@ -348,6 +348,11 @@ export default {
       diagnosisCharacteristics: 'Characteristics',
       diagnosisTactics: 'Recommended Tactics',
       diagnosisContentMix: 'Recommended Content Mix',
+      fiveForces: "Five Forces",
+      fiveForcesRunning: 'Analysing…',
+      fiveForcesTitle: "Porter's Five Forces",
+      fiveForcesGoverning: 'Governing force',
+      fiveForcesPositioning: 'Strategic positioning recommendations',
     },
 
     hashtags: {

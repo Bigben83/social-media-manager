@@ -3833,6 +3833,130 @@ Write as direct, specific analysis. No fluff.`;
   }
 });
 
+// ─── Porter's Five Forces Analysis ───────────────────────────────────────────
+
+app.post('/ai/five-forces', async (request, reply) => {
+  const { accountKey } = request.body || {};
+  if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
+
+  const db = await getDb();
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  if (!profile) return reply.code(404).send({ error: 'Account profile not found. Save a profile first.' });
+
+  if (!profile.industry && !profile.businessName) {
+    return reply.code(400).send({ error: 'Add at least a business name or industry to the profile first.' });
+  }
+
+  const profileBlock = [
+    profile.businessName   ? `Business: ${profile.businessName}` : '',
+    profile.industry       ? `Industry: ${profile.industry}` : '',
+    profile.description    ? `Description: ${profile.description}` : '',
+    profile.targetAudience ? `Target audience: ${profile.targetAudience}` : '',
+    profile.keywords       ? `Keywords / products: ${profile.keywords}` : '',
+  ].filter(Boolean).join('\n');
+
+  // Load competitor data for richer rivalry analysis
+  const competitors = await db.collection('competitors').find({}, { projection: { name: 1, aiAnalysis: 1 } }).toArray();
+  const competitorBlock = competitors.length
+    ? `Known direct competitors: ${competitors.map((c) => c.name).join(', ')}.`
+    : '';
+
+  const system = 'You are a Porter strategy analyst. Return only valid JSON with no markdown or explanation.';
+  const prompt = `Analyse this business using Porter\'s Five Forces framework.
+
+${profileBlock}
+${competitorBlock}
+
+Score each force 1–10 (1 = very weak/favourable, 10 = very strong/unfavourable) and return exactly:
+{
+  "attractiveness": "<High|Moderate|Low> — one sentence on overall industry attractiveness",
+  "overallScore": <0–100, where 100 = maximally attractive>,
+  "governingForce": "<name of the single most impactful force>",
+  "forces": [
+    {
+      "name": "Competitive Rivalry",
+      "score": <1–10>,
+      "assessment": "<one sentence>",
+      "drivers": ["<driver 1>", "<driver 2>", "<driver 3>"]
+    },
+    {
+      "name": "Threat of New Entrants",
+      "score": <1–10>,
+      "assessment": "<one sentence>",
+      "drivers": ["<driver>", "<driver>", "<driver>"]
+    },
+    {
+      "name": "Threat of Substitutes",
+      "score": <1–10>,
+      "assessment": "<one sentence>",
+      "drivers": ["<driver>", "<driver>", "<driver>"]
+    },
+    {
+      "name": "Supplier Power",
+      "score": <1–10>,
+      "assessment": "<one sentence>",
+      "drivers": ["<driver>", "<driver>", "<driver>"]
+    },
+    {
+      "name": "Buyer Power",
+      "score": <1–10>,
+      "assessment": "<one sentence>",
+      "drivers": ["<driver>", "<driver>", "<driver>"]
+    }
+  ],
+  "positioning": ["<strategic recommendation 1>", "<strategic recommendation 2>", "<strategic recommendation 3>"]
+}
+
+Scoring: overallScore = 100 minus the average of all five force scores × 10. Return ONLY valid JSON.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+    let result = null;
+    try {
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      result = JSON.parse(jsonStr);
+      if (!Array.isArray(result.forces) || result.forces.length !== 5) throw new Error('Missing forces array');
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid Five Forces format — try again' });
+    }
+
+    await db.collection('account_profiles').updateOne(
+      { _id: accountKey },
+      { $set: { industryAnalysis: result, industryAnalyzedAt: new Date(), updatedAt: new Date() } },
+    );
+
+    log.info({ action: 'five_forces', account: accountKey, governingForce: result.governingForce, outcome: 'success' });
+    return { success: true, ...result, analyzedAt: new Date() };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Five Forces analysis failed', detail: err.message });
+  }
+});
+
 // ─── Industry Type Diagnosis ─────────────────────────────────────────────────
 
 app.post('/ai/industry-diagnosis', async (request, reply) => {
