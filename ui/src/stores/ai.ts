@@ -175,11 +175,13 @@ export const useAiStore = defineStore('ai', () => {
     signal?: AbortSignal,
     useCompetitorContext?: boolean,
     destinations?: { platform: string; key: string }[],
+    useResearchBrief?: boolean,
+    accountKey?: string,
   ): AsyncGenerator<string> {
     const response = await fetch('/api/ai/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, system, model, useCompetitorContext, destinations }),
+      body: JSON.stringify({ prompt, system, model, useCompetitorContext, destinations, useResearchBrief, accountKey }),
       signal,
     })
 

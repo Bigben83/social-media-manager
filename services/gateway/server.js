@@ -814,13 +814,149 @@ app.get('/ai/models', async (request, reply) => {
   }
 });
 
+// ─── Community Research ───────────────────────────────────────────────────────
+
+async function fetchRedditSnippets(query, limit = 5) {
+  try {
+    const res = await axios.get(
+      `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=hot&limit=${limit}&t=month`,
+      { headers: { 'User-Agent': 'SocialManager/1.0 (research bot)' }, timeout: 8000 },
+    );
+    return (res.data?.data?.children || [])
+      .map((p) => p.data)
+      .filter((d) => d.title)
+      .map((d) => `"${d.title}": ${(d.selftext || d.url || '').slice(0, 180)}`);
+  } catch { return []; }
+}
+
+// POST /ai/research — scrape Reddit for industry/keyword discussions, AI-summarise into brief
+// Stores researchBrief + researchBriefAt on account_profiles
+app.post('/ai/research', async (request, reply) => {
+  const { accountKey, topics } = request.body || {};
+  const db = await getDb();
+  const profileKey = accountKey || null;
+  const profile = profileKey
+    ? await db.collection('account_profiles').findOne({ _id: profileKey })
+    : await db.collection('account_profiles').findOne({});
+
+  const industry = profile?.industry || '';
+  const keywords = profile?.keywords || '';
+  const businessName = profile?.businessName || '';
+  const extraTopics = Array.isArray(topics) ? topics.slice(0, 3) : [];
+
+  // Build 3 search queries from profile context
+  const queries = [
+    industry ? `${industry} challenges pain points` : null,
+    keywords ? `${keywords} community discussion` : null,
+    businessName ? `${businessName} competitors alternatives` : null,
+    ...extraTopics.map((t) => String(t)),
+  ].filter(Boolean).slice(0, 4);
+
+  if (!queries.length) return reply.code(400).send({ error: 'No research context — fill in Industry or Keywords in your Account Profile first' });
+
+  const snippets = [];
+  await Promise.all(queries.map(async (q) => {
+    const results = await fetchRedditSnippets(q, 5);
+    snippets.push(...results);
+  }));
+
+  if (!snippets.length) {
+    return reply.code(503).send({ error: 'Could not fetch community data — Reddit may be temporarily unavailable' });
+  }
+
+  const system = 'You are an audience research analyst. Return ONLY valid JSON — no markdown, no explanation.';
+  const prompt = `Based on these community discussions about "${industry || keywords || businessName}":
+
+${snippets.slice(0, 20).map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+Extract a research brief with these exact fields:
+{
+  "painPoints": ["<3-5 real audience frustrations or challenges found in the discussions>"],
+  "trendingTopics": ["<3-5 topics the community is actively discussing right now>"],
+  "communityLanguage": ["<5-8 exact phrases, words, or terms the audience uses — quote them>"],
+  "contentAngles": ["<3-5 specific post angles that would resonate based on what you found>"]
+}
+
+Return ONLY the JSON object.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 60000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 60000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) }, { timeout: 60000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let brief = null;
+    try {
+      const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      brief = JSON.parse(jsonStr);
+      if (!brief.painPoints) throw new Error('Missing painPoints');
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid research format — try again' });
+    }
+
+    const updatedAt = new Date();
+    if (profileKey) {
+      await db.collection('account_profiles').updateOne(
+        { _id: profileKey },
+        { $set: { researchBrief: brief, researchBriefAt: updatedAt } },
+        { upsert: false },
+      );
+    }
+
+    log.info({ action: 'ai_research', accountKey: profileKey || 'any', snippets: snippets.length, outcome: 'success' });
+    return { brief, accountKey: profileKey, updatedAt };
+  } catch (err) {
+    log.error({ action: 'ai_research', outcome: 'failure', err: err.message });
+    return reply.code(503).send({ error: `Research failed: ${err.message}` });
+  }
+});
+
+// Helper: inject research brief into a system prompt when available
+async function buildResearchBriefSuffix(accountKey) {
+  if (!accountKey) return '';
+  try {
+    const db = await getDb();
+    const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+    const b = profile?.researchBrief;
+    if (!b) return '';
+    const parts = [];
+    if (b.painPoints?.length)       parts.push(`Audience pain points: ${b.painPoints.join('; ')}`);
+    if (b.trendingTopics?.length)   parts.push(`Trending topics right now: ${b.trendingTopics.join('; ')}`);
+    if (b.communityLanguage?.length) parts.push(`Language the audience uses: ${b.communityLanguage.join(', ')}`);
+    if (b.contentAngles?.length)    parts.push(`Proven content angles: ${b.contentAngles.join('; ')}`);
+    if (!parts.length) return '';
+    return '\n\nAUDIENCE RESEARCH CONTEXT (use this to make the post feel native to the community):\n' + parts.join('\n');
+  } catch { return ''; }
+}
+
 app.post('/ai/generate', async (request, reply) => {
-  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, destinations } = request.body || {};
+  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, useResearchBrief, accountKey, destinations } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
   const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
+  const researchSuffix = useResearchBrief ? await buildResearchBriefSuffix(accountKey) : '';
   const platformRules = buildPlatformRulesBlock(destinations);
-  const system = rawSystem ? rawSystem + competitorSuffix + platformRules : ((competitorSuffix + platformRules) || undefined);
+  const system = rawSystem ? rawSystem + competitorSuffix + researchSuffix + platformRules : ((competitorSuffix + researchSuffix + platformRules) || undefined);
 
   const pconf = await getActiveProviderConfig();
   const model = reqModel || pconf.model;
@@ -928,12 +1064,13 @@ app.post('/ai/caption', async (request, reply) => {
 
 // SSE streaming endpoint — normalized data: { token, done } format for all providers
 app.post('/ai/stream', async (request, reply) => {
-  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, destinations } = request.body || {};
+  const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, useResearchBrief, accountKey, destinations } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
   const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
+  const researchSuffix = useResearchBrief ? await buildResearchBriefSuffix(accountKey) : '';
   const platformRules = buildPlatformRulesBlock(destinations);
-  const system = rawSystem ? rawSystem + competitorSuffix + platformRules : ((competitorSuffix + platformRules) || undefined);
+  const system = rawSystem ? rawSystem + competitorSuffix + researchSuffix + platformRules : ((competitorSuffix + researchSuffix + platformRules) || undefined);
 
   const pconf = await getActiveProviderConfig();
   const model = reqModel || pconf.model;

@@ -225,6 +225,14 @@ export default {
     firstCommentToggle: 'First Comment',
     firstCommentPlaceholder: 'Add a first comment (hashtags, links, extra context)…',
     firstCommentHint: 'Supported on Instagram, Facebook, Mastodon, and Bluesky.',
+
+    researchAudience: 'Research audience',
+    researching: 'Researching…',
+    researchBriefLabel: 'Brief',
+    researchJustNow: 'just now',
+    researchMinutesAgo: '{n}m ago',
+    researchHoursAgo: '{n}h ago',
+    useResearchBrief: 'Include community research context',
   },
 
   scheduler: {

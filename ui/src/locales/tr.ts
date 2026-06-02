@@ -225,6 +225,14 @@ export default {
     firstCommentToggle: 'İlk Yorum',
     firstCommentPlaceholder: 'İlk yorum ekle (hashtagler, bağlantılar, ek bilgi)…',
     firstCommentHint: 'Instagram, Facebook, Mastodon ve Bluesky\'de desteklenir.',
+
+    researchAudience: 'Kitleyi araştır',
+    researching: 'Araştırılıyor…',
+    researchBriefLabel: 'Özet',
+    researchJustNow: 'az önce',
+    researchMinutesAgo: '{n}d önce',
+    researchHoursAgo: '{n}s önce',
+    useResearchBrief: 'Topluluk araştırma bağlamını dahil et',
   },
 
   scheduler: {

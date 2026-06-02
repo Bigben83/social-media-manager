@@ -281,6 +281,45 @@
                 </label>
                 <span class="text-gray-600">— {{ $t('compose.aiUseCompetitorsHint', { names: competitorNames }) }}</span>
               </div>
+
+              <!-- Community research strip -->
+              <div class="border-t border-violet-900/30 pt-2 space-y-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <button
+                    @click="researchAudience"
+                    :disabled="researchLoading || !aiContextAccount"
+                    class="flex items-center gap-1 text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 border border-gray-700 rounded-lg transition-colors text-gray-300"
+                  >
+                    <i class="fa-solid fa-magnifying-glass-chart text-[10px]" :class="{ 'animate-pulse': researchLoading }"></i>
+                    {{ researchLoading ? $t('compose.researching') : $t('compose.researchAudience') }}
+                  </button>
+                  <span v-if="researchBriefAt" class="text-xs text-gray-600">{{ researchBriefAgeLabel() }}</span>
+                  <button
+                    v-if="researchBrief"
+                    @click="researchBriefOpen = !researchBriefOpen"
+                    class="ml-auto text-xs text-gray-600 hover:text-gray-400"
+                  >{{ researchBriefOpen ? '▲' : '▼' }} {{ $t('compose.researchBriefLabel') }}</button>
+                </div>
+
+                <!-- Brief preview -->
+                <div v-if="researchBrief && researchBriefOpen" class="bg-gray-800/60 rounded-lg p-2.5 text-xs text-gray-300 space-y-1.5">
+                  <div v-if="researchBrief.painPoints?.length">
+                    <span class="text-gray-500 font-medium">Pain points: </span>{{ researchBrief.painPoints.slice(0, 3).join(' · ') }}
+                  </div>
+                  <div v-if="researchBrief.contentAngles?.length">
+                    <span class="text-gray-500 font-medium">Content angles: </span>{{ researchBrief.contentAngles.slice(0, 3).join(' · ') }}
+                  </div>
+                  <div v-if="researchBrief.communityLanguage?.length">
+                    <span class="text-gray-500 font-medium">Community language: </span>{{ researchBrief.communityLanguage.slice(0, 5).join(', ') }}
+                  </div>
+                </div>
+
+                <!-- Use brief checkbox -->
+                <div v-if="researchBrief" class="flex items-center gap-2 text-xs text-gray-400">
+                  <input id="useResearchCtx" v-model="useResearchBrief" type="checkbox" class="accent-violet-500" />
+                  <label for="useResearchCtx" class="cursor-pointer select-none">{{ $t('compose.useResearchBrief') }}</label>
+                </div>
+              </div>
             </template>
           </div>
         </div>
@@ -710,6 +749,11 @@ const aiError = ref(false)
 const aiContextAccount = ref('')
 const abortController = ref<AbortController | null>(null)
 const useCompetitorContext = ref(false)
+const useResearchBrief = ref(false)
+const researchLoading = ref(false)
+const researchBrief = ref<{ painPoints: string[]; trendingTopics: string[]; communityLanguage: string[]; contentAngles: string[] } | null>(null)
+const researchBriefAt = ref<Date | null>(null)
+const researchBriefOpen = ref(false)
 
 const hasCompetitorSummaries = computed(() =>
   competitorStore.competitors.some((c) => c.aiSummary?.trim())
@@ -777,6 +821,31 @@ function buildSystemPrompt(profile: Record<string, string>): string {
   return lines.join('\n')
 }
 
+async function researchAudience() {
+  const firstDest = composeStore.selectedDestinations[0]
+  researchLoading.value = true
+  try {
+    const res = await axios.post('/api/ai/research', { accountKey: firstDest?.key })
+    researchBrief.value = res.data.brief
+    researchBriefAt.value = new Date(res.data.updatedAt)
+    researchBriefOpen.value = true
+    useResearchBrief.value = true
+  } catch (err: any) {
+    console.error('Research failed:', err)
+  } finally {
+    researchLoading.value = false
+  }
+}
+
+function researchBriefAgeLabel(): string {
+  if (!researchBriefAt.value) return ''
+  const mins = Math.round((Date.now() - researchBriefAt.value.getTime()) / 60000)
+  if (mins < 1) return t('compose.researchJustNow')
+  if (mins < 60) return t('compose.researchMinutesAgo', { n: mins })
+  const hrs = Math.round(mins / 60)
+  return t('compose.researchHoursAgo', { n: hrs })
+}
+
 async function generatePost() {
   aiError.value = false
   const firstDest = composeStore.selectedDestinations[0]
@@ -789,7 +858,11 @@ async function generatePost() {
   composeStore.content = ''
 
   try {
-    const gen = aiStore.streamGenerate(prompt, system, undefined, abortController.value.signal, useCompetitorContext.value, composeStore.selectedDestinations)
+    const gen = aiStore.streamGenerate(
+      prompt, system, undefined, abortController.value.signal,
+      useCompetitorContext.value, composeStore.selectedDestinations,
+      useResearchBrief.value, firstDest?.key,
+    )
     for await (const token of gen) {
       composeStore.content += token
     }
