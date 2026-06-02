@@ -1043,40 +1043,41 @@ app.post('/ai/content-calendar', async (request, reply) => {
   }
   const brandContext = contextParts.join('\n');
 
-  // Per-platform post count: 3 per platform (weeks 1–3)
-  const platformList = platforms.slice(0, 5).join(', ');
-  const postsPerPlatform = 3;
-  const totalPosts = platforms.slice(0, 5).length * postsPerPlatform;
+  const activePlatforms = platforms.slice(0, 5);
+  const platformList = activePlatforms.join(', ');
+  const postsPerPlatform = 2;
+  const totalPosts = activePlatforms.length * postsPerPlatform;
 
-  const system = 'You are a social media content strategist. Return only valid JSON with no explanation, no markdown code blocks.';
+  const system = 'You are a social media content strategist. Return ONLY a valid JSON object — no markdown, no explanation, no code fences.';
+
+  const platformNoteKeys = activePlatforms.map((p) => `"${p}"`).join(', ');
+  const postSchema = `{ "platform": "<one of: ${platformList}>", "week": <1 or 2>, "content": "<ready-to-publish post>", "hashtags": ["<tag>"], "postType": "<educational|promotional|engagement|storytelling>", "suggestedDay": "<day>" }`;
+
   const prompt = `${brandContext}
 
-Create a content calendar for ${monthName} across these platforms: ${platformList}.
+Create a ${monthName} content calendar for: ${platformList}.
+Generate ${postsPerPlatform} posts per platform (${totalPosts} posts total across weeks 1 and 2).
 
-Return a JSON object with exactly these fields:
+Platform conventions to follow:
+- LinkedIn: professional hook in first line, insights, 1300-char max
+- Instagram: visual-first, emojis ok, 2200-char max, 5-10 hashtags
+- Facebook: conversational, question or story, 500-char ideal
+- Twitter: concise, punchy, under 280 chars
+- TikTok: caption hook in first 3 words, trending angle
+- Pinterest: keyword-rich description, action-oriented
+- Mastodon/Bluesky: authentic, community-focused, 300/500 chars
+
+Return a single JSON object:
 {
   "brief": {
-    "theme": "The overarching monthly narrative theme in one sentence",
-    "pillars": ["3-4 content pillars that anchor all posts this month"],
-    "toneGuidance": "One sentence on tone and voice for this month",
-    "platformNotes": {
-      ${platforms.slice(0, 5).map((p) => `"${p}": "One sentence of platform-specific content strategy for ${p}"`).join(',\n      ')}
-    }
+    "theme": "<one-sentence monthly narrative>",
+    "pillars": ["<pillar 1>", "<pillar 2>", "<pillar 3>"],
+    "toneGuidance": "<one sentence>",
+    "platformNotes": { ${platformNoteKeys.split(', ').map((k) => `${k}: "<strategy>"`).join(', ')} }
   },
-  "posts": [
-    ${platforms.slice(0, 5).flatMap((p, pi) =>
-      [1, 2, 3].map((w, wi) => `{
-      "platform": "${p}",
-      "week": ${w},
-      "content": "<full post text ready to publish, following platform-specific best practices>",
-      "hashtags": ["<2-4 relevant hashtags>"],
-      "postType": "<educational|promotional|engagement|storytelling>",
-      "suggestedDay": "<best day of week to publish on ${p}>"
-    }${pi < platforms.length - 1 || wi < 2 ? ',' : ''}`)).join('\n    ')}
-  ]
+  "posts": [<${totalPosts} post objects using schema: ${postSchema}>]
 }
 
-Important: Each post must follow platform conventions — LinkedIn hooks in first 2 lines, TikTok scripts with second-0 hook, Instagram assuming silent viewing, etc.
 Return ONLY the JSON object.`;
 
   try {
@@ -1107,15 +1108,18 @@ Return ONLY the JSON object.`;
 
     let calendar = null;
     try {
-      const jsonStr = (text.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      // Strip markdown code fences if present
+      const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
       calendar = JSON.parse(jsonStr);
-      if (!calendar.brief || !Array.isArray(calendar.posts)) throw new Error();
-      // Normalise
+      if (!calendar.brief || !Array.isArray(calendar.posts)) throw new Error('Missing brief or posts array');
       if (!Array.isArray(calendar.brief.pillars)) calendar.brief.pillars = [];
       if (typeof calendar.brief.theme !== 'string') calendar.brief.theme = '';
       calendar.posts = calendar.posts.filter((p) => p && typeof p.content === 'string').slice(0, totalPosts);
-    } catch {
-      return reply.code(503).send({ error: 'AI returned invalid calendar format — try again' });
+      if (calendar.posts.length === 0) throw new Error('No valid posts in response');
+    } catch (parseErr) {
+      log.warn({ action: 'content_calendar', outcome: 'parse_failure', err: parseErr.message });
+      return reply.code(503).send({ error: 'AI returned invalid calendar format — try again or use a more capable model' });
     }
 
     const doc = {
@@ -1131,7 +1135,8 @@ Return ONLY the JSON object.`;
     log.info({ action: 'content_calendar', month: calMonth, platforms: platforms.join(','), posts: calendar.posts.length, outcome: 'success' });
     return { success: true, calendarId: result.insertedId.toString(), ...doc };
   } catch (err) {
-    return reply.code(503).send({ error: 'Calendar generation failed', detail: err.message });
+    log.error({ action: 'content_calendar', outcome: 'failure', err: err.message });
+    return reply.code(503).send({ error: `Calendar generation failed: ${err.message}` });
   }
 });
 
