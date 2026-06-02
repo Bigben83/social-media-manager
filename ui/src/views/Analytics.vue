@@ -10,6 +10,14 @@
         </div>
         <div class="flex items-center gap-2">
           <button
+            @click="runAudit"
+            :disabled="auditLoading"
+            class="flex items-center gap-2 px-4 py-2 bg-violet-800 hover:bg-violet-700 border border-violet-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
+          >
+            <i class="fa-solid fa-clipboard-check text-xs" :class="{ 'animate-pulse': auditLoading }"></i>
+            {{ auditLoading ? $t('analytics.runningAudit') : $t('analytics.runAudit') }}
+          </button>
+          <button
             @click="crawlMetrics"
             :disabled="crawling"
             class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
@@ -51,6 +59,67 @@
           <span class="w-1.5 h-1.5 rounded-full shrink-0" :style="{ background: platformColor(acc.platform) }"></span>
           {{ acc.label }}
         </button>
+      </div>
+
+      <!-- Audit error -->
+      <div v-if="auditError" class="mb-6 p-3 bg-red-900/40 border border-red-700 rounded-xl text-red-300 text-sm flex items-center justify-between gap-3">
+        {{ $t('analytics.auditError') }}
+        <button @click="auditError = false" class="text-red-400 hover:text-red-200 shrink-0">✕</button>
+      </div>
+
+      <!-- Audit results card -->
+      <div v-if="audit" class="mb-8 bg-gray-900 border border-violet-800/50 rounded-2xl overflow-hidden">
+        <!-- Card header -->
+        <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-clipboard-check text-violet-400"></i>
+              <span class="font-semibold text-white">{{ $t('analytics.auditTitle') }}</span>
+            </div>
+            <span class="text-xs text-gray-500">
+              {{ $t('analytics.auditStats', { count: audit.stats.postsLast30, freq: audit.stats.postsPerWeek, rate: audit.stats.successRate }) }}
+            </span>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <!-- Score badge -->
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-400">{{ $t('analytics.auditScore') }}</span>
+              <span
+                class="text-lg font-bold px-2 py-0.5 rounded-lg"
+                :class="audit.score >= 70 ? 'text-green-300 bg-green-900/40' : audit.score >= 40 ? 'text-amber-300 bg-amber-900/40' : 'text-red-300 bg-red-900/40'"
+              >{{ audit.score }}/100</span>
+            </div>
+            <button @click="audit = null" class="text-gray-500 hover:text-gray-300 text-sm">{{ $t('analytics.auditDismiss') }}</button>
+          </div>
+        </div>
+
+        <!-- Summary -->
+        <div class="px-6 py-4 border-b border-gray-800 text-sm text-gray-300">{{ audit.summary }}</div>
+
+        <!-- Score breakdown -->
+        <div class="grid grid-cols-3 divide-x divide-gray-800 border-b border-gray-800">
+          <div v-for="section in auditSections" :key="section.key" class="px-5 py-4">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs text-gray-400">{{ section.label }}</span>
+              <span class="text-sm font-semibold" :class="scoreColor(section.score)">{{ section.score }}/10</span>
+            </div>
+            <div class="w-full h-1.5 bg-gray-800 rounded-full mb-2">
+              <div class="h-1.5 rounded-full transition-all" :class="scoreBarColor(section.score)" :style="{ width: (section.score * 10) + '%' }"></div>
+            </div>
+            <p class="text-xs text-gray-400 leading-relaxed">{{ section.assessment }}</p>
+            <p v-if="section.benchmark" class="text-xs mt-0.5" :class="benchmarkColor(section.benchmark)">{{ section.benchmark }}</p>
+          </div>
+        </div>
+
+        <!-- Recommendations -->
+        <div class="px-6 py-4">
+          <div class="text-xs font-medium text-gray-400 mb-2">{{ $t('analytics.auditRecommendations') }}</div>
+          <ol class="space-y-1.5">
+            <li v-for="(rec, i) in audit.recommendations" :key="i" class="flex gap-2 text-sm text-gray-200">
+              <span class="text-violet-400 font-semibold shrink-0">{{ i + 1 }}.</span>{{ rec }}
+            </li>
+          </ol>
+        </div>
       </div>
 
       <!-- Loading -->
@@ -431,8 +500,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
+
+const { t } = useI18n()
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -500,6 +572,20 @@ const insights        = ref<Insights | null>(null)
 const crawling        = ref(false)
 const crawlResult     = ref<number | null>(null)
 
+interface AuditSection { score: number; assessment: string; benchmark?: string }
+interface Audit {
+  score: number
+  summary: string
+  postingFrequency: AuditSection
+  engagement: AuditSection & { benchmark: string }
+  contentMix: AuditSection
+  recommendations: string[]
+  stats: { postsLast30: number; postsLast7: number; postsPerWeek: number; platforms: string[]; successRate: number; avgEngagement: number }
+}
+const audit        = ref<Audit | null>(null)
+const auditLoading = ref(false)
+const auditError   = ref(false)
+
 // ── Data loading ──────────────────────────────────────────────────────────────
 
 function accountParams(extra: Record<string, unknown> = {}) {
@@ -538,6 +624,19 @@ async function loadInsights() {
     insights.value = res.data
   } finally {
     insightsLoading.value = false
+  }
+}
+
+async function runAudit() {
+  auditLoading.value = true
+  auditError.value = false
+  try {
+    const res = await axios.post('/api/analytics/audit', {}, { params: accountParams() })
+    audit.value = res.data
+  } catch {
+    auditError.value = true
+  } finally {
+    auditLoading.value = false
   }
 }
 
@@ -626,6 +725,34 @@ function platformBarWidth(count: number): number {
 
 function statusWidth(count: number): number {
   return summary.value?.total ? (count / summary.value.total) * 100 : 0
+}
+
+const auditSections = computed(() => {
+  if (!audit.value) return []
+  return [
+    { key: 'frequency', label: t('analytics.auditFrequency'), score: audit.value.postingFrequency.score, assessment: audit.value.postingFrequency.assessment },
+    { key: 'engagement', label: t('analytics.auditEngagement'), score: audit.value.engagement.score, assessment: audit.value.engagement.assessment, benchmark: audit.value.engagement.benchmark },
+    { key: 'mix', label: t('analytics.auditMix'), score: audit.value.contentMix.score, assessment: audit.value.contentMix.assessment },
+  ]
+})
+
+function scoreColor(score: number): string {
+  if (score >= 7) return 'text-green-400'
+  if (score >= 4) return 'text-amber-400'
+  return 'text-red-400'
+}
+
+function scoreBarColor(score: number): string {
+  if (score >= 7) return 'bg-green-500'
+  if (score >= 4) return 'bg-amber-500'
+  return 'bg-red-500'
+}
+
+function benchmarkColor(benchmark: string): string {
+  if (benchmark === 'Excellent') return 'text-green-400'
+  if (benchmark === 'Good') return 'text-blue-400'
+  if (benchmark === 'Average') return 'text-amber-400'
+  return 'text-red-400'
 }
 
 function platformColor(platform: string): string {

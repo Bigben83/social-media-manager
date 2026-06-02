@@ -2030,6 +2030,157 @@ app.get('/analytics/posts', async (request) => {
   return { posts: normalised, total: schedTotal + immTotal };
 });
 
+// ─── Brand / Account Audit ────────────────────────────────────────────────────
+
+app.post('/analytics/audit', async (request, reply) => {
+  const filter = parseAccountFilter(request.query.account);
+  const db = await getDb();
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
+
+  const recentPosts = await db.collection('posts').find({
+    publishedAt: { $gte: thirtyDaysAgo },
+    ...ipFilter(filter),
+  }, { projection: { content: 1, destinations: 1, publishedAt: 1, status: 1 } }).toArray();
+
+  if (recentPosts.length < 3) {
+    return reply.code(400).send({ error: 'Not enough publishing history. Publish at least 3 posts first.' });
+  }
+
+  // Posting frequency
+  const postsLast30 = recentPosts.length;
+  const postsLast7  = recentPosts.filter((p) => new Date(p.publishedAt) >= sevenDaysAgo).length;
+  const postsPerWeek = Math.round((postsLast30 / 4) * 10) / 10;
+
+  // Platforms used
+  const platforms = [...new Set(recentPosts.flatMap((p) => (p.destinations || []).map((d) => d.platform)).filter(Boolean))];
+
+  // Success rate
+  const publishedCount = recentPosts.filter((p) => p.status === 'published').length;
+  const successRate    = Math.round((publishedCount / postsLast30) * 100);
+
+  // Top hashtags from post content
+  const hashtagCounts = {};
+  for (const post of recentPosts) {
+    const re = /#([a-zA-Z]\w*)/g;
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(post.content || '')) !== null) {
+      const tag = `#${m[1].toLowerCase()}`;
+      hashtagCounts[tag] = (hashtagCounts[tag] || 0) + 1;
+    }
+  }
+  const topHashtags = Object.entries(hashtagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([tag, count]) => `${tag} (${count}x)`)
+    .join(', ');
+
+  // Posting hour distribution — identify peak hours
+  const hourCounts = {};
+  for (const post of recentPosts) {
+    if (post.publishedAt) {
+      const h = new Date(post.publishedAt).getUTCHours();
+      hourCounts[h] = (hourCounts[h] || 0) + 1;
+    }
+  }
+  const peakHours = Object.entries(hourCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([h]) => `${h}:00 UTC`)
+    .join(', ');
+
+  // Engagement data from post_metrics
+  const metricsFilter = filter
+    ? { platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }
+    : {};
+  const metrics = await db.collection('post_metrics')
+    .find({ ...metricsFilter, createdAt: { $gte: thirtyDaysAgo } })
+    .toArray();
+
+  const avgEngagement = metrics.length > 0
+    ? Math.round((metrics.reduce((s, m) => s + (m.metrics?.engagementTotal || 0), 0) / metrics.length) * 10) / 10
+    : 0;
+
+  const statsBlock = [
+    `Publishing stats (last 30 days):`,
+    `- Total posts: ${postsLast30}`,
+    `- Posts this week: ${postsLast7}`,
+    `- Posts per week (avg): ${postsPerWeek}`,
+    `- Platforms used: ${platforms.join(', ') || 'unknown'}`,
+    `- Success rate: ${successRate}%`,
+    `- Average engagement per post: ${avgEngagement}`,
+    `- Current peak posting hours (UTC): ${peakHours || 'not enough data'}`,
+    `- Top hashtags in use: ${topHashtags || 'none detected'}`,
+  ].join('\n');
+
+  const system = 'You are a social media performance analyst. Return only valid JSON with no explanation, no markdown code blocks.';
+  const prompt = `Audit this social media account and return a structured report.
+
+${statsBlock}
+
+Return a JSON object with exactly these fields:
+{
+  "score": <overall health score 0-100>,
+  "summary": "<2-3 sentence assessment>",
+  "postingFrequency": { "score": <0-10>, "assessment": "<one sentence>" },
+  "engagement": { "score": <0-10>, "benchmark": "<Excellent|Good|Average|Below Average>", "assessment": "<one sentence>" },
+  "contentMix": { "score": <0-10>, "assessment": "<one sentence on variety and platform fit>" },
+  "recommendations": ["<specific action 1>", "<specific action 2>", "<specific action 3>"]
+}
+
+Scoring benchmarks: posting 5+x/week = 8-10, 3-4x = 6-7, 1-2x = 4-5, less = 1-3.
+Engagement benchmarks: >5 avg = Excellent, 3-5 = Good, 1-3 = Average, <1 = Below Average.
+Return ONLY the JSON object.`;
+
+  try {
+    const pconf = await getActiveProviderConfig();
+    const model = pconf.model;
+    let text = '';
+
+    if (pconf.provider === 'ollama') {
+      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
+      text = res.data.response;
+    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
+      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
+        model, messages: buildOpenAIMessages(prompt, system), stream: false,
+      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
+      text = res.data.choices[0]?.message?.content || '';
+    } else if (pconf.provider === 'gemini') {
+      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
+        { contents: buildGeminiContents(prompt, system) },
+        { timeout: 120000 },
+      );
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      return reply.code(400).send({ error: 'AI not configured' });
+    }
+
+    let audit = null;
+    try {
+      const jsonStr = (text.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      audit = JSON.parse(jsonStr);
+      if (typeof audit.score !== 'number') throw new Error();
+    } catch {
+      return reply.code(503).send({ error: 'AI returned invalid audit format — try again' });
+    }
+
+    log.info({ action: 'analytics_audit', account: request.query.account || 'all', outcome: 'success' });
+    return {
+      success: true,
+      ...audit,
+      stats: { postsLast30, postsLast7, postsPerWeek, platforms, successRate, avgEngagement },
+      generatedAt: new Date(),
+    };
+  } catch (err) {
+    return reply.code(503).send({ error: 'Audit failed', detail: err.message });
+  }
+});
+
 // ─── Hashtag Groups ───────────────────────────────────────────────────────────
 
 app.get('/hashtag-groups', async () => {
