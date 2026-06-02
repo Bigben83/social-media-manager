@@ -1,6 +1,7 @@
 CLAUDE.md
 .env
 .claude/
+.claude/settings.local.json
 
 # Logs
 logs
@@ -75,3 +76,5 @@ coverage/
 
 # Docs folder
 docs/
+
+

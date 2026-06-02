@@ -2,6 +2,14 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import axios from 'axios'
 
+export interface AiAnalysis {
+  themes: string[]
+  tone: string
+  positioning: string
+  gaps: string[]
+  moves: string[]
+}
+
 export interface Competitor {
   _id: string
   name: string
@@ -9,6 +17,7 @@ export interface Competitor {
   socialUrls: Partial<Record<string, string>>
   scrapedContent: { source: string; url: string; text: string; scrapedAt: string }[]
   aiSummary: string
+  aiAnalysis?: AiAnalysis
   keywords: string[]
   lastScraped: string | null
   createdAt: string
@@ -97,7 +106,10 @@ export const useCompetitorStore = defineStore('competitors', () => {
     try {
       const res = await axios.post(`/api/competitors/${id}/summarize`)
       const idx = competitors.value.findIndex((c) => c._id === id)
-      if (idx !== -1) competitors.value[idx].aiSummary = res.data.aiSummary
+      if (idx !== -1) {
+        competitors.value[idx].aiAnalysis = res.data.aiAnalysis
+        competitors.value[idx].aiSummary = ''
+      }
     } catch (err: any) {
       error.value = err.response?.data?.detail || err.response?.data?.error || 'Summarization failed'
     } finally {

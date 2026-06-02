@@ -107,8 +107,64 @@
           {{ t('competitors.lastScraped') }}: {{ new Date(competitor.lastScraped).toLocaleString() }}
         </div>
 
-        <!-- AI Summary -->
-        <div v-if="competitor.aiSummary" class="mb-3 p-3 bg-gray-700/50 rounded border border-gray-600 text-sm text-gray-200">
+        <!-- Structured AI Analysis -->
+        <div v-if="competitor.aiAnalysis" class="mt-3 space-y-3">
+          <!-- Tone & Positioning -->
+          <div class="p-3 bg-gray-700/50 rounded border border-gray-600 space-y-2">
+            <div class="text-xs text-violet-400 font-medium">{{ t('competitors.aiAnalysisLabel') }}</div>
+            <div v-if="competitor.aiAnalysis.tone" class="text-sm">
+              <span class="text-xs text-gray-400">{{ t('competitors.analysisTone') }}: </span>
+              <span class="text-gray-200 italic">{{ competitor.aiAnalysis.tone }}</span>
+            </div>
+            <div v-if="competitor.aiAnalysis.positioning" class="text-sm">
+              <span class="text-xs text-gray-400">{{ t('competitors.analysisPositioning') }}: </span>
+              <span class="text-gray-200">{{ competitor.aiAnalysis.positioning }}</span>
+            </div>
+          </div>
+
+          <!-- Content Themes -->
+          <div v-if="competitor.aiAnalysis.themes?.length">
+            <div class="text-xs text-gray-400 mb-1.5">{{ t('competitors.analysisThemes') }}</div>
+            <div class="flex flex-wrap gap-1.5">
+              <span
+                v-for="theme in competitor.aiAnalysis.themes"
+                :key="theme"
+                class="text-xs px-2 py-0.5 bg-gray-700 border border-gray-600 text-gray-300 rounded-full"
+              >{{ theme }}</span>
+            </div>
+          </div>
+
+          <!-- Gaps & Opportunities -->
+          <div v-if="competitor.aiAnalysis.gaps?.length">
+            <div class="text-xs text-amber-400 font-medium mb-1.5">{{ t('competitors.analysisGaps') }}</div>
+            <ul class="space-y-1">
+              <li
+                v-for="gap in competitor.aiAnalysis.gaps"
+                :key="gap"
+                class="flex gap-1.5 items-start text-xs text-amber-200"
+              >
+                <span class="text-amber-400 mt-0.5 shrink-0">→</span>{{ gap }}
+              </li>
+            </ul>
+          </div>
+
+          <!-- Differentiation Moves -->
+          <div v-if="competitor.aiAnalysis.moves?.length">
+            <div class="text-xs text-green-400 font-medium mb-1.5">{{ t('competitors.analysisMoves') }}</div>
+            <ul class="space-y-1">
+              <li
+                v-for="move in competitor.aiAnalysis.moves"
+                :key="move"
+                class="flex gap-1.5 items-start text-xs text-green-200"
+              >
+                <span class="text-green-400 mt-0.5 shrink-0">✓</span>{{ move }}
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Legacy plain-text summary (for competitors analysed before this update) -->
+        <div v-else-if="competitor.aiSummary" class="mb-3 p-3 bg-gray-700/50 rounded border border-gray-600 text-sm text-gray-200">
           <div class="text-xs text-violet-400 font-medium mb-1">{{ t('competitors.aiSummaryLabel') }}</div>
           {{ competitor.aiSummary }}
         </div>

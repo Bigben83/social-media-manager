@@ -2239,9 +2239,21 @@ async function runCompetitorScrape(competitorId) {
 async function buildCompetitorSystemSuffix() {
   try {
     const db = await getDb();
-    const competitors = await db.collection('competitors').find({ aiSummary: { $nin: ['', null] } }).toArray();
+    const competitors = await db.collection('competitors').find({
+      $or: [{ 'aiAnalysis.positioning': { $nin: ['', null] } }, { aiSummary: { $nin: ['', null] } }],
+    }).toArray();
     if (!competitors.length) return '';
-    const lines = competitors.map((c) => `- ${c.name}: ${c.aiSummary}`).join('\n');
+    const lines = competitors.map((c) => {
+      if (c.aiAnalysis?.positioning) {
+        const a = c.aiAnalysis;
+        const parts = [`- ${c.name}:`];
+        if (a.positioning) parts.push(`  Positioning: ${a.positioning}`);
+        if (a.gaps?.length) parts.push(`  Weaknesses/gaps: ${a.gaps.join('; ')}`);
+        if (a.themes?.length) parts.push(`  Key themes: ${a.themes.join(', ')}`);
+        return parts.join('\n');
+      }
+      return `- ${c.name}: ${c.aiSummary}`;
+    }).join('\n');
     return `\n\nCOMPETITOR CONTEXT (for differentiation — do not copy, use to contrast):\n${lines}\nEmphasise what makes this brand unique compared to the above.`;
   } catch {
     return '';
@@ -2312,7 +2324,7 @@ app.post('/competitors/scrape-all', async (request, reply) => {
   return { success: true, results };
 });
 
-// Summarize competitor content with AI
+// Summarize competitor content with AI — returns structured analysis
 app.post('/competitors/:id/summarize', async (request, reply) => {
   const db = await getDb();
   const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
@@ -2321,23 +2333,35 @@ app.post('/competitors/:id/summarize', async (request, reply) => {
   const content = (competitor.scrapedContent || []).map((s) => `[${s.source}] ${s.text}`).join('\n\n').slice(0, 6000);
   if (!content) return reply.code(400).send({ error: 'No scraped content to summarize' });
 
-  const system = 'You are a competitive intelligence analyst. Be concise.';
-  const prompt = `Analyse the following content from "${competitor.name}" and summarise their key themes, messaging style, and content strategy in 2-3 sentences. Focus on topics, tone, and positioning.\n\n${content}`;
+  const system = 'You are a competitive intelligence analyst. Return only valid JSON with no explanation, no markdown code blocks.';
+  const prompt = `Analyse the following content from "${competitor.name}" and return a JSON object with exactly these fields:
+{
+  "themes": ["3-5 main content topics or pillars they focus on"],
+  "tone": "one sentence describing their voice and communication style",
+  "positioning": "one sentence on how they position themselves in the market",
+  "gaps": ["2-3 topics or angles they ignore or handle poorly — opportunities for you"],
+  "moves": ["3 specific content angles you could use to stand out against them"]
+}
+
+Content:
+${content}
+
+Return ONLY the JSON object. No explanation, no markdown.`;
 
   try {
     const pconf = await getActiveProviderConfig();
     const model = pconf.model;
-    let summary = '';
+    let text = '';
 
     if (pconf.provider === 'ollama') {
       const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 180000 });
-      summary = res.data.response;
+      text = res.data.response;
     } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
       if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
       const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
         model, messages: buildOpenAIMessages(prompt, system), stream: false,
       }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 180000 });
-      summary = res.data.choices[0]?.message?.content || '';
+      text = res.data.choices[0]?.message?.content || '';
     } else if (pconf.provider === 'gemini') {
       if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
       const res = await axios.post(
@@ -2345,17 +2369,30 @@ app.post('/competitors/:id/summarize', async (request, reply) => {
         { contents: buildGeminiContents(prompt, system) },
         { timeout: 180000 },
       );
-      summary = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     } else {
       return reply.code(400).send({ error: 'AI not configured' });
     }
 
-    summary = summary.trim();
+    let aiAnalysis = null;
+    try {
+      const jsonStr = (text.match(/\{[\s\S]*\}/) || ['{}'])[0];
+      aiAnalysis = JSON.parse(jsonStr);
+      if (!Array.isArray(aiAnalysis.themes)) aiAnalysis.themes = [];
+      if (typeof aiAnalysis.tone !== 'string') aiAnalysis.tone = '';
+      if (typeof aiAnalysis.positioning !== 'string') aiAnalysis.positioning = '';
+      if (!Array.isArray(aiAnalysis.gaps)) aiAnalysis.gaps = [];
+      if (!Array.isArray(aiAnalysis.moves)) aiAnalysis.moves = [];
+    } catch {
+      aiAnalysis = null;
+    }
+    if (!aiAnalysis) return reply.code(503).send({ error: 'AI returned invalid analysis format — try again' });
+
     await db.collection('competitors').updateOne(
       { _id: new ObjectId(request.params.id) },
-      { $set: { aiSummary: summary, updatedAt: new Date() } },
+      { $set: { aiAnalysis, aiSummary: '', updatedAt: new Date() } },
     );
-    return { success: true, aiSummary: summary };
+    return { success: true, aiAnalysis };
   } catch (err) {
     return reply.code(503).send({ error: 'Summarization failed', detail: err.message });
   }
