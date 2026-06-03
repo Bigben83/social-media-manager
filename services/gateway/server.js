@@ -114,8 +114,13 @@ const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:8081';
 
 app.addHook('onSend', async (request, reply) => {
   reply.header('Access-Control-Allow-Origin', '*');
-  reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  reply.header('Access-Control-Allow-Headers', 'Content-Type');
+  reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type, X-Workspace-Id');
+});
+
+// Inject workspace context into every request
+app.addHook('preHandler', async (request) => {
+  request.workspaceId = request.headers['x-workspace-id'] || 'default';
 });
 
 app.options('*', async (request, reply) => {
@@ -124,24 +129,121 @@ app.options('*', async (request, reply) => {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function getCredentials(id) {
+// Compound credential key: workspaceId + credential type
+function credId(ws, type) { return `${ws}:${type}`; }
+
+async function getCredentials(ws, type) {
   const db = await getDb();
-  return db.collection('platform_credentials').findOne({ _id: id });
+  return db.collection('platform_credentials').findOne({ _id: credId(ws, type) });
 }
 
-async function setCredentials(id, data) {
+async function setCredentials(ws, type, data) {
+  const id = credId(ws, type);
   const db = await getDb();
   await db.collection('platform_credentials').updateOne(
     { _id: id },
-    { $set: { _id: id, ...data, updatedAt: new Date() } },
+    { $set: { _id: id, workspaceId: ws, type, ...data, updatedAt: new Date() } },
     { upsert: true }
   );
 }
 
-async function deleteCredentials(id) {
+async function deleteCredentials(ws, type) {
   const db = await getDb();
-  await db.collection('platform_credentials').deleteOne({ _id: id });
+  await db.collection('platform_credentials').deleteOne({ _id: credId(ws, type) });
 }
+
+// ─── Workspaces ───────────────────────────────────────────────────────────────
+
+app.get('/workspaces', async () => {
+  const db = await getDb();
+  const list = await db.collection('workspaces').find({}).sort({ createdAt: 1 }).toArray();
+  return { workspaces: list };
+});
+
+app.post('/workspaces', async (request, reply) => {
+  const { name, color } = request.body || {};
+  if (!name?.trim()) return reply.code(400).send({ error: 'Workspace name is required' });
+  const db = await getDb();
+  const id = `ws_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+  const doc = { _id: id, name: name.trim(), color: color || '#3B82F6', createdAt: new Date(), updatedAt: new Date() };
+  await db.collection('workspaces').insertOne(doc);
+  log.info({ action: 'workspace_create', workspaceId: id, name: doc.name, outcome: 'success' });
+  return reply.code(201).send(doc);
+});
+
+app.put('/workspaces/:id', async (request, reply) => {
+  const { id } = request.params;
+  const { name, color } = request.body || {};
+  if (!name?.trim()) return reply.code(400).send({ error: 'Workspace name is required' });
+  const db = await getDb();
+  const result = await db.collection('workspaces').updateOne(
+    { _id: id },
+    { $set: { name: name.trim(), color: color || '#3B82F6', updatedAt: new Date() } }
+  );
+  if (!result.matchedCount) return reply.code(404).send({ error: 'Workspace not found' });
+  return { success: true };
+});
+
+app.delete('/workspaces/:id', async (request, reply) => {
+  const { id } = request.params;
+  if (id === 'default') return reply.code(400).send({ error: 'Cannot delete the default workspace' });
+  const db = await getDb();
+  const result = await db.collection('workspaces').deleteOne({ _id: id });
+  if (!result.deletedCount) return reply.code(404).send({ error: 'Workspace not found' });
+  // Cascade-delete all workspace-scoped data
+  const deleteAll = (col, filter) => db.collection(col).deleteMany(filter);
+  await Promise.all([
+    db.collection('platform_credentials').deleteMany({ workspaceId: id }),
+    deleteAll('competitors', { workspaceId: id }),
+    deleteAll('hashtag_groups', { workspaceId: id }),
+    deleteAll('hashtag_stats', { workspaceId: id }),
+    deleteAll('account_profiles', { workspaceId: id }),
+    deleteAll('content_calendars', { workspaceId: id }),
+    deleteAll('bulk_draft_batches', { workspaceId: id }),
+    deleteAll('drafts', { workspaceId: id }),
+    deleteAll('posts', { workspaceId: id }),
+    deleteAll('post_metrics', { workspaceId: id }),
+    deleteAll('media_files', { workspaceId: id }),
+  ]);
+  log.info({ action: 'workspace_delete', workspaceId: id, outcome: 'success' });
+  return { success: true };
+});
+
+// ─── Startup Migration ────────────────────────────────────────────────────────
+// Stamps existing documents (created before workspaces) with workspaceId: 'default'
+// and migrates platform_credentials _id keys to the 'default:type' format.
+
+async function runWorkspaceMigration() {
+  try {
+    const db = await getDb();
+    // Ensure the default workspace exists
+    await db.collection('workspaces').updateOne(
+      { _id: 'default' },
+      { $setOnInsert: { _id: 'default', name: 'Default', color: '#3B82F6', createdAt: new Date(), updatedAt: new Date() } },
+      { upsert: true }
+    );
+    // Migrate platform_credentials: re-key any doc whose _id doesn't contain ':'
+    const oldCreds = await db.collection('platform_credentials').find({ _id: { $not: /\:/ } }).toArray();
+    for (const cred of oldCreds) {
+      const newId = credId('default', cred._id);
+      const exists = await db.collection('platform_credentials').findOne({ _id: newId });
+      if (!exists) {
+        await db.collection('platform_credentials').insertOne({ ...cred, _id: newId, workspaceId: 'default', type: cred._id });
+      }
+      await db.collection('platform_credentials').deleteOne({ _id: cred._id });
+    }
+    // Stamp workspaceId on all other collections
+    const cols = ['competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','feeds'];
+    for (const col of cols) {
+      await db.collection(col).updateMany({ workspaceId: { $exists: false } }, { $set: { workspaceId: 'default' } });
+    }
+    if (oldCreds.length > 0) log.info({ action: 'workspace_migration', migrated: oldCreds.length, outcome: 'success' });
+  } catch (err) {
+    log.error({ action: 'workspace_migration', outcome: 'failure', err: err.message });
+  }
+}
+
+getDb().then(() => runWorkspaceMigration());
 
 // ─── Media Upload & Library ───────────────────────────────────────────────────
 
@@ -174,6 +276,7 @@ app.post('/upload', async (request, reply) => {
     mimetype: data.mimetype,
     size: stat.size,
     folder: folder || null,
+    workspaceId: request.workspaceId,
     uploadedAt: new Date(),
   };
 
@@ -190,9 +293,10 @@ app.post('/upload', async (request, reply) => {
 // List uploaded media files, newest first; optionally filter by folder
 // folder=__none__ → unorganized (null/missing); folder=<name> → that folder; omit → all
 app.get('/media-library', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
   const { folder } = request.query;
-  const query = {};
+  const query = { workspaceId: ws };
   if (folder === '__none__') {
     query.$or = [{ folder: { $exists: false } }, { folder: null }, { folder: '' }];
   } else if (folder) {
@@ -245,6 +349,7 @@ app.delete('/media-folders/:name', async (request, reply) => {
 
 // Update a file's folder assignment
 app.patch('/media/:filename', async (request, reply) => {
+  const ws = request.workspaceId;
   const { filename } = request.params;
   if (!filename || filename.includes('/') || filename.includes('..') || filename.includes('\0')) {
     return reply.code(400).send({ error: 'Invalid filename' });
@@ -252,7 +357,7 @@ app.patch('/media/:filename', async (request, reply) => {
   const { folder } = request.body || {};
   const db = await getDb();
   const result = await db.collection('media_files').updateOne(
-    { filename },
+    { filename, workspaceId: ws },
     { $set: { folder: folder || null } },
   );
   if (!result.matchedCount) return reply.code(404).send({ error: 'File not found' });
@@ -261,6 +366,7 @@ app.patch('/media/:filename', async (request, reply) => {
 
 // Delete a media file from disk and database
 app.delete('/media/:filename', async (request, reply) => {
+  const ws = request.workspaceId;
   const { filename } = request.params;
 
   // Prevent path traversal
@@ -280,7 +386,7 @@ app.delete('/media/:filename', async (request, reply) => {
   }
 
   const db = await getDb();
-  await db.collection('media_files').deleteOne({ filename });
+  await db.collection('media_files').deleteOne({ filename, workspaceId: ws });
 
   return { success: true };
 });
@@ -288,40 +394,44 @@ app.delete('/media/:filename', async (request, reply) => {
 // ─── Drafts ──────────────────────────────────────────────────────────────────
 
 app.post('/drafts', async (request, reply) => {
+  const ws = request.workspaceId;
   const { content = '', mediaUrl = '', scheduledAt = '', destinations = [] } = request.body || {};
   const db = await getDb();
   const now = new Date();
   const result = await db.collection('drafts').insertOne({
-    content, mediaUrl, scheduledAt, destinations, createdAt: now, updatedAt: now,
+    content, mediaUrl, scheduledAt, destinations, workspaceId: ws, createdAt: now, updatedAt: now,
   });
   const draft = await db.collection('drafts').findOne({ _id: result.insertedId });
   return reply.code(201).send(draft);
 });
 
-app.get('/drafts', async () => {
+app.get('/drafts', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const drafts = await db.collection('drafts').find({}).sort({ updatedAt: -1 }).toArray();
+  const drafts = await db.collection('drafts').find({ workspaceId: ws }).sort({ updatedAt: -1 }).toArray();
   return { drafts };
 });
 
 app.get('/drafts/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   const { id } = request.params;
   let oid;
   try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
   const db = await getDb();
-  const draft = await db.collection('drafts').findOne({ _id: oid });
+  const draft = await db.collection('drafts').findOne({ _id: oid, workspaceId: ws });
   if (!draft) return reply.code(404).send({ error: 'Draft not found' });
   return draft;
 });
 
 app.put('/drafts/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   const { id } = request.params;
   let oid;
   try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
   const { content = '', mediaUrl = '', scheduledAt = '', destinations = [] } = request.body || {};
   const db = await getDb();
   const result = await db.collection('drafts').updateOne(
-    { _id: oid },
+    { _id: oid, workspaceId: ws },
     { $set: { content, mediaUrl, scheduledAt, destinations, updatedAt: new Date() } }
   );
   if (!result.matchedCount) return reply.code(404).send({ error: 'Draft not found' });
@@ -329,11 +439,12 @@ app.put('/drafts/:id', async (request, reply) => {
 });
 
 app.delete('/drafts/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   const { id } = request.params;
   let oid;
   try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
   const db = await getDb();
-  await db.collection('drafts').deleteOne({ _id: oid });
+  await db.collection('drafts').deleteOne({ _id: oid, workspaceId: ws });
   return { success: true };
 });
 
@@ -348,13 +459,13 @@ app.get('/meta/token-expiry', async (request, reply) => {
   if (_tokenExpiryCache && Date.now() - _tokenExpiryCacheAt < TOKEN_EXPIRY_TTL) {
     return _tokenExpiryCache;
   }
-
-  const appCred = await getCredentials('meta_app');
+  const ws = request.workspaceId;
+  const appCred = await getCredentials(ws, 'meta_app');
   if (!appCred?.appId || !appCred?.appSecret) return { accounts: [] };
   const plainAppSecret = decryptToken(appCred.appSecret);
   if (!plainAppSecret) return { accounts: [] };
 
-  const ig = await getCredentials('instagram');
+  const ig = await getCredentials(ws, 'instagram');
   const selectedAccounts = (ig?.accounts || []).filter((a) => a.selected && a.accessToken);
   if (!selectedAccounts.length) return { accounts: [] };
 
@@ -388,7 +499,8 @@ app.get('/meta/token-expiry', async (request, reply) => {
 // Refresh Instagram long-lived tokens that are within TOKEN_REFRESH_THRESHOLD_DAYS of expiry.
 // Called by the scheduler's daily BullMQ job; can also be triggered manually from Settings.
 app.post('/meta/token-refresh', async (request, reply) => {
-  const appCred = await getCredentials('meta_app');
+  const ws = request.workspaceId;
+  const appCred = await getCredentials(ws, 'meta_app');
   if (!appCred?.appId || !appCred?.appSecret) {
     return reply.code(400).send({ success: false, error: 'Meta app credentials not configured' });
   }
@@ -397,7 +509,7 @@ app.post('/meta/token-refresh', async (request, reply) => {
     return reply.code(500).send({ success: false, error: 'Failed to decrypt app secret' });
   }
 
-  const ig = await getCredentials('instagram');
+  const ig = await getCredentials(ws, 'instagram');
   const allAccounts = ig?.accounts || [];
   const selectedAccounts = allAccounts.filter((a) => a.selected && a.accessToken);
   if (!selectedAccounts.length) {
@@ -467,7 +579,7 @@ app.post('/meta/token-refresh', async (request, reply) => {
   }
 
   if (refreshed.length > 0) {
-    await setCredentials('instagram', { accounts: allAccounts });
+    await setCredentials(ws, 'instagram', { accounts: allAccounts });
     _tokenExpiryCache = null; // force fresh expiry check on next poll
   }
 
@@ -477,20 +589,23 @@ app.post('/meta/token-refresh', async (request, reply) => {
 
 // ─── Account Profiles ────────────────────────────────────────────────────────
 
-app.get('/profiles', async () => {
+app.get('/profiles', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const profiles = await db.collection('account_profiles').find({}).toArray();
+  const profiles = await db.collection('account_profiles').find({ workspaceId: ws }).toArray();
   return { profiles };
 });
 
 app.get('/profiles/:accountKey', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey } = request.params;
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
   return profile ?? { _id: accountKey };
 });
 
 app.put('/profiles/:accountKey', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey } = request.params;
   const {
     businessName = '', description = '', websiteUrl = '', industry = '',
@@ -500,7 +615,7 @@ app.put('/profiles/:accountKey', async (request, reply) => {
   const db = await getDb();
   await db.collection('account_profiles').updateOne(
     { _id: accountKey },
-    { $set: { businessName, description, websiteUrl, industry, targetAudience, toneOfVoice, keywords, hashtags, postingGuidelines, updatedAt: new Date() } },
+    { $set: { businessName, description, websiteUrl, industry, targetAudience, toneOfVoice, keywords, hashtags, postingGuidelines, workspaceId: ws, updatedAt: new Date() } },
     { upsert: true }
   );
   return { success: true };
@@ -508,9 +623,10 @@ app.put('/profiles/:accountKey', async (request, reply) => {
 
 // Strategy consistency audit — check if a profile's fields are internally coherent
 app.post('/profiles/:accountKey/audit', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey } = request.params;
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
   if (!profile) return reply.code(404).send({ error: 'Profile not found' });
 
   const filled = [
@@ -559,7 +675,7 @@ Return a JSON object:
 Return [] for issues if no problems found. Return ONLY the JSON object.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -619,11 +735,11 @@ const PROVIDER_BASE_URLS = {
 };
 
 // Returns decrypted runtime config for the currently active provider
-async function getActiveProviderConfig() {
-  const aiConfig = await getCredentials('ai_config');
+async function getActiveProviderConfig(ws = 'default') {
+  const aiConfig = await getCredentials(ws, 'ai_config');
   const provider = aiConfig?.provider || 'ollama';
   if (provider === 'openai' || provider === 'groq') {
-    const doc = await getCredentials(`${provider}_config`);
+    const doc = await getCredentials(ws, `${provider}_config`);
     return {
       provider,
       apiKey: doc?.apiKey ? decryptToken(doc.apiKey) : null,
@@ -632,7 +748,7 @@ async function getActiveProviderConfig() {
     };
   }
   if (provider === 'gemini') {
-    const doc = await getCredentials('gemini_config');
+    const doc = await getCredentials(ws, 'gemini_config');
     return {
       provider,
       apiKey: doc?.apiKey ? decryptToken(doc.apiKey) : null,
@@ -665,8 +781,9 @@ function buildGeminiContents(prompt, system) {
   return contents;
 }
 
-app.get('/ai/config', async () => {
-  const config = await getCredentials('ai_config');
+app.get('/ai/config', async (request) => {
+  const ws = request.workspaceId;
+  const config = await getCredentials(ws, 'ai_config');
   return {
     provider:    config?.provider    || 'ollama',
     endpoint:    config?.endpoint    || DEFAULT_OLLAMA_ENDPOINT,
@@ -677,21 +794,23 @@ app.get('/ai/config', async () => {
 });
 
 app.put('/ai/config', async (request, reply) => {
+  const ws = request.workspaceId;
   const { provider = 'ollama', endpoint, model, visionModel = 'llava', enabled = true } = request.body || {};
   if (provider === 'ollama' && !endpoint) return reply.code(400).send({ error: 'endpoint is required for Ollama' });
-  await setCredentials('ai_config', { provider, endpoint, model, visionModel, enabled });
+  await setCredentials(ws, 'ai_config', { provider, endpoint, model, visionModel, enabled });
   return { success: true };
 });
 
 // ─── Provider management routes ───────────────────────────────────────────────
 
-app.get('/ai/providers', async () => {
-  const aiConfig = await getCredentials('ai_config');
+app.get('/ai/providers', async (request) => {
+  const ws = request.workspaceId;
+  const aiConfig = await getCredentials(ws, 'ai_config');
   const active = aiConfig?.provider || 'ollama';
   const [openaiDoc, groqDoc, geminiDoc] = await Promise.all([
-    getCredentials('openai_config'),
-    getCredentials('groq_config'),
-    getCredentials('gemini_config'),
+    getCredentials(ws, 'openai_config'),
+    getCredentials(ws, 'groq_config'),
+    getCredentials(ws, 'gemini_config'),
   ]);
   return {
     active,
@@ -733,13 +852,14 @@ app.get('/ai/providers', async () => {
 // ollama body: { endpoint, model, visionModel, setActive? }
 // others body: { apiKey, model, setActive? }
 app.put('/ai/provider/:name', async (request, reply) => {
+  const ws = request.workspaceId;
   const { name } = request.params;
   const { apiKey, model, endpoint, visionModel, setActive = false } = request.body || {};
 
   if (name === 'ollama') {
     if (!endpoint) return reply.code(400).send({ error: 'endpoint is required for Ollama' });
-    const existing = await getCredentials('ai_config') || {};
-    await setCredentials('ai_config', {
+    const existing = await getCredentials(ws, 'ai_config') || {};
+    await setCredentials(ws, 'ai_config', {
       ...existing,
       provider: setActive ? 'ollama' : (existing.provider || 'ollama'),
       endpoint,
@@ -748,13 +868,13 @@ app.put('/ai/provider/:name', async (request, reply) => {
     });
   } else if (['openai', 'groq', 'gemini'].includes(name)) {
     if (!apiKey) return reply.code(400).send({ error: 'apiKey is required' });
-    await setCredentials(`${name}_config`, {
+    await setCredentials(ws, `${name}_config`, {
       apiKey: encryptToken(apiKey),
       model: model || PROVIDER_MODELS[name][0],
     });
     if (setActive) {
-      const existing = await getCredentials('ai_config') || {};
-      await setCredentials('ai_config', { ...existing, provider: name });
+      const existing = await getCredentials(ws, 'ai_config') || {};
+      await setCredentials(ws, 'ai_config', { ...existing, provider: name });
     }
   } else {
     return reply.code(404).send({ error: `Unknown provider: ${name}` });
@@ -765,25 +885,26 @@ app.put('/ai/provider/:name', async (request, reply) => {
 
 // DELETE /ai/provider/:name — remove provider credentials; falls back to ollama if it was active
 app.delete('/ai/provider/:name', async (request, reply) => {
+  const ws = request.workspaceId;
   const { name } = request.params;
   if (name === 'ollama') return reply.code(400).send({ error: 'Cannot remove Ollama provider' });
   if (!['openai', 'groq', 'gemini'].includes(name)) return reply.code(404).send({ error: `Unknown provider: ${name}` });
-  const db = await getDb();
-  await db.collection('platform_credentials').deleteOne({ _id: `${name}_config` });
-  const aiConfig = await getCredentials('ai_config') || {};
+  await deleteCredentials(ws, `${name}_config`);
+  const aiConfig = await getCredentials(ws, 'ai_config') || {};
   if (aiConfig.provider === name) {
-    await setCredentials('ai_config', { ...aiConfig, provider: 'ollama' });
+    await setCredentials(ws, 'ai_config', { ...aiConfig, provider: 'ollama' });
   }
   return { success: true };
 });
 
 // POST /ai/provider/:name/models — list models for a provider (test without saving key)
 app.post('/ai/provider/:name/models', async (request, reply) => {
+  const ws = request.workspaceId;
   const { name } = request.params;
   const { apiKey: bodyApiKey, endpoint: bodyEndpoint } = request.body || {};
 
   if (name === 'ollama') {
-    const aiConfig = await getCredentials('ai_config');
+    const aiConfig = await getCredentials(ws, 'ai_config');
     const ep = bodyEndpoint || aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
     try {
       const res = await axios.get(`${ep}/api/tags`, { timeout: 5000 });
@@ -799,7 +920,8 @@ app.post('/ai/provider/:name/models', async (request, reply) => {
 });
 
 app.get('/ai/models', async (request, reply) => {
-  const config = await getCredentials('ai_config');
+  const ws = request.workspaceId;
+  const config = await getCredentials(ws, 'ai_config');
   const provider = config?.provider || 'ollama';
   if (provider !== 'ollama') {
     return { models: PROVIDER_MODELS[provider] || [], provider };
@@ -832,12 +954,13 @@ async function fetchRedditSnippets(query, limit = 5) {
 // POST /ai/research — scrape Reddit for industry/keyword discussions, AI-summarise into brief
 // Stores researchBrief + researchBriefAt on account_profiles
 app.post('/ai/research', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey, topics } = request.body || {};
   const db = await getDb();
   const profileKey = accountKey || null;
   const profile = profileKey
-    ? await db.collection('account_profiles').findOne({ _id: profileKey })
-    : await db.collection('account_profiles').findOne({});
+    ? await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws })
+    : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const industry = profile?.industry || '';
   const keywords = profile?.keywords || '';
@@ -880,7 +1003,7 @@ Extract a research brief with these exact fields:
 Return ONLY the JSON object.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -917,7 +1040,7 @@ Return ONLY the JSON object.`;
     const updatedAt = new Date();
     if (profileKey) {
       await db.collection('account_profiles').updateOne(
-        { _id: profileKey },
+        { _id: profileKey, workspaceId: ws },
         { $set: { researchBrief: brief, researchBriefAt: updatedAt } },
         { upsert: false },
       );
@@ -932,11 +1055,11 @@ Return ONLY the JSON object.`;
 });
 
 // Helper: inject research brief into a system prompt when available
-async function buildResearchBriefSuffix(accountKey) {
+async function buildResearchBriefSuffix(accountKey, ws = 'default') {
   if (!accountKey) return '';
   try {
     const db = await getDb();
-    const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+    const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
     const b = profile?.researchBrief;
     if (!b) return '';
     const parts = [];
@@ -950,15 +1073,16 @@ async function buildResearchBriefSuffix(accountKey) {
 }
 
 app.post('/ai/generate', async (request, reply) => {
+  const ws = request.workspaceId;
   const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, useResearchBrief, accountKey, destinations } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
-  const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
-  const researchSuffix = useResearchBrief ? await buildResearchBriefSuffix(accountKey) : '';
+  const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix(ws) : '';
+  const researchSuffix = useResearchBrief ? await buildResearchBriefSuffix(accountKey, ws) : '';
   const platformRules = buildPlatformRulesBlock(destinations);
   const system = rawSystem ? rawSystem + competitorSuffix + researchSuffix + platformRules : ((competitorSuffix + researchSuffix + platformRules) || undefined);
 
-  const pconf = await getActiveProviderConfig();
+  const pconf = await getActiveProviderConfig(request.workspaceId);
   const model = reqModel || pconf.model;
 
   try {
@@ -999,7 +1123,7 @@ app.post('/ai/caption', async (request, reply) => {
   const { imageUrl, model: reqModel } = request.body || {};
   if (!imageUrl) return reply.code(400).send({ error: 'imageUrl is required' });
 
-  const pconf = await getActiveProviderConfig();
+  const pconf = await getActiveProviderConfig(request.workspaceId);
 
   let imageBase64, imageMime;
   try {
@@ -1064,15 +1188,16 @@ app.post('/ai/caption', async (request, reply) => {
 
 // SSE streaming endpoint — normalized data: { token, done } format for all providers
 app.post('/ai/stream', async (request, reply) => {
+  const ws = request.workspaceId;
   const { prompt, system: rawSystem, model: reqModel, useCompetitorContext, useResearchBrief, accountKey, destinations } = request.body || {};
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
 
-  const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix() : '';
-  const researchSuffix = useResearchBrief ? await buildResearchBriefSuffix(accountKey) : '';
+  const competitorSuffix = useCompetitorContext ? await buildCompetitorSystemSuffix(ws) : '';
+  const researchSuffix = useResearchBrief ? await buildResearchBriefSuffix(accountKey, ws) : '';
   const platformRules = buildPlatformRulesBlock(destinations);
   const system = rawSystem ? rawSystem + competitorSuffix + researchSuffix + platformRules : ((competitorSuffix + researchSuffix + platformRules) || undefined);
 
-  const pconf = await getActiveProviderConfig();
+  const pconf = await getActiveProviderConfig(request.workspaceId);
   const model = reqModel || pconf.model;
 
   reply.raw.setHeader('Content-Type', 'text/event-stream');
@@ -1155,6 +1280,7 @@ app.post('/ai/stream', async (request, reply) => {
 // POST /ai/content-brief — generate a narrative brief only (step 1 of 2-step calendar flow)
 // Body: { accountKey?, platforms[], month? (YYYY-MM) }
 app.post('/ai/content-brief', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey, platforms = [], month } = request.body || {};
   if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
 
@@ -1164,8 +1290,8 @@ app.post('/ai/content-brief', async (request, reply) => {
 
   const profileKey = accountKey || null;
   const profile = profileKey
-    ? await db.collection('account_profiles').findOne({ _id: profileKey })
-    : await db.collection('account_profiles').findOne({});
+    ? await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws })
+    : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const contextParts = [];
   if (profile) {
@@ -1194,7 +1320,7 @@ Return this exact JSON:
 Return ONLY valid JSON.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -1241,6 +1367,7 @@ Return ONLY valid JSON.`;
 // POST /ai/content-calendar — generate a monthly content plan with narrative brief + sample posts
 // Body: { accountKey?, platforms[], month? (YYYY-MM), approvedBrief? }
 app.post('/ai/content-calendar', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey, platforms = [], month, approvedBrief } = request.body || {};
   if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
 
@@ -1252,8 +1379,8 @@ app.post('/ai/content-calendar', async (request, reply) => {
   // Load account profile for context
   const profileKey = accountKey || null;
   const profile = profileKey
-    ? await db.collection('account_profiles').findOne({ _id: profileKey })
-    : await db.collection('account_profiles').findOne({});
+    ? await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws })
+    : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const contextParts = ['You are a social media content strategist.'];
   if (profile) {
@@ -1315,7 +1442,7 @@ Return a single JSON object:
 Return ONLY the JSON object.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -1363,6 +1490,7 @@ Return ONLY the JSON object.`;
       platforms,
       brief: calendar.brief,
       posts: calendar.posts,
+      workspaceId: ws,
       createdAt: new Date(),
     };
     const result = await db.collection('content_calendars').insertOne(doc);
@@ -1376,19 +1504,21 @@ Return ONLY the JSON object.`;
 
 // GET /ai/content-calendar/:id — retrieve a saved calendar
 app.get('/ai/content-calendar/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   let oid;
   try { oid = new ObjectId(request.params.id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
   const db = await getDb();
-  const cal = await db.collection('content_calendars').findOne({ _id: oid });
+  const cal = await db.collection('content_calendars').findOne({ _id: oid, workspaceId: ws });
   if (!cal) return reply.code(404).send({ error: 'Calendar not found' });
   return { calendarId: cal._id.toString(), ...cal };
 });
 
 // GET /ai/content-calendars — list recent calendars
-app.get('/ai/content-calendars', async (request, reply) => {
+app.get('/ai/content-calendars', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
   const cals = await db.collection('content_calendars')
-    .find({}, { projection: { posts: 0 } })
+    .find({ workspaceId: ws }, { projection: { posts: 0 } })
     .sort({ createdAt: -1 })
     .limit(20)
     .toArray();
@@ -1400,6 +1530,7 @@ app.get('/ai/content-calendars', async (request, reply) => {
 // POST /ai/bulk-draft — kick off a batch; returns batchId immediately (non-blocking)
 // Body: { topics: string[], destinations: Destination[], tone?: string, model?: string }
 app.post('/ai/bulk-draft', async (request, reply) => {
+  const ws = request.workspaceId;
   const { topics, destinations = [], tone = '', model: reqModel } = request.body || {};
   if (!Array.isArray(topics) || !topics.length) return reply.code(400).send({ error: 'topics array is required' });
 
@@ -1416,6 +1547,7 @@ app.post('/ai/bulk-draft', async (request, reply) => {
     completed: 0,
     failed: 0,
     status: 'processing',
+    workspaceId: ws,
     createdAt: now,
     updatedAt: now,
   });
@@ -1427,7 +1559,7 @@ app.post('/ai/bulk-draft', async (request, reply) => {
 
   // Fire-and-forget — process topics sequentially in the background
   (async () => {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = reqModel || pconf.model;
 
     for (const topic of filteredTopics) {
@@ -1463,6 +1595,7 @@ app.post('/ai/bulk-draft', async (request, reply) => {
             destinations: selectedDests,
             batchId: batchId.toString(),
             topic,
+            workspaceId: request.workspaceId,
             createdAt: draftNow,
             updatedAt: draftNow,
           });
@@ -1499,11 +1632,12 @@ app.post('/ai/bulk-draft', async (request, reply) => {
 
 // GET /ai/bulk-draft/:batchId — poll batch progress
 app.get('/ai/bulk-draft/:batchId', async (request, reply) => {
+  const ws = request.workspaceId;
   const { batchId } = request.params;
   let oid;
   try { oid = new ObjectId(batchId); } catch { return reply.code(400).send({ error: 'Invalid batchId' }); }
   const db = await getDb();
-  const batch = await db.collection('bulk_draft_batches').findOne({ _id: oid });
+  const batch = await db.collection('bulk_draft_batches').findOne({ _id: oid, workspaceId: ws });
   if (!batch) return reply.code(404).send({ error: 'Batch not found' });
   return {
     batchId: batch._id.toString(),
@@ -1572,6 +1706,7 @@ app.post('/post', async (request, reply) => {
         ])
       ),
       status: postStatus,
+      workspaceId: request.workspaceId,
       publishedAt: new Date(),
       createdAt: new Date(),
     });
@@ -1600,17 +1735,19 @@ app.post('/', async (request, reply) => {
 
 // Save Facebook App ID + Secret (entered by user in Settings UI)
 app.post('/credentials/meta-app', async (request, reply) => {
+  const ws = request.workspaceId;
   const { appId, appSecret } = request.body || {};
   if (!appId || !appSecret) {
     return reply.code(400).send({ error: 'appId and appSecret are required' });
   }
-  await setCredentials('meta_app', { appId, appSecret: encryptToken(appSecret) });
+  await setCredentials(ws, 'meta_app', { appId, appSecret: encryptToken(appSecret) });
   return { success: true };
 });
 
 // Get Meta App config (secret is masked for UI display)
-app.get('/credentials/meta-app', async () => {
-  const cred = await getCredentials('meta_app');
+app.get('/credentials/meta-app', async (request) => {
+  const ws = request.workspaceId;
+  const cred = await getCredentials(ws, 'meta_app');
   if (!cred) return { configured: false };
   const plainSecret = decryptToken(cred.appSecret) || '';
   return { configured: true, appId: cred.appId, appSecretHint: plainSecret ? `****${plainSecret.slice(-4)}` : '****' };
@@ -1620,7 +1757,8 @@ app.get('/credentials/meta-app', async () => {
 
 // Return the Facebook OAuth URL to redirect the user to
 app.get('/auth/meta/init', async (request, reply) => {
-  const cred = await getCredentials('meta_app');
+  const ws = request.workspaceId;
+  const cred = await getCredentials(ws, 'meta_app');
   if (!cred?.appId) {
     return reply.code(400).send({ error: 'Save your Facebook App ID and Secret first' });
   }
@@ -1640,6 +1778,7 @@ app.get('/auth/meta/init', async (request, reply) => {
 
 // OAuth callback — Facebook redirects here after user authorises
 app.get('/auth/meta/callback', async (request, reply) => {
+  const ws = request.workspaceId;
   const { code, error: oauthError } = request.query;
 
   if (oauthError) {
@@ -1651,7 +1790,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
   }
 
   try {
-    const appCred = await getCredentials('meta_app');
+    const appCred = await getCredentials(ws, 'meta_app');
     if (!appCred?.appId) throw new Error('App credentials not configured');
     const appSecret = decryptToken(appCred.appSecret);
     if (!appSecret) throw new Error('Failed to decrypt app secret');
@@ -1729,7 +1868,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
     }
 
     // Store discovery results for the UI to pick from
-    await setCredentials('meta_discovery', { pages, igAccounts, discoveredAt: new Date() });
+    await setCredentials(ws, 'meta_discovery', { pages, igAccounts, discoveredAt: new Date() });
 
     reply.redirect(`${APP_BASE_URL}/settings?meta_discovery=1`);
   } catch (err) {
@@ -1739,17 +1878,19 @@ app.get('/auth/meta/callback', async (request, reply) => {
 });
 
 // Return pending discovery results so the UI can render the page picker
-app.get('/auth/meta/discovered', async () => {
-  const discovery = await getCredentials('meta_discovery');
+app.get('/auth/meta/discovered', async (request) => {
+  const ws = request.workspaceId;
+  const discovery = await getCredentials(ws, 'meta_discovery');
   if (!discovery) return { pages: [], igAccounts: [] };
   return { pages: discovery.pages || [], igAccounts: discovery.igAccounts || [] };
 });
 
 // User has chosen which pages/accounts to connect
 app.post('/auth/meta/save', async (request, reply) => {
+  const ws = request.workspaceId;
   const { selectedPageIds = [], selectedIgAccountIds = [] } = request.body || {};
 
-  const discovery = await getCredentials('meta_discovery');
+  const discovery = await getCredentials(ws, 'meta_discovery');
   if (!discovery) return reply.code(400).send({ error: 'No discovery data found — reconnect via OAuth' });
 
   const fbPages = (discovery.pages || []).map((p) => ({
@@ -1762,19 +1903,20 @@ app.post('/auth/meta/save', async (request, reply) => {
     selected: selectedIgAccountIds.includes(a.id),
   }));
 
-  await setCredentials('facebook', { pages: fbPages });
-  await setCredentials('instagram', { accounts: igAccounts });
-  await deleteCredentials('meta_discovery');
+  await setCredentials(ws, 'facebook', { pages: fbPages });
+  await setCredentials(ws, 'instagram', { accounts: igAccounts });
+  await deleteCredentials(ws, 'meta_discovery');
   _tokenExpiryCache = null; // invalidate cache after reconnect
 
   return { success: true, facebookPages: fbPages.filter((p) => p.selected).length, instagramAccounts: igAccounts.filter((a) => a.selected).length };
 });
 
 // Disconnect all Meta platforms
-app.delete('/credentials/meta', async () => {
-  await deleteCredentials('facebook');
-  await deleteCredentials('instagram');
-  await deleteCredentials('meta_discovery');
+app.delete('/credentials/meta', async (request) => {
+  const ws = request.workspaceId;
+  await deleteCredentials(ws, 'facebook');
+  await deleteCredentials(ws, 'instagram');
+  await deleteCredentials(ws, 'meta_discovery');
   return { success: true };
 });
 
@@ -1785,24 +1927,27 @@ const PINTEREST_AUTH_URL = 'https://www.pinterest.com/oauth/';
 const PINTEREST_TOKEN_URL = 'https://api.pinterest.com/v5/oauth/token';
 
 app.post('/credentials/pinterest-app', async (request, reply) => {
+  const ws = request.workspaceId;
   const { clientId, clientSecret } = request.body || {};
   if (!clientId || !clientSecret) {
     return reply.code(400).send({ error: 'clientId and clientSecret are required' });
   }
-  await setCredentials('pinterest_app', { clientId, clientSecret: encryptToken(clientSecret) });
+  await setCredentials(ws, 'pinterest_app', { clientId, clientSecret: encryptToken(clientSecret) });
   log.info({ action: 'pinterest_app_save', outcome: 'success' });
   return { success: true };
 });
 
-app.get('/credentials/pinterest-app', async () => {
-  const cred = await getCredentials('pinterest_app');
+app.get('/credentials/pinterest-app', async (request) => {
+  const ws = request.workspaceId;
+  const cred = await getCredentials(ws, 'pinterest_app');
   if (!cred) return { configured: false };
   const plain = decryptToken(cred.clientSecret) || '';
   return { configured: true, clientId: cred.clientId, clientSecretHint: plain ? `****${plain.slice(-4)}` : '****' };
 });
 
 app.get('/auth/pinterest/init', async (request, reply) => {
-  const cred = await getCredentials('pinterest_app');
+  const ws = request.workspaceId;
+  const cred = await getCredentials(ws, 'pinterest_app');
   if (!cred?.clientId) {
     return reply.code(400).send({ error: 'Save your Pinterest Client ID and Secret first' });
   }
@@ -1813,6 +1958,7 @@ app.get('/auth/pinterest/init', async (request, reply) => {
 });
 
 app.get('/auth/pinterest/callback', async (request, reply) => {
+  const ws = request.workspaceId;
   const { code, error: oauthError } = request.query;
 
   if (oauthError) {
@@ -1823,7 +1969,7 @@ app.get('/auth/pinterest/callback', async (request, reply) => {
   }
 
   try {
-    const appCred = await getCredentials('pinterest_app');
+    const appCred = await getCredentials(ws, 'pinterest_app');
     if (!appCred?.clientId) throw new Error('App credentials not configured');
     const clientSecret = decryptToken(appCred.clientSecret);
     if (!clientSecret) throw new Error('Failed to decrypt client secret');
@@ -1865,7 +2011,7 @@ app.get('/auth/pinterest/callback', async (request, reply) => {
       selected: false,
     }));
 
-    await setCredentials('pinterest', {
+    await setCredentials(ws, 'pinterest', {
       userId: userRes.data.username,
       username: userRes.data.username,
       displayName: userRes.data.business_name || userRes.data.username,
@@ -1886,18 +2032,20 @@ app.get('/auth/pinterest/callback', async (request, reply) => {
 });
 
 app.post('/credentials/pinterest/boards', async (request, reply) => {
+  const ws = request.workspaceId;
   const { selectedBoardIds = [] } = request.body || {};
-  const cred = await getCredentials('pinterest');
+  const cred = await getCredentials(ws, 'pinterest');
   if (!cred) return reply.code(400).send({ error: 'Pinterest not connected' });
 
   const boards = (cred.boards || []).map((b) => ({ ...b, selected: selectedBoardIds.includes(b.id) }));
-  await setCredentials('pinterest', { ...cred, boards });
+  await setCredentials(ws, 'pinterest', { ...cred, boards });
   log.info({ action: 'pinterest_boards_save', selected: boards.filter((b) => b.selected).length, outcome: 'success' });
   return { success: true, selected: boards.filter((b) => b.selected).length };
 });
 
-app.delete('/credentials/pinterest', async () => {
-  await deleteCredentials('pinterest');
+app.delete('/credentials/pinterest', async (request) => {
+  const ws = request.workspaceId;
+  await deleteCredentials(ws, 'pinterest');
   return { success: true };
 });
 
@@ -1908,21 +2056,24 @@ const TIKTOK_TOKEN_URL = 'https://open.tiktokapis.com/v2/oauth/token/';
 const TIKTOK_API = 'https://open.tiktokapis.com/v2';
 
 app.post('/credentials/tiktok-app', async (request, reply) => {
+  const ws = request.workspaceId;
   const { clientKey, clientSecret } = request.body || {};
   if (!clientKey || !clientSecret) return reply.code(400).send({ error: 'clientKey and clientSecret are required' });
-  await setCredentials('tiktok_app', { clientKey, clientSecret: encryptToken(clientSecret) });
+  await setCredentials(ws, 'tiktok_app', { clientKey, clientSecret: encryptToken(clientSecret) });
   log.info({ action: 'tiktok_app_save', outcome: 'success' });
   return { success: true };
 });
 
-app.get('/credentials/tiktok-app', async () => {
-  const cred = await getCredentials('tiktok_app');
+app.get('/credentials/tiktok-app', async (request) => {
+  const ws = request.workspaceId;
+  const cred = await getCredentials(ws, 'tiktok_app');
   if (!cred?.clientKey) return { configured: false };
   return { configured: true, clientKey: cred.clientKey, clientSecretHint: `****${decryptToken(cred.clientSecret).slice(-4)}` };
 });
 
 app.get('/auth/tiktok/init', async (request, reply) => {
-  const cred = await getCredentials('tiktok_app');
+  const ws = request.workspaceId;
+  const cred = await getCredentials(ws, 'tiktok_app');
   if (!cred?.clientKey) return reply.code(400).send({ error: 'Save your TikTok Client Key and Secret first' });
 
   const codeVerifier = crypto.randomBytes(32).toString('base64url');
@@ -1930,10 +2081,11 @@ app.get('/auth/tiktok/init', async (request, reply) => {
   const state = crypto.randomBytes(16).toString('hex');
 
   // Persist PKCE verifier for the callback
+  const pkceId = credId(ws, 'tiktok_pkce');
   const db = await getDb();
   await db.collection('platform_credentials').updateOne(
-    { _id: 'tiktok_pkce' },
-    { $set: { codeVerifier, state, createdAt: new Date() } },
+    { _id: pkceId },
+    { $set: { _id: pkceId, workspaceId: ws, codeVerifier, state, createdAt: new Date() } },
     { upsert: true }
   );
 
@@ -1952,6 +2104,7 @@ app.get('/auth/tiktok/init', async (request, reply) => {
 });
 
 app.get('/auth/tiktok/callback', async (request, reply) => {
+  const ws = request.workspaceId;
   const { code, state, error: oauthError, error_description } = request.query;
 
   if (oauthError) {
@@ -1964,11 +2117,11 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
 
   try {
     const db = await getDb();
-    const pkce = await db.collection('platform_credentials').findOne({ _id: 'tiktok_pkce' });
+    const pkce = await db.collection('platform_credentials').findOne({ _id: credId(ws, 'tiktok_pkce') });
     if (!pkce?.codeVerifier) throw new Error('PKCE state not found — try connecting again');
     if (state && pkce.state && state !== pkce.state) throw new Error('OAuth state mismatch');
 
-    const appCred = await getCredentials('tiktok_app');
+    const appCred = await getCredentials(ws, 'tiktok_app');
     if (!appCred?.clientKey) throw new Error('App credentials not configured');
     const clientSecret = decryptToken(appCred.clientSecret);
 
@@ -1997,7 +2150,7 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
     });
     const user = userRes.data?.data?.user || {};
 
-    await setCredentials('tiktok', {
+    await setCredentials(ws, 'tiktok', {
       openId: open_id || user.open_id,
       username: user.username || user.display_name,
       displayName: user.display_name,
@@ -2009,7 +2162,7 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
     });
 
     // Clean up PKCE temp state
-    await db.collection('platform_credentials').deleteOne({ _id: 'tiktok_pkce' });
+    await db.collection('platform_credentials').deleteOne({ _id: credId(ws, 'tiktok_pkce') });
 
     log.info({ action: 'tiktok_oauth_callback', username: user.username || user.display_name, outcome: 'success' });
     reply.redirect(`${APP_BASE_URL}/settings?tiktok_connected=1`);
@@ -2020,21 +2173,23 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
   }
 });
 
-app.delete('/credentials/tiktok', async () => {
-  await deleteCredentials('tiktok');
+app.delete('/credentials/tiktok', async (request) => {
+  const ws = request.workspaceId;
+  await deleteCredentials(ws, 'tiktok');
   return { success: true };
 });
 
 // ─── Credential Status ────────────────────────────────────────────────────────
 
 // Aggregate connection status for all DB-managed platforms
-app.get('/credentials', async () => {
+app.get('/credentials', async (request) => {
+  const ws = request.workspaceId;
   const [metaApp, fb, ig, pinterest, tiktok] = await Promise.all([
-    getCredentials('meta_app'),
-    getCredentials('facebook'),
-    getCredentials('instagram'),
-    getCredentials('pinterest'),
-    getCredentials('tiktok'),
+    getCredentials(ws, 'meta_app'),
+    getCredentials(ws, 'facebook'),
+    getCredentials(ws, 'instagram'),
+    getCredentials(ws, 'pinterest'),
+    getCredentials(ws, 'tiktok'),
   ]);
 
   const fbPages = (fb?.pages || []).filter((p) => p.selected);
@@ -2104,8 +2259,9 @@ app.get('/schedule/suggestions', async (request, reply) => {
   const { platform, accountId } = request.query;
   if (!platform) return reply.code(400).send({ error: 'platform is required' });
 
+  const ws = request.workspaceId;
   const db = await getDb();
-  const query = { platform, ...(accountId && { accountId }) };
+  const query = { workspaceId: ws, platform, ...(accountId && { accountId }) };
   const dataPoints = await db.collection('post_metrics').countDocuments(query);
 
   let slots;
@@ -2152,8 +2308,8 @@ app.get('/schedule/suggestions', async (request, reply) => {
 
 // ─── Analytics Metrics Crawl ─────────────────────────────────────────────────
 
-async function crawlFacebookMetrics(db) {
-  const fb = await getCredentials('facebook');
+async function crawlFacebookMetrics(db, ws = 'default') {
+  const fb = await getCredentials(ws, 'facebook');
   const pages = (fb?.pages || []).filter((p) => p.selected && p.accessToken);
   if (!pages.length) return { count: 0 };
 
@@ -2176,7 +2332,7 @@ async function crawlFacebookMetrics(db) {
         const shares   = post.shares?.count || 0;
         const publishedAt = new Date(post.created_time);
         await db.collection('post_metrics').updateOne(
-          { platform: 'facebook', postId: post.id },
+          { platform: 'facebook', postId: post.id, workspaceId: ws },
           {
             $set: {
               platform: 'facebook',
@@ -2188,6 +2344,7 @@ async function crawlFacebookMetrics(db) {
               metrics: { likes, comments, shares, views: 0, saves: 0, engagementTotal: likes + comments + shares },
               hourOfDay: publishedAt.getUTCHours(),
               dayOfWeek: publishedAt.getUTCDay(),
+              workspaceId: ws,
               fetchedAt: new Date(),
             },
           },
@@ -2202,8 +2359,8 @@ async function crawlFacebookMetrics(db) {
   return { count };
 }
 
-async function crawlInstagramMetrics(db) {
-  const ig = await getCredentials('instagram');
+async function crawlInstagramMetrics(db, ws = 'default') {
+  const ig = await getCredentials(ws, 'instagram');
   const accounts = (ig?.accounts || []).filter((a) => a.selected && a.accessToken);
   if (!accounts.length) return { count: 0 };
 
@@ -2233,7 +2390,7 @@ async function crawlInstagramMetrics(db) {
           }
         } catch (_) {}
         await db.collection('post_metrics').updateOne(
-          { platform: 'instagram', postId: media.id },
+          { platform: 'instagram', postId: media.id, workspaceId: ws },
           {
             $set: {
               platform: 'instagram',
@@ -2245,6 +2402,7 @@ async function crawlInstagramMetrics(db) {
               metrics: { likes, comments, shares: 0, views, saves, engagementTotal: likes + comments },
               hourOfDay: publishedAt.getUTCHours(),
               dayOfWeek: publishedAt.getUTCDay(),
+              workspaceId: ws,
               fetchedAt: new Date(),
             },
           },
@@ -2259,12 +2417,13 @@ async function crawlInstagramMetrics(db) {
   return { count };
 }
 
-app.post('/analytics/crawl', async () => {
+app.post('/analytics/crawl', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
   const results = {};
   for (const [platform, crawler] of [['facebook', crawlFacebookMetrics], ['instagram', crawlInstagramMetrics]]) {
     try {
-      results[platform] = await crawler(db);
+      results[platform] = await crawler(db, ws);
     } catch (err) {
       app.log.error({ action: 'metrics_crawl', platform, outcome: 'failure', err: err.message });
       results[platform] = { count: 0, error: err.message };
@@ -2276,10 +2435,11 @@ app.post('/analytics/crawl', async () => {
 });
 
 app.get('/analytics/insights', async (request) => {
+  const ws = request.workspaceId;
   const filter = parseAccountFilter(request.query.account);
   const metricsMatch = filter
-    ? { platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }
-    : {};
+    ? { workspaceId: ws, platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }
+    : { workspaceId: ws };
   const db = await getDb();
   const total = await db.collection('post_metrics').countDocuments(metricsMatch);
   if (total === 0) return { empty: true };
@@ -2383,6 +2543,7 @@ function ipFilter(filter) {
 }
 
 app.get('/analytics/summary', async (request) => {
+  const ws = request.workspaceId;
   const filter = parseAccountFilter(request.query.account);
   const db = await getDb();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -2393,6 +2554,7 @@ app.get('/analytics/summary', async (request) => {
   // counts the platform(s) that match the filter.
   const unwindFilter = filter ? [{ $match: sjFilter(filter) }] : [];
 
+  const wsIp = { workspaceId: ws };
   const [
     schedCompleted, schedFailed,
     immPublished, immFailed,
@@ -2402,10 +2564,10 @@ app.get('/analytics/summary', async (request) => {
   ] = await Promise.all([
     db.collection('scheduled_jobs').countDocuments({ status: 'completed', ...sjFilter(filter) }),
     db.collection('scheduled_jobs').countDocuments({ status: 'failed', ...sjFilter(filter) }),
-    db.collection('posts').countDocuments({ type: 'immediate', status: { $in: ['published', 'partial'] }, ...ipFilter(filter) }),
-    db.collection('posts').countDocuments({ type: 'immediate', status: 'failed', ...ipFilter(filter) }),
+    db.collection('posts').countDocuments({ type: 'immediate', status: { $in: ['published', 'partial'] }, ...wsIp, ...ipFilter(filter) }),
+    db.collection('posts').countDocuments({ type: 'immediate', status: 'failed', ...wsIp, ...ipFilter(filter) }),
     db.collection('scheduled_jobs').countDocuments({ status: 'completed', completedAt: { $gte: sevenDaysAgo }, ...sjFilter(filter) }),
-    db.collection('posts').countDocuments({ type: 'immediate', publishedAt: { $gte: sevenDaysAgo }, ...ipFilter(filter) }),
+    db.collection('posts').countDocuments({ type: 'immediate', publishedAt: { $gte: sevenDaysAgo }, ...wsIp, ...ipFilter(filter) }),
     // Platform breakdown from scheduled_jobs destinations
     db.collection('scheduled_jobs').aggregate([
       { $match: { status: 'completed', ...sjFilter(filter) } },
@@ -2416,7 +2578,7 @@ app.get('/analytics/summary', async (request) => {
     ]).toArray(),
     // Platform breakdown from immediate posts platformResults
     db.collection('posts').aggregate([
-      { $match: { type: 'immediate', ...ipFilter(filter) } },
+      { $match: { type: 'immediate', ...wsIp, ...ipFilter(filter) } },
       { $project: { results: { $objectToArray: { $ifNull: ['$platformResults', {}] } } } },
       { $unwind: '$results' },
       { $match: { 'results.v.success': true } },
@@ -2431,7 +2593,7 @@ app.get('/analytics/summary', async (request) => {
     ]).toArray(),
     // Activity by day from immediate posts
     db.collection('posts').aggregate([
-      { $match: { type: 'immediate', publishedAt: { $gte: thirtyDaysAgo }, ...ipFilter(filter) } },
+      { $match: { type: 'immediate', publishedAt: { $gte: thirtyDaysAgo }, ...wsIp, ...ipFilter(filter) } },
       { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$publishedAt' } }, count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]).toArray(),
@@ -2458,13 +2620,14 @@ app.get('/analytics/summary', async (request) => {
 });
 
 app.get('/analytics/posts', async (request) => {
+  const ws = request.workspaceId;
   const limit  = Math.min(parseInt(request.query.limit || '20', 10), 100);
   const skip   = parseInt(request.query.skip || '0', 10);
   const filter = parseAccountFilter(request.query.account);
   const db = await getDb();
 
   const sjMatch = { status: { $in: ['completed', 'failed'] }, ...sjFilter(filter) };
-  const ipMatch = { type: 'immediate', ...ipFilter(filter) };
+  const ipMatch = { type: 'immediate', workspaceId: ws, ...ipFilter(filter) };
 
   const [scheduledJobs, immediatePosts, schedTotal, immTotal] = await Promise.all([
     db.collection('scheduled_jobs')
@@ -2513,6 +2676,7 @@ app.get('/analytics/posts', async (request) => {
 // GET /analytics/export?format=csv&account=&month=YYYY-MM
 // Exports scheduled jobs + immediate posts as a downloadable CSV.
 app.get('/analytics/export', async (request, reply) => {
+  const ws = request.workspaceId;
   const { format = 'csv', account, month } = request.query;
   const filter = parseAccountFilter(account);
   const db = await getDb();
@@ -2532,6 +2696,7 @@ app.get('/analytics/export', async (request, reply) => {
   };
   const ipMatch = {
     type: 'immediate',
+    workspaceId: ws,
     ...ipFilter(filter),
     ...(month ? { publishedAt: dateFilter } : {}),
   };
@@ -2584,6 +2749,7 @@ app.get('/analytics/export', async (request, reply) => {
 // ─── Brand / Account Audit ────────────────────────────────────────────────────
 
 app.post('/analytics/audit', async (request, reply) => {
+  const ws = request.workspaceId;
   const filter = parseAccountFilter(request.query.account);
   const db = await getDb();
 
@@ -2591,6 +2757,7 @@ app.post('/analytics/audit', async (request, reply) => {
   const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
 
   const recentPosts = await db.collection('posts').find({
+    workspaceId: ws,
     publishedAt: { $gte: thirtyDaysAgo },
     ...ipFilter(filter),
   }, { projection: { content: 1, destinations: 1, publishedAt: 1, status: 1 } }).toArray();
@@ -2644,8 +2811,8 @@ app.post('/analytics/audit', async (request, reply) => {
 
   // Engagement data from post_metrics
   const metricsFilter = filter
-    ? { platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }
-    : {};
+    ? { workspaceId: ws, platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }
+    : { workspaceId: ws };
   const metrics = await db.collection('post_metrics')
     .find({ ...metricsFilter, createdAt: { $gte: thirtyDaysAgo } })
     .toArray();
@@ -2686,7 +2853,7 @@ Engagement benchmarks: >5 avg = Excellent, 3-5 = Good, 1-3 = Average, <1 = Below
 Return ONLY the JSON object.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -2734,18 +2901,21 @@ Return ONLY the JSON object.`;
 
 // ─── Hashtag Groups ───────────────────────────────────────────────────────────
 
-app.get('/hashtag-groups', async () => {
+app.get('/hashtag-groups', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const groups = await db.collection('hashtag_groups').find({}).sort({ name: 1 }).toArray();
+  const groups = await db.collection('hashtag_groups').find({ workspaceId: ws }).sort({ name: 1 }).toArray();
   return { groups };
 });
 
 app.post('/hashtag-groups', async (request, reply) => {
+  const ws = request.workspaceId;
   const { name, hashtags } = request.body || {};
   if (!name?.trim()) return reply.code(400).send({ error: 'name is required' });
   const tags = (hashtags || []).map((t) => (t.startsWith('#') ? t : `#${t}`).toLowerCase()).filter(Boolean);
   const db = await getDb();
   const result = await db.collection('hashtag_groups').insertOne({
+    workspaceId: ws,
     name: name.trim(),
     hashtags: [...new Set(tags)],
     createdAt: new Date(),
@@ -2755,6 +2925,7 @@ app.post('/hashtag-groups', async (request, reply) => {
 });
 
 app.put('/hashtag-groups/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   const { id } = request.params;
   const { name, hashtags } = request.body || {};
   const update = { updatedAt: new Date() };
@@ -2766,16 +2937,17 @@ app.put('/hashtag-groups/:id', async (request, reply) => {
   const db = await getDb();
   let oid;
   try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
-  await db.collection('hashtag_groups').updateOne({ _id: oid }, { $set: update });
+  await db.collection('hashtag_groups').updateOne({ _id: oid, workspaceId: ws }, { $set: update });
   return { success: true };
 });
 
 app.delete('/hashtag-groups/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   const { id } = request.params;
   const db = await getDb();
   let oid;
   try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
-  await db.collection('hashtag_groups').deleteOne({ _id: oid });
+  await db.collection('hashtag_groups').deleteOne({ _id: oid, workspaceId: ws });
   return { success: true };
 });
 
@@ -2802,6 +2974,7 @@ function gradeHashtag(count, avgEngagement) {
 // POST /hashtags/scrape — scan YOUR published posts per-account.
 // Body: { accountKey?: string }  — omit to scan all accounts at once.
 app.post('/hashtags/scrape', async (request) => {
+  const ws = request.workspaceId;
   const { accountKey: filterAccount } = request.body || {};
   const db = await getDb();
 
@@ -2817,7 +2990,7 @@ app.post('/hashtags/scrape', async (request) => {
   }
 
   // Engagement lookup keyed by content fingerprint
-  const postMetrics = await db.collection('post_metrics').find({}).toArray();
+  const postMetrics = await db.collection('post_metrics').find({ workspaceId: ws }).toArray();
   const metricsByContent = {};
   for (const m of postMetrics) {
     if (m.content) {
@@ -2827,7 +3000,7 @@ app.post('/hashtags/scrape', async (request) => {
   }
 
   // Scan YOUR published posts only — feeds are others' content, not your performance
-  const posts = await db.collection('posts').find({}, { projection: { content: 1, destinations: 1 } }).toArray();
+  const posts = await db.collection('posts').find({ workspaceId: ws }, { projection: { content: 1, destinations: 1 } }).toArray();
 
   for (const post of posts) {
     const tags = extractHashtags(post.content || '');
@@ -2850,9 +3023,10 @@ app.post('/hashtags/scrape', async (request) => {
   for (const [compoundKey, data] of Object.entries(tagMap)) {
     const avgEngagement = data.count > 0 ? data.totalEngagement / data.count : 0;
     await db.collection('hashtag_stats').updateOne(
-      { _id: compoundKey },
+      { _id: compoundKey, workspaceId: ws },
       {
         $set: {
+          workspaceId: ws,
           hashtag: data.tag,
           accountKey: data.accountKey,
           count: data.count,
@@ -2872,6 +3046,7 @@ app.post('/hashtags/scrape', async (request) => {
 });
 
 app.get('/hashtags/stats', async (request) => {
+  const ws = request.workspaceId;
   const { sort, accountKey } = request.query;
   const db = await getDb();
   const sortField = sort === 'engagement' ? 'avgEngagement' : 'count';
@@ -2879,15 +3054,15 @@ app.get('/hashtags/stats', async (request) => {
   if (accountKey) {
     // Per-account view
     const stats = await db.collection('hashtag_stats')
-      .find({ accountKey })
+      .find({ workspaceId: ws, accountKey })
       .sort({ [sortField]: -1 })
       .limit(200)
       .toArray();
     return { stats };
   }
 
-  // Aggregate view: group by hashtag across all accounts
-  const allStats = await db.collection('hashtag_stats').find({ accountKey: { $exists: true } }).toArray();
+  // Aggregate view: group by hashtag across all accounts in this workspace
+  const allStats = await db.collection('hashtag_stats').find({ workspaceId: ws, accountKey: { $exists: true } }).toArray();
   const grouped = new Map();
   for (const s of allStats) {
     if (!s.hashtag) continue;
@@ -2923,13 +3098,14 @@ app.get('/hashtags/stats', async (request) => {
 });
 
 app.post('/hashtags/ai-suggest', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey, topTags = [], count = 20 } = request.body || {};
 
   let profileCtx = '';
   if (accountKey) {
     try {
       const db = await getDb();
-      const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+      const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
       if (profile) {
         const parts = [];
         if (profile.businessName)   parts.push(`Business: ${profile.businessName}`);
@@ -2954,7 +3130,7 @@ app.post('/hashtags/ai-suggest', async (request, reply) => {
   ].filter(Boolean).join('');
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3068,10 +3244,11 @@ async function runCompetitorScrape(competitorId) {
   return { ok: true, sources: newItems.length, message: newItems.length ? `Scraped ${newItems.length} source(s)` : 'No content found' };
 }
 
-async function buildCompetitorSystemSuffix() {
+async function buildCompetitorSystemSuffix(ws = 'default') {
   try {
     const db = await getDb();
     const competitors = await db.collection('competitors').find({
+      workspaceId: ws,
       $or: [{ 'aiAnalysis.positioning': { $nin: ['', null] } }, { aiSummary: { $nin: ['', null] } }],
     }).toArray();
     if (!competitors.length) return '';
@@ -3094,36 +3271,32 @@ async function buildCompetitorSystemSuffix() {
 
 // Save Google Places API key (used for local competitor discovery)
 app.post('/credentials/google-places', async (request, reply) => {
+  const ws = request.workspaceId;
   const { apiKey } = request.body || {};
   if (!apiKey?.trim()) return reply.code(400).send({ error: 'apiKey is required' });
-  const db = await getDb();
-  await db.collection('platform_credentials').updateOne(
-    { _id: 'google_places' },
-    { $set: { apiKey: apiKey.trim(), updatedAt: new Date() } },
-    { upsert: true },
-  );
+  await setCredentials(ws, 'google_places', { apiKey: apiKey.trim() });
   return { success: true };
 });
 
-app.get('/credentials/google-places', async () => {
-  const db = await getDb();
-  const cred = await db.collection('platform_credentials').findOne({ _id: 'google_places' });
+app.get('/credentials/google-places', async (request) => {
+  const ws = request.workspaceId;
+  const cred = await getCredentials(ws, 'google_places');
   return { configured: !!cred?.apiKey, keyHint: cred?.apiKey ? `****${cred.apiKey.slice(-4)}` : null };
 });
 
-app.delete('/credentials/google-places', async () => {
-  const db = await getDb();
-  await db.collection('platform_credentials').deleteOne({ _id: 'google_places' });
+app.delete('/credentials/google-places', async (request) => {
+  const ws = request.workspaceId;
+  await deleteCredentials(ws, 'google_places');
   return { success: true };
 });
 
 // Discover local competitors via Google Places API
 app.post('/competitors/discover-local', async (request, reply) => {
+  const ws = request.workspaceId;
   const { location, businessType, radiusMeters = 5000 } = request.body || {};
   if (!location) return reply.code(400).send({ error: 'location is required' });
 
-  const db = await getDb();
-  const cred = await db.collection('platform_credentials').findOne({ _id: 'google_places' });
+  const cred = await getCredentials(ws, 'google_places');
   if (!cred?.apiKey) return reply.code(400).send({ error: 'Google Places API key not configured — add it in Settings.' });
 
   // Step 1: Geocode the location string to coordinates
@@ -3187,10 +3360,11 @@ app.post('/competitors/discover-local', async (request, reply) => {
 
 // Discover competitors automatically using AI + account profile context
 app.post('/competitors/discover', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
 
   // Use the first account profile for business context
-  const profile = await db.collection('account_profiles').findOne({});
+  const profile = await db.collection('account_profiles').findOne({ workspaceId: ws });
   const contextParts = [];
   if (profile) {
     if (profile.businessName)   contextParts.push(`Business: ${profile.businessName}`);
@@ -3219,7 +3393,7 @@ Rules:
 - No explanation outside the JSON array.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3269,22 +3443,24 @@ Rules:
 });
 
 // List competitors
-app.get('/competitors', async (request, reply) => {
+app.get('/competitors', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const list = await db.collection('competitors').find({}).sort({ createdAt: 1 }).toArray();
+  const list = await db.collection('competitors').find({ workspaceId: ws }).sort({ createdAt: 1 }).toArray();
   return list;
 });
 
-// Add competitor (max 2)
+// Add competitor (max 5 per workspace)
 app.post('/competitors', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const count = await db.collection('competitors').countDocuments();
+  const count = await db.collection('competitors').countDocuments({ workspaceId: ws });
   if (count >= 5) return reply.code(400).send({ error: 'Maximum 5 competitors allowed' });
   const { name, websiteUrl, socialUrls = {} } = request.body || {};
   if (!name || !websiteUrl) return reply.code(400).send({ error: 'name and websiteUrl are required' });
   const now = new Date();
   const result = await db.collection('competitors').insertOne({
-    name, websiteUrl, socialUrls, scrapedContent: [], aiSummary: '', keywords: [], lastScraped: null, createdAt: now, updatedAt: now,
+    workspaceId: ws, name, websiteUrl, socialUrls, scrapedContent: [], aiSummary: '', keywords: [], lastScraped: null, createdAt: now, updatedAt: now,
   });
   const doc = await db.collection('competitors').findOne({ _id: result.insertedId });
   return doc;
@@ -3292,21 +3468,24 @@ app.post('/competitors', async (request, reply) => {
 
 // Update competitor
 app.put('/competitors/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
   const { name, websiteUrl, socialUrls } = request.body || {};
   const updates = { updatedAt: new Date() };
   if (name !== undefined) updates.name = name;
   if (websiteUrl !== undefined) updates.websiteUrl = websiteUrl;
   if (socialUrls !== undefined) updates.socialUrls = socialUrls;
-  await db.collection('competitors').updateOne({ _id: new ObjectId(request.params.id) }, { $set: updates });
-  const doc = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  const oid = new ObjectId(request.params.id);
+  await db.collection('competitors').updateOne({ _id: oid, workspaceId: ws }, { $set: updates });
+  const doc = await db.collection('competitors').findOne({ _id: oid, workspaceId: ws });
   return doc;
 });
 
 // Delete competitor
 app.delete('/competitors/:id', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  await db.collection('competitors').deleteOne({ _id: new ObjectId(request.params.id) });
+  await db.collection('competitors').deleteOne({ _id: new ObjectId(request.params.id), workspaceId: ws });
   return { success: true };
 });
 
@@ -3338,10 +3517,11 @@ app.get('/competitors/:id/scrape-status/:jobId', async (request, reply) => {
   return job;
 });
 
-// Scrape all competitors (called by scheduler)
+// Scrape all competitors (called by scheduler — always operates on default workspace)
 app.post('/competitors/scrape-all', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const all = await db.collection('competitors').find({}).toArray();
+  const all = await db.collection('competitors').find({ workspaceId: ws }).toArray();
   const results = [];
   for (const c of all) {
     const r = await runCompetitorScrape(c._id.toString());
@@ -3352,8 +3532,10 @@ app.post('/competitors/scrape-all', async (request, reply) => {
 
 // Summarize competitor content with AI — returns structured analysis
 app.post('/competitors/:id/summarize', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  const oid = new ObjectId(request.params.id);
+  const competitor = await db.collection('competitors').findOne({ _id: oid, workspaceId: ws });
   if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
 
   const content = (competitor.scrapedContent || []).map((s) => `[${s.source}] ${s.text}`).join('\n\n').slice(0, 6000);
@@ -3387,7 +3569,7 @@ ${content}
 Return ONLY the JSON object. No explanation, no markdown.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3439,7 +3621,7 @@ Return ONLY the JSON object. No explanation, no markdown.`;
     if (!aiAnalysis) return reply.code(503).send({ error: 'AI returned invalid analysis format — try again' });
 
     await db.collection('competitors').updateOne(
-      { _id: new ObjectId(request.params.id) },
+      { _id: oid, workspaceId: ws },
       { $set: { aiAnalysis, aiSummary: '', updatedAt: new Date() } },
     );
     return { success: true, aiAnalysis };
@@ -3450,8 +3632,10 @@ Return ONLY the JSON object. No explanation, no markdown.`;
 
 // Extract keywords from scraped content using AI (item 34)
 app.post('/competitors/:id/extract-keywords', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  const oid = new ObjectId(request.params.id);
+  const competitor = await db.collection('competitors').findOne({ _id: oid, workspaceId: ws });
   if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
 
   const content = (competitor.scrapedContent || []).map((s) => s.text).join('\n\n').slice(0, 6000);
@@ -3472,7 +3656,7 @@ Return ONLY a JSON array, e.g.:
 No explanation, no markdown.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3517,7 +3701,7 @@ No explanation, no markdown.`;
     }
 
     await db.collection('competitors').updateOne(
-      { _id: new ObjectId(request.params.id) },
+      { _id: oid, workspaceId: ws },
       { $set: { keywords, updatedAt: new Date() } },
     );
     return { success: true, keywords };
@@ -3528,15 +3712,17 @@ No explanation, no markdown.`;
 
 // Analyse content gaps — compare competitor keywords against user's hashtag_stats
 app.post('/competitors/:id/analyze-gaps', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  const oid = new ObjectId(request.params.id);
+  const competitor = await db.collection('competitors').findOne({ _id: oid, workspaceId: ws });
   if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
 
   const keywords = (competitor.keywords || []);
   if (!keywords.length) return reply.code(400).send({ error: 'Extract keywords first before analysing gaps' });
 
   const hashtagDocs = await db.collection('hashtag_stats')
-    .find({ accountKey: { $exists: true } }, { projection: { _id: 0, hashtag: 1 } })
+    .find({ workspaceId: ws, accountKey: { $exists: true } }, { projection: { _id: 0, hashtag: 1 } })
     .toArray();
   const hashtagStatsEmpty = hashtagDocs.length === 0;
 
@@ -3572,7 +3758,7 @@ app.post('/competitors/:id/analyze-gaps', async (request, reply) => {
   const gapAnalysis = { gaps, covered, totalKeywords: keywords.length, hashtagStatsEmpty, lastAnalyzed: new Date() };
 
   await db.collection('competitors').updateOne(
-    { _id: new ObjectId(request.params.id) },
+    { _id: oid, workspaceId: ws },
     { $set: { gapAnalysis, updatedAt: new Date() } },
   );
   return { success: true, ...gapAnalysis };
@@ -3580,8 +3766,10 @@ app.post('/competitors/:id/analyze-gaps', async (request, reply) => {
 
 // Detect and classify market signals from latest scraped content
 app.post('/competitors/:id/detect-signals', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  const oid = new ObjectId(request.params.id);
+  const competitor = await db.collection('competitors').findOne({ _id: oid, workspaceId: ws });
   if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
 
   const recentContent = (competitor.scrapedContent || []).slice(0, 10);
@@ -3616,7 +3804,7 @@ Return ONLY a JSON array (empty array [] if no significant signals):
 Severity guide: high = major strategic shift, medium = notable change worth monitoring, low = minor or uncertain change.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3663,7 +3851,7 @@ Severity guide: high = major strategic shift, medium = notable change worth moni
     }
 
     await db.collection('competitors').updateOne(
-      { _id: new ObjectId(request.params.id) },
+      { _id: oid, workspaceId: ws },
       { $set: { signals, contentChanged: false, updatedAt: new Date() } },
     );
     log.info({ action: 'detect_signals', competitorId: request.params.id, count: signals.length, outcome: 'success' });
@@ -3675,8 +3863,10 @@ Severity guide: high = major strategic shift, medium = notable change worth moni
 
 // Generate a 5-post content roadmap from competitor keywords and gaps
 app.post('/competitors/:id/content-roadmap', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
-  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(request.params.id) });
+  const oid = new ObjectId(request.params.id);
+  const competitor = await db.collection('competitors').findOne({ _id: oid, workspaceId: ws });
   if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
 
   const keywords = (competitor.keywords || []);
@@ -3709,7 +3899,7 @@ Return ONLY a JSON array:
 No explanation, no markdown.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3754,7 +3944,7 @@ No explanation, no markdown.`;
     if (!roadmap.length) return reply.code(503).send({ error: 'AI returned invalid roadmap format — try again' });
 
     await db.collection('competitors').updateOne(
-      { _id: new ObjectId(request.params.id) },
+      { _id: oid, workspaceId: ws },
       { $set: { contentRoadmap: roadmap, updatedAt: new Date() } },
     );
     return { success: true, contentRoadmap: roadmap };
@@ -3766,11 +3956,12 @@ No explanation, no markdown.`;
 // ─── Quantitative Competitor Extraction ──────────────────────────────────────
 
 app.post('/competitors/:id/extract-quantitative', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
   let oid;
   try { oid = new ObjectId(request.params.id); } catch { return reply.code(400).send({ error: 'Invalid id' }); }
 
-  const competitor = await db.collection('competitors').findOne({ _id: oid });
+  const competitor = await db.collection('competitors').findOne({ _id: oid, workspaceId: ws });
   if (!competitor) return reply.code(404).send({ error: 'Competitor not found' });
   if (!competitor.websiteUrl) return reply.code(400).send({ error: 'Competitor has no website URL' });
 
@@ -3809,7 +4000,7 @@ Return this JSON:
 If data is not available for a field, use null for numbers and [] for arrays. Return ONLY valid JSON.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3845,7 +4036,7 @@ If data is not available for a field, use null for numbers and [] for arrays. Re
     }
 
     await db.collection('competitors').updateOne(
-      { _id: oid },
+      { _id: oid, workspaceId: ws },
       { $set: { quantitativeProfile: profile, quantitativeExtractedAt: new Date(), updatedAt: new Date() } },
     );
 
@@ -3870,13 +4061,14 @@ const STRATEGIC_DIMENSIONS = [
 ];
 
 app.post('/competitors/strategic-map', async (request, reply) => {
+  const ws = request.workspaceId;
   const { xAxis, yAxis, accountKey } = request.body || {};
   if (!xAxis || !yAxis) return reply.code(400).send({ error: 'xAxis and yAxis are required' });
   if (xAxis === yAxis) return reply.code(400).send({ error: 'xAxis and yAxis must be different dimensions' });
 
   const db = await getDb();
   const competitors = await db.collection('competitors')
-    .find({ aiAnalysis: { $exists: true } })
+    .find({ workspaceId: ws, aiAnalysis: { $exists: true } })
     .toArray();
 
   if (competitors.length < 1) {
@@ -3884,8 +4076,8 @@ app.post('/competitors/strategic-map', async (request, reply) => {
   }
 
   const profile = accountKey
-    ? await db.collection('account_profiles').findOne({ _id: accountKey })
-    : await db.collection('account_profiles').findOne({});
+    ? await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws })
+    : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const competitorBlocks = competitors.map((c) => {
     const a = c.aiAnalysis || {};
@@ -3917,7 +4109,7 @@ Return:
 Include your brand as a player with isYou: true. Return ONLY valid JSON.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -3962,9 +4154,10 @@ Include your brand as a player with isYou: true. Return ONLY valid JSON.`;
 // ─── Competitor Social Matrix ────────────────────────────────────────────────
 
 app.post('/competitors/social-matrix', async (request, reply) => {
+  const ws = request.workspaceId;
   const db = await getDb();
   const competitors = await db.collection('competitors')
-    .find({ aiAnalysis: { $exists: true } })
+    .find({ workspaceId: ws, aiAnalysis: { $exists: true } })
     .toArray();
 
   if (competitors.length < 2) {
@@ -3996,7 +4189,7 @@ Write a concise competitive landscape synthesis (3–4 sentences) that:
 Write as direct, specific analysis. No fluff.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -4032,11 +4225,12 @@ Write as direct, specific analysis. No fluff.`;
 // ─── Porter's Five Forces Analysis ───────────────────────────────────────────
 
 app.post('/ai/five-forces', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey } = request.body || {};
   if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
 
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
   if (!profile) return reply.code(404).send({ error: 'Account profile not found. Save a profile first.' });
 
   if (!profile.industry && !profile.businessName) {
@@ -4052,7 +4246,7 @@ app.post('/ai/five-forces', async (request, reply) => {
   ].filter(Boolean).join('\n');
 
   // Load competitor data for richer rivalry analysis
-  const competitors = await db.collection('competitors').find({}, { projection: { name: 1, aiAnalysis: 1 } }).toArray();
+  const competitors = await db.collection('competitors').find({ workspaceId: ws }, { projection: { name: 1, aiAnalysis: 1 } }).toArray();
   const competitorBlock = competitors.length
     ? `Known direct competitors: ${competitors.map((c) => c.name).join(', ')}.`
     : '';
@@ -4106,7 +4300,7 @@ Score each force 1–10 (1 = very weak/favourable, 10 = very strong/unfavourable
 Scoring: overallScore = 100 minus the average of all five force scores × 10. Return ONLY valid JSON.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -4142,7 +4336,7 @@ Scoring: overallScore = 100 minus the average of all five force scores × 10. Re
     }
 
     await db.collection('account_profiles').updateOne(
-      { _id: accountKey },
+      { _id: accountKey, workspaceId: ws },
       { $set: { industryAnalysis: result, industryAnalyzedAt: new Date(), updatedAt: new Date() } },
     );
 
@@ -4156,11 +4350,12 @@ Scoring: overallScore = 100 minus the average of all five force scores × 10. Re
 // ─── Industry Type Diagnosis ─────────────────────────────────────────────────
 
 app.post('/ai/industry-diagnosis', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey } = request.body || {};
   if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
 
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
   if (!profile) return reply.code(404).send({ error: 'Account profile not found. Save the profile first.' });
 
   const fields = [profile.businessName, profile.description, profile.industry, profile.toneOfVoice].filter(Boolean);
@@ -4204,7 +4399,7 @@ The contentMix percentages must sum to 100.
 Return ONLY valid JSON.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 
@@ -4241,7 +4436,7 @@ Return ONLY valid JSON.`;
 
     // Persist the diagnosis on the account profile for future use
     await db.collection('account_profiles').updateOne(
-      { _id: accountKey },
+      { _id: accountKey, workspaceId: ws },
       { $set: { industryDiagnosis: result, industryDiagnosedAt: new Date(), updatedAt: new Date() } },
     );
 
@@ -4255,6 +4450,7 @@ Return ONLY valid JSON.`;
 // ─── Social Channel Audit ────────────────────────────────────────────────────
 
 app.post('/ai/channel-audit', async (request, reply) => {
+  const ws = request.workspaceId;
   const { accountKey } = request.body || {};
   const db = await getDb();
 
@@ -4263,13 +4459,13 @@ app.post('/ai/channel-audit', async (request, reply) => {
   // Load profile (optional — enriches completeness & bio quality sections)
   let profile = null;
   if (accountKey) {
-    profile = await db.collection('account_profiles').findOne({ _id: accountKey });
+    profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
   }
 
   // Load recent posts, optionally filtered by account
   const postFilter = accountKey
-    ? { publishedAt: { $gte: thirtyDaysAgo }, 'destinations.key': accountKey }
-    : { publishedAt: { $gte: thirtyDaysAgo } };
+    ? { workspaceId: ws, publishedAt: { $gte: thirtyDaysAgo }, 'destinations.key': accountKey }
+    : { workspaceId: ws, publishedAt: { $gte: thirtyDaysAgo } };
   const recentPosts = await db.collection('posts')
     .find(postFilter, { projection: { content: 1, destinations: 1, publishedAt: 1, status: 1 } })
     .toArray();
@@ -4309,8 +4505,8 @@ app.post('/ai/channel-audit', async (request, reply) => {
 
   // Engagement from post_metrics
   const metricsFilter = accountKey
-    ? { accountKey }
-    : {};
+    ? { workspaceId: ws, accountKey }
+    : { workspaceId: ws };
   const metrics = await db.collection('post_metrics')
     .find({ ...metricsFilter, createdAt: { $gte: thirtyDaysAgo } })
     .toArray();
@@ -4370,7 +4566,7 @@ Scoring benchmarks:
 Return ONLY valid JSON.`;
 
   try {
-    const pconf = await getActiveProviderConfig();
+    const pconf = await getActiveProviderConfig(request.workspaceId);
     const model = pconf.model;
     let text = '';
 

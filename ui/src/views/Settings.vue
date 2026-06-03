@@ -1415,6 +1415,95 @@
         </div>
       </div>
 
+      <!-- ═══════════════════════════════════════════════════════════════════
+           WORKSPACE MANAGEMENT
+      ════════════════════════════════════════════════════════════════════ -->
+      <div id="workspaces" class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <span class="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center text-white text-sm font-bold">🏢</span>
+          <div>
+            <p class="font-semibold">{{ $t('workspace.settingsTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('workspace.settingsSubtitle') }}</p>
+          </div>
+        </div>
+
+        <div class="p-5 space-y-3">
+          <!-- Existing workspaces -->
+          <div
+            v-for="ws in workspaceStore.workspaces"
+            :key="ws._id"
+            class="flex items-center gap-3 p-3 rounded-xl border"
+            :class="ws._id === workspaceStore.activeWorkspaceId
+              ? 'border-violet-600 bg-violet-950/30'
+              : 'border-gray-800 bg-gray-800/40'"
+          >
+            <div class="flex-1 min-w-0">
+              <div v-if="renamingId !== ws._id" class="flex items-center gap-2">
+                <span class="text-sm font-medium truncate">{{ ws.name || $t('workspace.defaultName') }}</span>
+                <span v-if="ws._id === workspaceStore.activeWorkspaceId" class="text-xs px-1.5 py-0.5 rounded bg-violet-600 text-white">{{ $t('workspace.activeLabel') }}</span>
+              </div>
+              <div v-else class="flex items-center gap-2">
+                <input
+                  v-model="renameValue"
+                  type="text"
+                  class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-violet-500"
+                  @keydown.enter="saveRename(ws._id)"
+                  @keydown.escape="renamingId = null"
+                />
+                <button @click="saveRename(ws._id)" class="text-xs px-2 py-1 bg-violet-600 hover:bg-violet-500 rounded text-white transition-colors">{{ wsRenaming ? $t('workspace.renaming') : $t('workspace.rename') }}</button>
+                <button @click="renamingId = null" class="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 transition-colors">✕</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button
+                v-if="ws._id !== workspaceStore.activeWorkspaceId"
+                @click="switchTo(ws._id)"
+                class="text-xs px-2.5 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 hover:text-white transition-colors"
+              >
+                Switch
+              </button>
+              <button
+                @click="startRename(ws)"
+                class="text-xs px-2.5 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 hover:text-white transition-colors"
+              >
+                {{ $t('workspace.rename') }}
+              </button>
+              <button
+                v-if="workspaceStore.workspaces.length > 1"
+                @click="deleteWorkspace(ws._id)"
+                class="text-xs px-2.5 py-1 bg-red-900/50 hover:bg-red-800 rounded-lg text-red-400 hover:text-red-200 transition-colors"
+              >
+                {{ wsDeleting === ws._id ? $t('workspace.deleting') : $t('workspace.delete') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Error -->
+          <p v-if="wsError" class="text-xs text-red-400">{{ wsError }}</p>
+
+          <!-- Create new workspace -->
+          <div class="pt-2 border-t border-gray-800">
+            <p class="text-xs text-gray-500 mb-2">{{ $t('workspace.addNew') }}</p>
+            <div class="flex gap-2">
+              <input
+                v-model="newWsName"
+                type="text"
+                :placeholder="$t('workspace.namePlaceholder')"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm placeholder-gray-600 focus:outline-none focus:border-violet-500"
+                @keydown.enter="createWorkspace"
+              />
+              <button
+                @click="createWorkspace"
+                :disabled="!newWsName.trim() || wsCreating"
+                class="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+              >
+                {{ wsCreating ? $t('workspace.creating') : $t('workspace.create') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Refresh button -->
       <button
         @click="platformsStore.fetchStatuses()"
@@ -1435,14 +1524,87 @@ import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
 import { useAiStore, PROVIDER_MODELS } from '../stores/ai'
 import { useHashtagStore, type HashtagGroup } from '../stores/hashtags'
+import { useWorkspaceStore, type Workspace } from '../stores/workspace'
 import { COMMON_TIMEZONES } from '../utils/timezone'
+import { useRouter } from 'vue-router'
 
 const { t } = useI18n()
 
 const route = useRoute()
+const router = useRouter()
 const platformsStore = usePlatformsStore()
 const aiStore = useAiStore()
 const hashtagStore = useHashtagStore()
+const workspaceStore = useWorkspaceStore()
+
+// ─── Workspace management ────────────────────────────────────────────────────
+
+const newWsName = ref('')
+const wsCreating = ref(false)
+const wsDeleting = ref<string | null>(null)
+const wsRenaming = ref(false)
+const wsError = ref('')
+const renamingId = ref<string | null>(null)
+const renameValue = ref('')
+
+async function createWorkspace() {
+  if (!newWsName.value.trim() || wsCreating.value) return
+  wsCreating.value = true
+  wsError.value = ''
+  try {
+    const ws = await workspaceStore.create(newWsName.value.trim())
+    newWsName.value = ''
+    await workspaceStore.setActive(ws._id)
+    router.go(0)
+  } catch {
+    wsError.value = t('workspace.createError')
+  } finally {
+    wsCreating.value = false
+  }
+}
+
+async function deleteWorkspace(id: string) {
+  if (workspaceStore.workspaces.length <= 1) {
+    wsError.value = t('workspace.deleteBlocked')
+    return
+  }
+  if (!confirm(t('workspace.confirmDelete'))) return
+  wsDeleting.value = id
+  wsError.value = ''
+  try {
+    const wasActive = id === workspaceStore.activeWorkspaceId
+    await workspaceStore.remove(id)
+    if (wasActive) router.go(0)
+  } catch {
+    wsError.value = t('workspace.deleteError')
+  } finally {
+    wsDeleting.value = null
+  }
+}
+
+function startRename(ws: Workspace) {
+  renamingId.value = ws._id
+  renameValue.value = ws.name
+}
+
+async function saveRename(id: string) {
+  if (!renameValue.value.trim() || wsRenaming.value) return
+  wsRenaming.value = true
+  wsError.value = ''
+  try {
+    await workspaceStore.rename(id, renameValue.value.trim())
+    renamingId.value = null
+  } catch {
+    wsError.value = t('workspace.renameError')
+  } finally {
+    wsRenaming.value = false
+  }
+}
+
+async function switchTo(id: string) {
+  await workspaceStore.setActive(id)
+  router.go(0)
+}
 
 // ─── App credential form state ──────────────────────────────────────────────
 
