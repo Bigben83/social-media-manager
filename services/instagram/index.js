@@ -6,6 +6,28 @@ const { decryptToken, warnIfNoKey } = require('./utils/crypto');
 const { getWorkspaceCredential } = require('./utils/credentials');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
+// Instagram's Container API requires a publicly accessible image URL.
+// If APP_BASE_URL is set to a public domain, relative /media/ paths are resolved against it.
+const APP_BASE_URL = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+
+function resolveInstagramMediaUrl(url) {
+  if (!url) return url;
+  if (url.startsWith('/')) {
+    if (!APP_BASE_URL) {
+      throw new Error('Instagram requires a publicly accessible image URL. Set APP_BASE_URL to your public domain (e.g. https://social.example.com) to post images from the media library.');
+    }
+    const full = `${APP_BASE_URL}${url}`;
+    if (/https?:\/\/(localhost|127\.0\.0\.1)/.test(full)) {
+      throw new Error(`Instagram requires a publicly accessible image URL. The app (${APP_BASE_URL}) is not reachable from the internet. Use an external image URL or deploy to a public server.`);
+    }
+    return full;
+  }
+  // Already a full URL — warn if it looks local but still try
+  if (/https?:\/\/(localhost|127\.0\.0\.1)/.test(url)) {
+    throw new Error(`Instagram requires a publicly accessible image URL. "${url}" is not reachable from the internet. Use an external image URL or deploy to a public server.`);
+  }
+  return url;
+}
 
 class InstagramService extends BasePlatformService {
   constructor() {
@@ -140,9 +162,9 @@ class InstagramService extends BasePlatformService {
       };
       if (videoUrl) {
         containerParams.media_type = 'REELS';
-        containerParams.video_url = videoUrl;
+        containerParams.video_url = resolveInstagramMediaUrl(videoUrl);
       } else {
-        containerParams.image_url = imageUrl;
+        containerParams.image_url = resolveInstagramMediaUrl(imageUrl);
       }
 
       const containerRes = await axios.post(

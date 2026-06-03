@@ -33,7 +33,10 @@ class BasePlatformService extends RabbitMQConnector {
         const items = await this.fetchFeed({ ...request.query, workspaceId });
         return { success: true, platform: this.platformName, count: items.length, items };
       } catch (err) {
-        reply.code(500).send({ success: false, error: err.message });
+        const graphMsg = err.response?.data?.error?.message;
+        const apiError = graphMsg || err.message;
+        this.log.error({ action: 'fetch_feed', platform: this.platformName, outcome: 'failure', err: String(apiError) });
+        reply.code(500).send({ success: false, error: String(apiError) });
       }
     });
 
@@ -43,7 +46,15 @@ class BasePlatformService extends RabbitMQConnector {
         const result = await this.publishPost({ ...request.body, workspaceId });
         return { success: true, platform: this.platformName, result };
       } catch (err) {
-        reply.code(500).send({ success: false, error: err.message });
+        // Extract the actual third-party API error (e.g. Facebook Graph API error body)
+        // rather than the generic axios "Request failed with status code 4xx" message.
+        const graphMsg = err.response?.data?.error?.message;
+        const graphCode = err.response?.data?.error?.code;
+        const apiError = graphMsg
+          ? (graphCode ? `[#${graphCode}] ${graphMsg}` : graphMsg)
+          : (typeof err.response?.data?.error === 'string' ? err.response.data.error : err.message);
+        this.log.error({ action: 'publish_post', platform: this.platformName, outcome: 'failure', err: String(apiError) });
+        reply.code(500).send({ success: false, error: String(apiError) });
       }
     });
 

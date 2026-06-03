@@ -316,7 +316,7 @@ app.post('/upload', async (request, reply) => {
   const record = {
     filename,
     originalName: data.filename,
-    url: `/media/${filename}`,
+    url: process.env.APP_BASE_URL ? `${process.env.APP_BASE_URL.replace(/\/$/, '')}/media/${filename}` : `/media/${filename}`,
     mimetype: data.mimetype,
     size: stat.size,
     folder: folder || null,

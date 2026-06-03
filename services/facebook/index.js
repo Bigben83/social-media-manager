@@ -6,6 +6,17 @@ const { decryptToken, warnIfNoKey } = require('./utils/crypto');
 const { getWorkspaceCredential } = require('./utils/credentials');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
+// Internal Docker URL for downloading local media files (nginx serves /media/*)
+const MEDIA_INTERNAL_URL = (process.env.MEDIA_INTERNAL_URL || 'http://nginx:8081').replace(/\/$/, '');
+
+function isLocalUrl(url) {
+  return !url || url.startsWith('/') || /https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(url);
+}
+
+function resolveInternalUrl(url) {
+  if (url.startsWith('/')) return `${MEDIA_INTERNAL_URL}${url}`;
+  return url.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/, MEDIA_INTERNAL_URL);
+}
 
 class FacebookService extends BasePlatformService {
   constructor() {
@@ -113,6 +124,39 @@ class FacebookService extends BasePlatformService {
     return allItems;
   }
 
+  // Upload a photo to a Facebook Page.
+  // - Local/relative URLs are downloaded from the internal Docker network and uploaded as binary.
+  // - Public external URLs are submitted via the `url` parameter (Facebook downloads them directly).
+  // Returns the post_id (visible on the Page timeline).
+  async _uploadPhoto(pageId, accessToken, message, imageUrl) {
+    if (isLocalUrl(imageUrl)) {
+      // Download from internal nginx and binary-upload — Facebook's servers cannot reach localhost
+      const internalUrl = resolveInternalUrl(imageUrl);
+      this.app.log.info({ action: 'photo_upload', pageId, method: 'binary', internalUrl });
+      const imgRes = await axios.get(internalUrl, { responseType: 'arraybuffer', timeout: 15000 });
+      const mime = imgRes.headers['content-type'] || 'image/jpeg';
+
+      const form = new FormData();
+      form.append('message', message);
+      form.append('access_token', accessToken);
+      form.append('source', new Blob([imgRes.data], { type: mime }), 'image.jpg');
+
+      const photoRes = await fetch(`${GRAPH_API}/${pageId}/photos`, { method: 'POST', body: form });
+      if (!photoRes.ok) {
+        const errBody = await photoRes.json().catch(() => ({}));
+        throw new Error(errBody.error?.message || `Facebook API error ${photoRes.status}`);
+      }
+      const data = await photoRes.json();
+      return data.post_id || data.id;
+    } else {
+      // External public URL — Facebook downloads it directly
+      const res = await axios.post(`${GRAPH_API}/${pageId}/photos`, null, {
+        params: { message, url: imageUrl, access_token: accessToken },
+      });
+      return res.data.post_id || res.data.id;
+    }
+  }
+
   async publishPost({ content, link, imageUrl, accountId, firstComment, workspaceId = 'default' } = {}) {
     const allPages = await this._getPages(workspaceId);
     if (allPages.length === 0) throw new Error('No Facebook Pages connected');
@@ -124,12 +168,18 @@ class FacebookService extends BasePlatformService {
 
     const results = [];
     for (const page of pages) {
-      const params = { message: content, access_token: page.accessToken };
-      if (link) params.link = link;
-      if (imageUrl) params.picture = imageUrl;
+      let postId;
 
-      const res = await axios.post(`${GRAPH_API}/${page.id}/feed`, null, { params });
-      const postId = res.data.id;
+      if (imageUrl) {
+        // Photo post — use /photos endpoint (binary for local URLs, url param for external)
+        postId = await this._uploadPhoto(page.id, page.accessToken, content, imageUrl);
+      } else {
+        // Text-only post (optionally with a link preview)
+        const params = { message: content, access_token: page.accessToken };
+        if (link) params.link = link;
+        const res = await axios.post(`${GRAPH_API}/${page.id}/feed`, null, { params });
+        postId = res.data.id;
+      }
 
       if (firstComment?.trim()) {
         try {
