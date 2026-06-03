@@ -141,7 +141,13 @@ const GLOBAL_CREDENTIAL_TYPES = new Set([
 async function getCredentials(ws, type) {
   const db = await getDb();
   const id = GLOBAL_CREDENTIAL_TYPES.has(type) ? type : credId(ws, type);
-  return db.collection('platform_credentials').findOne({ _id: id });
+  const doc = await db.collection('platform_credentials').findOne({ _id: id });
+  // Fallback: if global credential not found under bare key, check the erroneously
+  // workspace-prefixed key that an earlier migration may have created.
+  if (!doc && GLOBAL_CREDENTIAL_TYPES.has(type)) {
+    return db.collection('platform_credentials').findOne({ _id: credId(ws, type) });
+  }
+  return doc;
 }
 
 async function setCredentials(ws, type, data) {
@@ -232,22 +238,50 @@ async function runWorkspaceMigration() {
       { $setOnInsert: { _id: 'default', name: 'Default', color: '#3B82F6', createdAt: new Date(), updatedAt: new Date() } },
       { upsert: true }
     );
-    // Migrate platform_credentials: re-key any doc whose _id doesn't contain ':'
-    const oldCreds = await db.collection('platform_credentials').find({ _id: { $not: /\:/ } }).toArray();
+
+    // Recovery: any global credential that was previously mis-migrated to
+    // 'default:TYPE' must be moved back to the bare 'TYPE' key so that
+    // getCredentials() can find it. This repairs data corrupted by the earlier
+    // version of this migration that didn't skip global types.
+    for (const type of GLOBAL_CREDENTIAL_TYPES) {
+      const migratedId = credId('default', type);
+      const migrated = await db.collection('platform_credentials').findOne({ _id: migratedId });
+      if (migrated) {
+        const bareExists = await db.collection('platform_credentials').findOne({ _id: type });
+        if (!bareExists) {
+          const { _id, workspaceId, ...rest } = migrated;
+          await db.collection('platform_credentials').insertOne({ ...rest, _id: type });
+          log.info({ action: 'workspace_migration', step: 'recover_global', type, outcome: 'success' });
+        }
+        await db.collection('platform_credentials').deleteOne({ _id: migratedId });
+      }
+    }
+
+    // Migrate workspace-scoped platform_credentials: re-key docs whose _id
+    // has no colon AND is not a global type (e.g. bare 'facebook' → 'default:facebook').
+    // Global types (ai_config, meta_app, etc.) are intentionally never workspace-prefixed.
+    const oldCreds = await db.collection('platform_credentials').find({
+      _id: { $not: /\:/ },
+      type: { $exists: false },  // only un-migrated docs (migrated ones already have 'type' field)
+    }).toArray();
+    let migrated = 0;
     for (const cred of oldCreds) {
+      if (GLOBAL_CREDENTIAL_TYPES.has(cred._id)) continue;  // never re-key global types
       const newId = credId('default', cred._id);
       const exists = await db.collection('platform_credentials').findOne({ _id: newId });
       if (!exists) {
         await db.collection('platform_credentials').insertOne({ ...cred, _id: newId, workspaceId: 'default', type: cred._id });
+        migrated++;
       }
       await db.collection('platform_credentials').deleteOne({ _id: cred._id });
     }
+
     // Stamp workspaceId on all other collections
     const cols = ['competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','feeds','scheduled_jobs'];
     for (const col of cols) {
       await db.collection(col).updateMany({ workspaceId: { $exists: false } }, { $set: { workspaceId: 'default' } });
     }
-    if (oldCreds.length > 0) log.info({ action: 'workspace_migration', migrated: oldCreds.length, outcome: 'success' });
+    if (migrated > 0) log.info({ action: 'workspace_migration', migrated, outcome: 'success' });
   } catch (err) {
     log.error({ action: 'workspace_migration', outcome: 'failure', err: err.message });
   }
