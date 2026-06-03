@@ -1552,7 +1552,10 @@ const allConnectedAccounts = computed((): ProfileAccount[] => {
   for (const [platform, meta] of Object.entries(PLATFORM_META)) {
     if (platform === 'facebook' || platform === 'instagram' || platform === 'pinterest' || platform === 'tiktok') continue
     if (platformsStore.isConnected(platform)) {
-      accounts.push({ key: platform, label: t(`platforms.${platform}`), platform, color: meta.color, avatar: null })
+      const status = platformsStore.getStatus(platform)
+      const username = status?.username || status?.displayName
+      const label = username ? `${t(`platforms.${platform}`)} (@${username})` : t(`platforms.${platform}`)
+      accounts.push({ key: platform, label, platform, color: meta.color, avatar: null })
     }
   }
 

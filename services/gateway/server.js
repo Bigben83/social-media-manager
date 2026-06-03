@@ -1783,14 +1783,15 @@ app.get('/auth/meta/init', async (request, reply) => {
     'instagram_manage_insights',
   ].join(',');
 
-  const url = `https://www.facebook.com/v22.0/dialog/oauth?client_id=${cred.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code`;
+  const url = `https://www.facebook.com/v22.0/dialog/oauth?client_id=${cred.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code&state=${encodeURIComponent(ws)}`;
   return { url };
 });
 
 // OAuth callback — Facebook redirects here after user authorises
 app.get('/auth/meta/callback', async (request, reply) => {
-  const ws = request.workspaceId;
-  const { code, error: oauthError } = request.query;
+  const { code, state, error: oauthError } = request.query;
+  // Recover workspace from state param (browser redirects carry no X-Workspace-Id header)
+  const ws = (state && String(state).trim()) ? String(state) : request.workspaceId;
 
   if (oauthError) {
     return reply.redirect(`${APP_BASE_URL}/settings?meta_error=${encodeURIComponent(oauthError)}`);
@@ -1964,13 +1965,13 @@ app.get('/auth/pinterest/init', async (request, reply) => {
   }
   const redirectUri = `${APP_BASE_URL}/api/auth/pinterest/callback`;
   const scopes = 'pins:read,pins:write,boards:read,user_accounts:read';
-  const url = `${PINTEREST_AUTH_URL}?client_id=${cred.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scopes}`;
+  const url = `${PINTEREST_AUTH_URL}?client_id=${cred.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scopes}&state=${encodeURIComponent(ws)}`;
   return { url };
 });
 
 app.get('/auth/pinterest/callback', async (request, reply) => {
-  const ws = request.workspaceId;
-  const { code, error: oauthError } = request.query;
+  const { code, state, error: oauthError } = request.query;
+  const ws = (state && String(state).trim()) ? String(state) : request.workspaceId;
 
   if (oauthError) {
     return reply.redirect(`${APP_BASE_URL}/settings?pinterest_error=${encodeURIComponent(oauthError)}`);
@@ -2115,7 +2116,6 @@ app.get('/auth/tiktok/init', async (request, reply) => {
 });
 
 app.get('/auth/tiktok/callback', async (request, reply) => {
-  const ws = request.workspaceId;
   const { code, state, error: oauthError, error_description } = request.query;
 
   if (oauthError) {
@@ -2128,9 +2128,10 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
 
   try {
     const db = await getDb();
-    const pkce = await db.collection('platform_credentials').findOne({ _id: credId(ws, 'tiktok_pkce') });
+    // Look up PKCE by state value — recovers the workspace ID that initiated the OAuth
+    const pkce = await db.collection('platform_credentials').findOne({ state });
     if (!pkce?.codeVerifier) throw new Error('PKCE state not found — try connecting again');
-    if (state && pkce.state && state !== pkce.state) throw new Error('OAuth state mismatch');
+    const ws = pkce.workspaceId || request.workspaceId;
 
     const appCred = await getCredentials(ws, 'tiktok_app');
     if (!appCred?.clientKey) throw new Error('App credentials not configured');
