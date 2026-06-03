@@ -574,6 +574,8 @@
               </div>
             </div>
           </div>
+        </div>
+
         <!-- Quantitative profile -->
         <div v-if="competitor.quantitativeProfile" class="mt-4 border-t border-gray-700/60 pt-3">
           <div class="text-xs text-cyan-400 font-medium mb-2">{{ t('competitors.quantitativeLabel') }}</div>
