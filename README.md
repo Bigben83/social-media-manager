@@ -27,6 +27,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 - **Token Expiry Warnings** — Dashboard banner when Meta tokens are within 7 days of expiry; auto-refresh via daily BullMQ job
 - **Token Encryption** — OAuth tokens and API keys stored AES-256-GCM encrypted at rest
 - **Structured Logging** — Pino JSON logging across all services with consistent fields
+- **Multi-Workspace Support** — Create isolated workspaces for separate brands, clients, or projects; each workspace has its own connected platforms, profiles, drafts, posts, analytics, and competitor data; switch workspaces from the NavBar without logging out
 - **Multi-language UI** — English and Turkish built-in; adding a new language is a single file
 - **Microservices** — Each platform is an independent service, easy to add or remove
 - **Fully local** — No SaaS, no subscriptions. Runs entirely on your machine via Docker
@@ -382,6 +383,46 @@ The **Find Nearby** feature on the Competitors page uses the Google Places API t
 3. Paste your API key → **Save Key**
 
 The key is stored AES-256-GCM encrypted in MongoDB. Once configured, the **Find Nearby** button appears in the Competitors page. Enter a location (city, suburb, postcode, or street address) and an optional business type, then click **Search** to get up to 5 local competitor suggestions with websites pre-filled.
+
+---
+
+## Workspaces
+
+Workspaces let you run multiple independent social media presences from the same SocialManager instance — separate brands, agencies managing client accounts, or personal vs. business use.
+
+### What is isolated per workspace
+
+Each workspace has its own:
+
+- Connected platform accounts (Meta pages, Instagram accounts, Pinterest boards, TikTok)
+- Account profile and workspace business profile
+- Drafts, scheduled posts, and post history
+- Analytics, post metrics, and engagement data
+- Competitor tracking, hashtag groups, and hashtag stats
+- Media library files
+- Content calendars and bulk draft batches
+
+### What is shared across all workspaces
+
+Global credentials set in **Global Settings** (`/global-settings`) are shared:
+
+- AI provider API keys (OpenAI, Groq, Gemini, Ollama)
+- Meta App ID + Secret (Facebook Developer App)
+- Pinterest App Client ID + Secret
+- TikTok Client Key + Secret
+- Google Places API key
+
+### Managing workspaces
+
+1. Click the workspace indicator in the **NavBar** (top-left, shows the current workspace name)
+2. Select a workspace to switch to it — all stores immediately re-fetch with the new workspace context
+3. Click **Manage** to open **Settings → Workspaces** where you can create, rename, or delete workspaces
+
+> **Note:** The `default` workspace cannot be deleted. Deleting a workspace permanently removes all its scoped data.
+
+### How it works technically
+
+Every API request carries an `X-Workspace-Id` header set by the Pinia `useWorkspaceStore`. The gateway reads this header and scopes all database reads/writes to that workspace. Platform service calls pass the header through so feed fetches and posts are also workspace-aware.
 
 ---
 
