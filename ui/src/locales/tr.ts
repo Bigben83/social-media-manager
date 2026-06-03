@@ -315,6 +315,7 @@ export default {
 
   settings: {
     title: 'Platform Bağlantıları',
+    workspaceScope: 'Yapılandırılan çalışma alanı:',
     subtitle: 'Platforma bağlanmak için {env} dosyasını düzenle, ardından ilgili servisi yeniden başlat.',
     connected: 'Bağlı',
     notConnected: 'Bağlı değil',

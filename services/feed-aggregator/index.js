@@ -46,19 +46,35 @@ async function fetchPlatformFeed(platform, serviceUrl, workspaceId = 'default') 
   }
 }
 
-async function fetchAllFeeds() {
-  log.info({ action: 'feed_fetch_all' }, 'Fetching feeds from all platforms');
+// Resolve all workspace IDs so the cron refreshes feeds for every workspace,
+// not just 'default'. Falls back to ['default'] if the DB is unavailable.
+async function getAllWorkspaceIds() {
+  try {
+    const db = await getDb();
+    const rows = await db.collection('workspaces').find({}, { projection: { _id: 1 } }).toArray();
+    const ids = rows.map((r) => r._id).filter(Boolean);
+    return ids.length ? ids : ['default'];
+  } catch {
+    return ['default'];
+  }
+}
 
-  const results = await Promise.allSettled(
-    Object.entries(PLATFORM_SERVICES).map(([platform, url]) =>
-      fetchPlatformFeed(platform, url)
-    )
-  );
+async function fetchAllFeeds() {
+  const workspaceIds = await getAllWorkspaceIds();
+  log.info({ action: 'feed_fetch_all', workspaces: workspaceIds.length }, 'Fetching feeds for all workspaces');
 
   const summary = {};
-  Object.keys(PLATFORM_SERVICES).forEach((platform, i) => {
-    summary[platform] = results[i].status === 'fulfilled' ? results[i].value.length : 0;
-  });
+  for (const wsId of workspaceIds) {
+    const results = await Promise.allSettled(
+      Object.entries(PLATFORM_SERVICES).map(([platform, url]) =>
+        fetchPlatformFeed(platform, url, wsId)
+      )
+    );
+    Object.keys(PLATFORM_SERVICES).forEach((platform, i) => {
+      const count = results[i].status === 'fulfilled' ? results[i].value.length : 0;
+      summary[`${wsId}:${platform}`] = count;
+    });
+  }
 
   log.info({ action: 'feed_fetch_all', outcome: 'success', summary });
   return summary;
@@ -85,8 +101,10 @@ app.get('/feeds', async (request) => {
   const db = await getDb();
   const col = db.collection('feeds');
 
-  // Include legacy items without workspaceId (backwards compat)
-  const filter = { $or: [{ workspaceId }, { workspaceId: { $exists: false } }] };
+  // Legacy items (no workspaceId field) only visible in the default workspace to
+  // avoid cross-workspace feed bleed.
+  const legacyClause = workspaceId === 'default' ? [{ workspaceId: { $exists: false } }] : [];
+  const filter = { $or: [{ workspaceId }, ...legacyClause] };
   if (platform) filter.platform = platform;
   if (tag) filter.tags = tag;
 

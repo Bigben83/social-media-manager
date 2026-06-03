@@ -4,6 +4,10 @@
 
       <div>
         <h1 class="text-2xl font-bold mb-1">{{ $t('settings.title') }}</h1>
+        <p class="text-sm text-gray-500 mt-1">
+          {{ $t('settings.workspaceScope') }}
+          <span class="text-violet-400 font-medium">{{ workspaceStore.activeWorkspace?.name || workspaceStore.activeWorkspaceId }}</span>
+        </p>
       </div>
 
       <!-- ═══════════════════════════════════════════════════════════════════

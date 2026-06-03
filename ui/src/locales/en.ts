@@ -315,6 +315,7 @@ export default {
 
   settings: {
     title: 'Platform Connections',
+    workspaceScope: 'Configuring workspace:',
     subtitle: 'Edit the {env} file to connect platforms, then restart the relevant service.',
     connected: 'Connected',
     notConnected: 'Not connected',
