@@ -257,9 +257,16 @@ export default {
     noJobs: 'No scheduled posts.',
     statuses: {
       pending: 'Pending',
+      published: 'Published',
+      partial: 'Partial',
       completed: 'Completed',
       failed: 'Failed',
       cancelled: 'Cancelled',
+    },
+    platformResult: {
+      posted: 'Posted',
+      failed: 'Failed',
+      viewPost: 'View',
     },
     cancel: 'Cancel',
     scheduledTab: 'Scheduled',

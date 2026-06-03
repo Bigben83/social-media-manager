@@ -257,9 +257,16 @@ export default {
     noJobs: 'Zamanlanmış gönderi yok.',
     statuses: {
       pending: 'Bekleyen',
+      published: 'Yayınlandı',
+      partial: 'Kısmi',
       completed: 'Tamamlanan',
       failed: 'Başarısız',
       cancelled: 'İptal',
+    },
+    platformResult: {
+      posted: 'Gönderildi',
+      failed: 'Başarısız',
+      viewPost: 'Görüntüle',
     },
     cancel: 'İptal',
     scheduledTab: 'Zamanlanmış',

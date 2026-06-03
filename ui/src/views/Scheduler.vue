@@ -62,10 +62,19 @@
             >
               <div class="flex items-start justify-between gap-4">
                 <div class="flex-1 min-w-0">
-                  <p class="text-sm text-gray-200 line-clamp-2 mb-2">{{ job.postId }}</p>
+                  <!-- Content preview -->
+                  <p class="text-sm text-gray-200 line-clamp-2 mb-2">{{ job.content || '(no content)' }}</p>
+                  <!-- Media indicator -->
+                  <p v-if="jobMediaUrl(job)" class="text-xs text-blue-400 mb-2 flex items-center gap-1 truncate">
+                    <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01" />
+                    </svg>
+                    <span class="truncate">{{ mediaName(jobMediaUrl(job)!) }}</span>
+                  </p>
+                  <!-- Platform chips -->
                   <div class="flex flex-wrap gap-1 mb-2">
                     <span
-                      v-for="p in job.platforms"
+                      v-for="p in jobPlatformKeys(job)"
                       :key="p"
                       class="text-xs px-2 py-0.5 rounded-full"
                       :style="{ backgroundColor: platformColor(p) + '22', color: platformColor(p) }"
@@ -74,6 +83,26 @@
                     </span>
                   </div>
                   <p class="text-xs text-gray-500">{{ formatDate(job.scheduledAt) }}</p>
+                  <!-- Per-platform results (shown after processing) -->
+                  <div v-if="job.platformResults" class="mt-2 space-y-1">
+                    <div
+                      v-for="[key, result] in platformResultEntries(job)"
+                      :key="key"
+                      class="flex items-start gap-2 text-xs"
+                    >
+                      <span v-if="result.success" class="text-green-400 shrink-0 mt-px">✓</span>
+                      <span v-else class="text-red-400 shrink-0 mt-px">✗</span>
+                      <span class="text-gray-400 shrink-0">{{ result.pageName || key }}</span>
+                      <span v-if="result.success && result.postId" class="text-gray-600 font-mono truncate">
+                        {{ result.postId }}
+                      </span>
+                      <span v-if="!result.success && result.error" class="text-red-400 truncate">
+                        {{ result.error }}
+                      </span>
+                    </div>
+                  </div>
+                  <!-- BullMQ failure reason -->
+                  <p v-if="job.failReason" class="mt-1 text-xs text-red-400">{{ job.failReason }}</p>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
                   <span class="text-xs px-2 py-1 rounded-full font-medium" :class="statusClass(job.status)">
@@ -217,10 +246,10 @@
                   >
                     <div class="flex-1 min-w-0">
                       <p class="text-xs text-gray-500 mb-1 font-mono">{{ formatTime(job.scheduledAt) }}</p>
-                      <p class="text-sm text-gray-200 line-clamp-2 mb-2">{{ job.postId }}</p>
+                      <p class="text-sm text-gray-200 line-clamp-2 mb-2">{{ job.content || '(no content)' }}</p>
                       <div class="flex flex-wrap gap-1">
                         <span
-                          v-for="p in job.platforms"
+                          v-for="p in jobPlatformKeys(job)"
                           :key="p"
                           class="text-xs px-2 py-0.5 rounded-full"
                           :style="{ backgroundColor: platformColor(p) + '22', color: platformColor(p) }"
@@ -490,13 +519,25 @@ const composeStore = useComposeStore()
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+interface PlatformResult {
+  success: boolean
+  postId?: string
+  pageId?: string
+  pageName?: string
+  error?: string
+}
+
 interface ScheduledJob {
   _id: string
   postId: string
+  content: string
   platforms: string[]
+  destinations: { platform: string; accountId?: string; imageUrl?: string; videoUrl?: string }[]
   scheduledAt: string
   status: string
   bullJobId: string
+  platformResults?: Record<string, PlatformResult>
+  failReason?: string
 }
 
 interface DraftDestination {
@@ -542,7 +583,8 @@ const activeStatus = ref('pending')
 
 const statusOptions = computed(() => [
   { value: 'pending',   label: t('scheduler.statuses.pending') },
-  { value: 'completed', label: t('scheduler.statuses.completed') },
+  { value: 'published', label: t('scheduler.statuses.published') },
+  { value: 'partial',   label: t('scheduler.statuses.partial') },
   { value: 'failed',    label: t('scheduler.statuses.failed') },
   { value: 'cancelled', label: t('scheduler.statuses.cancelled') },
 ])
@@ -724,11 +766,30 @@ function statusClass(status: string) {
   return ({
     pending:   'bg-yellow-900/40 text-yellow-400',
     running:   'bg-blue-900/40 text-blue-400',
+    published: 'bg-green-900/40 text-green-400',
+    partial:   'bg-orange-900/40 text-orange-400',
     completed: 'bg-green-900/40 text-green-400',
     failed:    'bg-red-900/40 text-red-400',
     cancelled: 'bg-gray-800 text-gray-500',
   } as Record<string, string>)[status] ?? 'bg-gray-800 text-gray-400'
 }
+
+function jobPlatformKeys(job: ScheduledJob): string[] {
+  if (job.destinations?.length) return [...new Set(job.destinations.map((d) => d.platform))]
+  return job.platforms || []
+}
+
+function jobMediaUrl(job: ScheduledJob): string | null {
+  return job.destinations?.find((d) => d.imageUrl || d.videoUrl)?.imageUrl
+    || job.destinations?.find((d) => d.videoUrl)?.videoUrl
+    || null
+}
+
+function platformResultEntries(job: ScheduledJob): [string, PlatformResult][] {
+  if (!job.platformResults) return []
+  return Object.entries(job.platformResults)
+}
+
 
 // ── Bulk draft ─────────────────────────────────────────────────────────────────
 

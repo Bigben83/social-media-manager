@@ -65,9 +65,14 @@ async function processPostJob(job) {
         { content, accountId, imageUrl, videoUrl, link, media, firstComment: firstComment?.trim() || undefined },
         { timeout: 30000, headers: { 'X-Workspace-Id': workspaceId } }
       );
-      results[resultKey] = { success: true, ...response.data.result };
+      // response.data.result may be an array (multi-page services return [{ postId, ... }])
+      // or a plain object. Normalise to a single object so results[key] is flat.
+      const raw = response.data.result;
+      const flat = Array.isArray(raw) ? (raw[0] || {}) : (raw || {});
+      results[resultKey] = { success: true, ...flat };
     } catch (err) {
-      results[resultKey] = { success: false, error: err.message };
+      const apiError = err.response?.data?.error || err.message;
+      results[resultKey] = { success: false, error: apiError };
     }
   }
 
@@ -96,8 +101,9 @@ async function processPostJob(job) {
     { bullJobId: String(job.id) },
     {
       $set: {
-        status: 'completed',
+        status: postStatus,  // 'published' | 'partial' | 'failed'
         completedAt: new Date(),
+        platformResults: results,
       },
     }
   );
@@ -222,8 +228,17 @@ async function start() {
   postQueue = new Queue('post-queue', { connection: redis });
 
   const worker = new Worker('post-queue', processPostJob, { connection: redis });
-  worker.on('failed', (job, err) => {
+  worker.on('failed', async (job, err) => {
     log.error({ action: 'job_process', jobId: job?.id, outcome: 'failure', err: err.message });
+    if (job?.id) {
+      try {
+        const db = await getDb();
+        await db.collection('scheduled_jobs').updateOne(
+          { bullJobId: String(job.id), status: 'pending' },
+          { $set: { status: 'failed', failedAt: new Date(), failReason: err.message } }
+        );
+      } catch (_) { /* non-fatal */ }
+    }
   });
 
   // Daily system jobs (housekeeping, token refresh, etc.)
