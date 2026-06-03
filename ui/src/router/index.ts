@@ -2,6 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to) {
+    if (to.hash) {
+      return { el: to.hash, behavior: 'smooth', top: 20 }
+    }
+    return { top: 0 }
+  },
   routes: [
     {
       path: '/',
@@ -46,6 +52,11 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),
+    },
+    {
+      path: '/global-settings',
+      name: 'globalSettings',
+      component: () => import('../views/GlobalSettings.vue'),
     },
   ],
 })

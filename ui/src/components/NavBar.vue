@@ -10,7 +10,7 @@
         :key="link.to"
         :to="link.to"
         class="px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
-        :class="$route.path === link.to
+        :class="$route.path.startsWith(link.to) && link.to !== '/'
           ? 'bg-gray-800 text-white'
           : 'text-gray-400 hover:text-white hover:bg-gray-800'"
       >
@@ -98,6 +98,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { SUPPORTED_LOCALES } from '../locales'
@@ -109,18 +110,18 @@ const showLangMenu = ref(false)
 const showWorkspaceMenu = ref(false)
 
 const workspaceStore = useWorkspaceStore()
-const { workspaces, activeWorkspaceId } = workspaceStore
-const activeWorkspace = computed(() => workspaceStore.activeWorkspace)
+const { workspaces, activeWorkspaceId, activeWorkspace } = storeToRefs(workspaceStore)
 
 const navLinks = [
-  { to: '/dashboard', label: 'nav.feed' },
-  { to: '/compose',   label: 'nav.compose' },
-  { to: '/media',     label: 'nav.media' },
-  { to: '/scheduler', label: 'nav.scheduler' },
-  { to: '/analytics',      label: 'nav.analytics' },
-  { to: '/calendar-plan',  label: 'nav.calendarPlan' },
-  { to: '/competitors',    label: 'nav.competitors' },
-  { to: '/settings',       label: 'nav.settings' },
+  { to: '/dashboard',        label: 'nav.feed' },
+  { to: '/compose',          label: 'nav.compose' },
+  { to: '/media',            label: 'nav.media' },
+  { to: '/scheduler',        label: 'nav.scheduler' },
+  { to: '/analytics',        label: 'nav.analytics' },
+  { to: '/calendar-plan',    label: 'nav.calendarPlan' },
+  { to: '/competitors',      label: 'nav.competitors' },
+  { to: '/settings',         label: 'nav.settings' },
+  { to: '/global-settings',  label: 'nav.globalSettings' },
 ]
 
 const currentLocale = computed(

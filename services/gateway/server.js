@@ -132,24 +132,34 @@ app.options('*', async (request, reply) => {
 // Compound credential key: workspaceId + credential type
 function credId(ws, type) { return `${ws}:${type}`; }
 
+// Global credential types are not workspace-scoped (AI config, app credentials)
+const GLOBAL_CREDENTIAL_TYPES = new Set([
+  'ai_config', 'openai_config', 'groq_config', 'gemini_config',
+  'meta_app', 'pinterest_app', 'tiktok_app', 'google_places',
+]);
+
 async function getCredentials(ws, type) {
   const db = await getDb();
-  return db.collection('platform_credentials').findOne({ _id: credId(ws, type) });
+  const id = GLOBAL_CREDENTIAL_TYPES.has(type) ? type : credId(ws, type);
+  return db.collection('platform_credentials').findOne({ _id: id });
 }
 
 async function setCredentials(ws, type, data) {
-  const id = credId(ws, type);
+  const isGlobal = GLOBAL_CREDENTIAL_TYPES.has(type);
+  const id = isGlobal ? type : credId(ws, type);
   const db = await getDb();
+  const meta = isGlobal ? {} : { workspaceId: ws };
   await db.collection('platform_credentials').updateOne(
     { _id: id },
-    { $set: { _id: id, workspaceId: ws, type, ...data, updatedAt: new Date() } },
+    { $set: { _id: id, type, ...meta, ...data, updatedAt: new Date() } },
     { upsert: true }
   );
 }
 
 async function deleteCredentials(ws, type) {
   const db = await getDb();
-  await db.collection('platform_credentials').deleteOne({ _id: credId(ws, type) });
+  const id = GLOBAL_CREDENTIAL_TYPES.has(type) ? type : credId(ws, type);
+  await db.collection('platform_credentials').deleteOne({ _id: id });
 }
 
 // ─── Workspaces ───────────────────────────────────────────────────────────────
@@ -2201,10 +2211,12 @@ app.get('/credentials', async (request) => {
     facebook: {
       connected: fbPages.length > 0,
       pages: fbPages.map(({ id, name, picture }) => ({ id, name, picture })),
+      allPages: (fb?.pages || []).map(({ id, name, picture, selected }) => ({ id, name, picture, selected: !!selected })),
     },
     instagram: {
       connected: igAccounts.length > 0,
       accounts: igAccounts.map(({ id, username, avatar }) => ({ id, username, avatar })),
+      allAccounts: (ig?.accounts || []).map(({ id, username, avatar, selected }) => ({ id, username, avatar, selected: !!selected })),
     },
     pinterest: {
       connected: pinterestBoards.length > 0,
@@ -2222,6 +2234,28 @@ app.get('/credentials', async (request) => {
 });
 
 // ─── Schedule Suggestions ────────────────────────────────────────────────────
+
+// Update which Facebook pages are selected for this workspace
+app.post('/credentials/facebook/pages', async (request) => {
+  const ws = request.workspaceId;
+  const { selectedPageIds } = request.body;
+  const fb = await getCredentials(ws, 'facebook');
+  if (!fb) return { success: false, error: 'Not connected' };
+  const updated = (fb.pages || []).map((p) => ({ ...p, selected: selectedPageIds.includes(p.id) }));
+  await setCredentials(ws, 'facebook', { pages: updated });
+  return { success: true };
+});
+
+// Update which Instagram accounts are selected for this workspace
+app.post('/credentials/instagram/accounts', async (request) => {
+  const ws = request.workspaceId;
+  const { selectedAccountIds } = request.body;
+  const ig = await getCredentials(ws, 'instagram');
+  if (!ig) return { success: false, error: 'Not connected' };
+  const updated = (ig.accounts || []).map((a) => ({ ...a, selected: selectedAccountIds.includes(a.id) }));
+  await setCredentials(ws, 'instagram', { accounts: updated });
+  return { success: true };
+});
 
 // [dayOfWeek (0=Sun), hourUTC] pairs — research-based best-practice defaults
 const INDUSTRY_DEFAULTS = {

@@ -8,6 +8,7 @@ export default {
     calendarPlan: 'İçerik Planı',
     competitors: 'Rakipler',
     settings: 'Ayarlar',
+    globalSettings: 'Genel Ayarlar',
   },
 
   analytics: {
@@ -308,6 +309,7 @@ export default {
     notConnected: 'Bağlı değil',
     refreshStatus: '↻ Durumları Yenile',
     envHint: 'Yapılandırma gerekli',
+    configureInGlobal: 'Genel Ayarlarda Yapılandır',
 
     profiles: {
       sectionTitle: 'Hesap Profilleri',
@@ -466,6 +468,11 @@ export default {
 
       connectedPages: 'Bağlı Sayfalar',
       connectedAccounts: 'Bağlı Hesaplar',
+      appNotConfigured: 'Uygulama kimlik bilgileri yapılandırılmadı',
+      selectPages: 'Bu çalışma alanı için Facebook sayfaları seçin',
+      selectAccounts: 'Bu çalışma alanı için Instagram hesapları seçin',
+      selectionSaved: 'Seçim kaydedildi',
+      saveSelection: 'Seçimi Kaydet',
 
       errorTitle: 'OAuth Hatası',
       getAppHelp: 'Uygulama Kimliği ve Gizli Anahtarını şuradan al:',

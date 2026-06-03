@@ -8,6 +8,7 @@ export default {
     calendarPlan: 'Content Plan',
     competitors: 'Competitors',
     settings: 'Settings',
+    globalSettings: 'Global Settings',
   },
 
   analytics: {
@@ -308,6 +309,7 @@ export default {
     notConnected: 'Not connected',
     refreshStatus: '↻ Refresh Status',
     envHint: 'Configuration required',
+    configureInGlobal: 'Configure in Global Settings',
 
     profiles: {
       sectionTitle: 'Account Profiles',
@@ -466,6 +468,11 @@ export default {
 
       connectedPages: 'Connected Pages',
       connectedAccounts: 'Connected Accounts',
+      appNotConfigured: 'App credentials not configured',
+      selectPages: 'Select Facebook pages for this workspace',
+      selectAccounts: 'Select Instagram accounts for this workspace',
+      selectionSaved: 'Selection saved',
+      saveSelection: 'Save Selection',
 
       errorTitle: 'OAuth Error',
       getAppHelp: 'Get your App ID and Secret from',

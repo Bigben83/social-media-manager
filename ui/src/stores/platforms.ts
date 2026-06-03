@@ -84,6 +84,9 @@ export const usePlatformsStore = defineStore('platforms', () => {
   // Connected pages/accounts (fetched from gateway)
   const connectedPages = ref<MetaPage[]>([])
   const connectedIgAccounts = ref<MetaIgAccount[]>([])
+  // All pages/accounts including unselected ones (for per-workspace selection UI)
+  const allFbPages = ref<(MetaPage & { selected: boolean })[]>([])
+  const allIgAccounts = ref<(MetaIgAccount & { selected: boolean })[]>([])
 
   // Pinterest
   const pinterestCredentials = ref<PinterestCredentials>({ configured: false })
@@ -129,7 +132,9 @@ export const usePlatformsStore = defineStore('platforms', () => {
       const res = await fetch('/api/credentials')
       const data = await res.json()
       connectedPages.value = data.facebook?.pages || []
+      allFbPages.value = data.facebook?.allPages || []
       connectedIgAccounts.value = data.instagram?.accounts || []
+      allIgAccounts.value = data.instagram?.allAccounts || []
       connectedPinterestBoards.value = data.pinterest?.boards || []
       allPinterestBoards.value = data.pinterest?.allBoards || []
       tiktokConnected.value = data.tiktok?.connected ?? false
@@ -360,12 +365,39 @@ export const usePlatformsStore = defineStore('platforms', () => {
     }
   }
 
+  async function saveFbPageSelection(selectedPageIds: string[]) {
+    metaLoading.value = true
+    try {
+      await axios.post('/api/credentials/facebook/pages', { selectedPageIds })
+      allFbPages.value = allFbPages.value.map((p) => ({ ...p, selected: selectedPageIds.includes(p.id) }))
+      connectedPages.value = allFbPages.value.filter((p) => p.selected)
+    } catch (err: any) {
+      metaError.value = err.response?.data?.error || 'Failed to save page selection'
+    } finally {
+      metaLoading.value = false
+    }
+  }
+
+  async function saveIgAccountSelection(selectedAccountIds: string[]) {
+    metaLoading.value = true
+    try {
+      await axios.post('/api/credentials/instagram/accounts', { selectedAccountIds })
+      allIgAccounts.value = allIgAccounts.value.map((a) => ({ ...a, selected: selectedAccountIds.includes(a.id) }))
+      connectedIgAccounts.value = allIgAccounts.value.filter((a) => a.selected)
+    } catch (err: any) {
+      metaError.value = err.response?.data?.error || 'Failed to save account selection'
+    } finally {
+      metaLoading.value = false
+    }
+  }
+
   return {
     statuses, loading, fetchStatuses, getStatus, isConnected,
     metaCredentials, metaDiscovery, metaLoading, metaError,
-    connectedPages, connectedIgAccounts, fetchMetaConnections,
-    fetchMetaCredentials, saveMetaApp, startMetaOAuth,
+    connectedPages, connectedIgAccounts, allFbPages, allIgAccounts,
+    fetchMetaConnections, fetchMetaCredentials, saveMetaApp, startMetaOAuth,
     fetchMetaDiscovery, saveMetaSelection, disconnectMeta,
+    saveFbPageSelection, saveIgAccountSelection,
     tokenExpiry, expiringAccounts, hasExpiryWarning,
     fetchTokenExpiry, dismissTokenWarning, refreshMetaTokens,
     pinterestCredentials, pinterestLoading, pinterestError,
