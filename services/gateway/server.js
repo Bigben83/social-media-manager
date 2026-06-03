@@ -613,7 +613,9 @@ app.get('/profiles/:accountKey', async (request, reply) => {
   const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
   const profile = await db.collection('account_profiles').findOne({ _id: profileId })
     // Backward compat: old documents stored without workspace prefix
-    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws })
+    // Workspace profile fallback: use business context from workspace profile when no platform-specific one exists
+    || (accountKey !== 'workspace' ? await db.collection('account_profiles').findOne({ _id: `${ws}:workspace` }) : null);
   return profile ?? { _id: accountKey };
 });
 
@@ -732,7 +734,9 @@ Return [] for issues if no problems found. Return ONLY the JSON object.`;
     log.info({ action: 'profile_audit', accountKey, score: result.score, issues: result.issues.length, outcome: 'success' });
     return { success: true, ...result };
   } catch (err) {
-    return reply.code(503).send({ error: 'Profile audit failed', detail: err.message });
+    const aiBody = err.response?.data;
+    const detail = aiBody ? (aiBody.error || aiBody.message || JSON.stringify(aiBody)) : err.message;
+    return reply.code(503).send({ error: 'Profile audit failed', detail });
   }
 });
 
@@ -4396,7 +4400,9 @@ Scoring: overallScore = 100 minus the average of all five force scores × 10. Re
     log.info({ action: 'five_forces', account: accountKey, governingForce: result.governingForce, outcome: 'success' });
     return { success: true, ...result, analyzedAt: new Date() };
   } catch (err) {
-    return reply.code(503).send({ error: 'Five Forces analysis failed', detail: err.message });
+    const aiBody = err.response?.data;
+    const detail = aiBody ? (aiBody.error || aiBody.message || JSON.stringify(aiBody)) : err.message;
+    return reply.code(503).send({ error: 'Five Forces analysis failed', detail });
   }
 });
 
@@ -4498,7 +4504,9 @@ Return ONLY valid JSON.`;
     log.info({ action: 'industry_diagnosis', account: accountKey, diagnosedType: result.diagnosedType, outcome: 'success' });
     return { success: true, ...result, diagnosedAt: new Date() };
   } catch (err) {
-    return reply.code(503).send({ error: 'Industry diagnosis failed', detail: err.message });
+    const aiBody = err.response?.data;
+    const detail = aiBody ? (aiBody.error || aiBody.message || JSON.stringify(aiBody)) : err.message;
+    return reply.code(503).send({ error: 'Industry diagnosis failed', detail });
   }
 });
 
