@@ -610,7 +610,10 @@ app.get('/profiles/:accountKey', async (request, reply) => {
   const ws = request.workspaceId;
   const { accountKey } = request.params;
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
+    // Backward compat: old documents stored without workspace prefix
+    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
   return profile ?? { _id: accountKey };
 });
 
@@ -620,12 +623,15 @@ app.put('/profiles/:accountKey', async (request, reply) => {
   const {
     businessName = '', description = '', websiteUrl = '', industry = '',
     targetAudience = '', toneOfVoice = '', keywords = '', hashtags = '',
-    postingGuidelines = '',
+    postingGuidelines = '', timezone = '',
   } = request.body || {};
   const db = await getDb();
+  // Use a workspace-scoped document ID for the 'workspace' key so that
+  // multiple workspaces don't overwrite each other's profile.
+  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
   await db.collection('account_profiles').updateOne(
-    { _id: accountKey },
-    { $set: { businessName, description, websiteUrl, industry, targetAudience, toneOfVoice, keywords, hashtags, postingGuidelines, workspaceId: ws, updatedAt: new Date() } },
+    { _id: profileId },
+    { $set: { businessName, description, websiteUrl, industry, targetAudience, toneOfVoice, keywords, hashtags, postingGuidelines, timezone, workspaceId: ws, updatedAt: new Date() } },
     { upsert: true }
   );
   return { success: true };
@@ -636,8 +642,10 @@ app.post('/profiles/:accountKey/audit', async (request, reply) => {
   const ws = request.workspaceId;
   const { accountKey } = request.params;
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
-  if (!profile) return reply.code(404).send({ error: 'Profile not found' });
+  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
+    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+  if (!profile) return reply.code(404).send({ error: 'Profile not found — save your workspace profile first.' });
 
   const filled = [
     profile.businessName, profile.description, profile.industry,
@@ -4273,8 +4281,10 @@ app.post('/ai/five-forces', async (request, reply) => {
   if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
 
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
-  if (!profile) return reply.code(404).send({ error: 'Account profile not found. Save a profile first.' });
+  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
+    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+  if (!profile) return reply.code(404).send({ error: 'Save your workspace profile first, then run Five Forces.' });
 
   if (!profile.industry && !profile.businessName) {
     return reply.code(400).send({ error: 'Add at least a business name or industry to the profile first.' });
@@ -4379,7 +4389,7 @@ Scoring: overallScore = 100 minus the average of all five force scores × 10. Re
     }
 
     await db.collection('account_profiles').updateOne(
-      { _id: accountKey, workspaceId: ws },
+      { _id: profileId },
       { $set: { industryAnalysis: result, industryAnalyzedAt: new Date(), updatedAt: new Date() } },
     );
 
@@ -4398,8 +4408,10 @@ app.post('/ai/industry-diagnosis', async (request, reply) => {
   if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
 
   const db = await getDb();
-  const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
-  if (!profile) return reply.code(404).send({ error: 'Account profile not found. Save the profile first.' });
+  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
+    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+  if (!profile) return reply.code(404).send({ error: 'Save your workspace profile first, then run Industry Diagnosis.' });
 
   const fields = [profile.businessName, profile.description, profile.industry, profile.toneOfVoice].filter(Boolean);
   if (fields.length < 2) return reply.code(400).send({ error: 'Fill in at least a business name and description before running diagnosis.' });
@@ -4479,7 +4491,7 @@ Return ONLY valid JSON.`;
 
     // Persist the diagnosis on the account profile for future use
     await db.collection('account_profiles').updateOne(
-      { _id: accountKey, workspaceId: ws },
+      { _id: profileId },
       { $set: { industryDiagnosis: result, industryDiagnosedAt: new Date(), updatedAt: new Date() } },
     );
 

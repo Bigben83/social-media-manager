@@ -1541,7 +1541,9 @@ async function runFiveForces(key: string) {
     const res = await axios.post('/api/ai/five-forces', { accountKey: key })
     fiveForcesResults.value = { ...fiveForcesResults.value, [key]: res.data }
   } catch (err: any) {
-    alert(err.response?.data?.error || 'Five Forces analysis failed')
+    const msg = err.response?.data?.error || 'Five Forces analysis failed'
+    const detail = err.response?.data?.detail
+    alert(detail ? `${msg}\n\n${detail}` : msg)
   } finally {
     fiveForcesRunning.value = null
   }
@@ -1553,7 +1555,9 @@ async function diagnoseIndustry(key: string) {
     const res = await axios.post('/api/ai/industry-diagnosis', { accountKey: key })
     industryDiagnoses.value = { ...industryDiagnoses.value, [key]: res.data }
   } catch (err: any) {
-    alert(err.response?.data?.error || 'Industry diagnosis failed')
+    const msg = err.response?.data?.error || 'Industry diagnosis failed'
+    const detail = err.response?.data?.detail
+    alert(detail ? `${msg}\n\n${detail}` : msg)
   } finally {
     industryDiagnosing.value = null
   }
@@ -1565,7 +1569,9 @@ async function auditProfile(key: string) {
     const res = await axios.post(`/api/profiles/${encodeURIComponent(key)}/audit`)
     profileAudits.value = { ...profileAudits.value, [key]: res.data }
   } catch (err: any) {
-    alert(err.response?.data?.error || 'Profile audit failed')
+    const msg = err.response?.data?.error || 'Profile audit failed'
+    const detail = err.response?.data?.detail
+    alert(detail ? `${msg}\n\n${detail}` : msg)
   } finally {
     profileAuditing.value = null
   }
