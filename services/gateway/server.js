@@ -969,7 +969,8 @@ app.post('/ai/research', async (request, reply) => {
   const db = await getDb();
   const profileKey = accountKey || null;
   const profile = profileKey
-    ? await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws })
+    ? (await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws }))
+    || (await db.collection('account_profiles').findOne({ workspaceId: ws }))
     : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const industry = profile?.industry || '';
@@ -1300,7 +1301,8 @@ app.post('/ai/content-brief', async (request, reply) => {
 
   const profileKey = accountKey || null;
   const profile = profileKey
-    ? await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws })
+    ? (await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws }))
+    || (await db.collection('account_profiles').findOne({ workspaceId: ws }))
     : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const contextParts = [];
@@ -1389,7 +1391,8 @@ app.post('/ai/content-calendar', async (request, reply) => {
   // Load account profile for context
   const profileKey = accountKey || null;
   const profile = profileKey
-    ? await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws })
+    ? (await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws }))
+    || (await db.collection('account_profiles').findOne({ workspaceId: ws }))
     : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const contextParts = ['You are a social media content strategist.'];

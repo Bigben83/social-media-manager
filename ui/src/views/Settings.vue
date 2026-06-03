@@ -477,66 +477,15 @@
           <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.profiles.sectionSubtitle') }}</p>
         </div>
 
-        <!-- No accounts -->
-        <div v-if="!allConnectedAccounts.length" class="px-5 py-6 text-sm text-gray-600 text-center">
-          {{ $t('settings.profiles.noAccounts') }}
-        </div>
-
-        <!-- Account rows -->
-        <div v-else class="divide-y divide-gray-800">
-          <div v-for="account in allConnectedAccounts" :key="account.key">
-
-            <!-- Account header row -->
-            <button
-              @click="toggleProfile(account.key)"
-              class="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-gray-800/50 transition-colors text-left"
-            >
-              <!-- Avatar -->
-              <div class="flex-shrink-0">
-                <img
-                  v-if="account.avatar"
-                  :src="account.avatar"
-                  class="w-8 h-8 rounded-full object-cover"
-                />
-                <span
-                  v-else
-                  class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                  :style="{ backgroundColor: account.color }"
-                >
-                  {{ account.label[0] }}
-                </span>
-              </div>
-
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium truncate">{{ account.label }}</p>
-                <p class="text-xs text-gray-600">{{ $t(`platforms.${account.platform}`) }}</p>
-              </div>
-
-              <!-- Filled indicator -->
-              <span
-                v-if="profileFilled(account.key)"
-                class="text-xs text-green-400 flex-shrink-0"
-              >✓</span>
-
-              <!-- Chevron -->
-              <svg
-                class="w-4 h-4 text-gray-500 flex-shrink-0 transition-transform"
-                :class="expandedProfileKey === account.key ? 'rotate-180' : ''"
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            <!-- Expanded profile form -->
-            <div v-if="expandedProfileKey === account.key" class="px-5 pb-5 pt-1 space-y-4 bg-gray-950/40">
+        <!-- Workspace profile form — one per workspace, always visible -->
+        <div v-if="editingProfiles['workspace']" class="px-5 pb-5 pt-4 space-y-4">
 
               <!-- Row 1: Business Name + Website -->
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.businessName') }}</label>
                   <input
-                    v-model="editingProfiles[account.key].businessName"
+                    v-model="editingProfiles['workspace'].businessName"
                     type="text"
                     :placeholder="$t('settings.profiles.businessNameHint')"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -545,7 +494,7 @@
                 <div>
                   <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.websiteUrl') }}</label>
                   <input
-                    v-model="editingProfiles[account.key].websiteUrl"
+                    v-model="editingProfiles['workspace'].websiteUrl"
                     type="url"
                     placeholder="https://"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -557,7 +506,7 @@
               <div>
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.description') }}</label>
                 <textarea
-                  v-model="editingProfiles[account.key].description"
+                  v-model="editingProfiles['workspace'].description"
                   :placeholder="$t('settings.profiles.descriptionHint')"
                   rows="2"
                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
@@ -569,7 +518,7 @@
                 <div>
                   <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.industry') }}</label>
                   <input
-                    v-model="editingProfiles[account.key].industry"
+                    v-model="editingProfiles['workspace'].industry"
                     type="text"
                     :placeholder="$t('settings.profiles.industryHint')"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -578,7 +527,7 @@
                 <div>
                   <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.toneOfVoice') }}</label>
                   <select
-                    v-model="editingProfiles[account.key].toneOfVoice"
+                    v-model="editingProfiles['workspace'].toneOfVoice"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
                   >
                     <option value="">{{ $t('settings.profiles.toneSelect') }}</option>
@@ -591,7 +540,7 @@
               <div>
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.timezone') }}</label>
                 <select
-                  v-model="editingProfiles[account.key].timezone"
+                  v-model="editingProfiles['workspace'].timezone"
                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
                 >
                   <option value="">{{ $t('settings.profiles.timezoneAuto') }}</option>
@@ -604,7 +553,7 @@
               <div>
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.targetAudience') }}</label>
                 <input
-                  v-model="editingProfiles[account.key].targetAudience"
+                  v-model="editingProfiles['workspace'].targetAudience"
                   type="text"
                   :placeholder="$t('settings.profiles.targetAudienceHint')"
                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -616,7 +565,7 @@
                 <div>
                   <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.keywords') }}</label>
                   <input
-                    v-model="editingProfiles[account.key].keywords"
+                    v-model="editingProfiles['workspace'].keywords"
                     type="text"
                     :placeholder="$t('settings.profiles.keywordsHint')"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -625,7 +574,7 @@
                 <div>
                   <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.hashtags') }}</label>
                   <input
-                    v-model="editingProfiles[account.key].hashtags"
+                    v-model="editingProfiles['workspace'].hashtags"
                     type="text"
                     :placeholder="$t('settings.profiles.hashtagsHint')"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -637,7 +586,7 @@
               <div>
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('settings.profiles.postingGuidelines') }}</label>
                 <textarea
-                  v-model="editingProfiles[account.key].postingGuidelines"
+                  v-model="editingProfiles['workspace'].postingGuidelines"
                   :placeholder="$t('settings.profiles.postingGuidelinesHint')"
                   rows="3"
                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
@@ -646,58 +595,58 @@
 
               <!-- Save button -->
               <div class="flex items-center justify-end gap-3">
-                <span v-if="profileSavedKey === account.key" class="text-xs text-green-400">
+                <span v-if="profileSavedKey === 'workspace'" class="text-xs text-green-400">
                   {{ $t('settings.profiles.saved') }}
                 </span>
                 <button
-                  @click="runFiveForces(account.key)"
-                  :disabled="fiveForcesRunning === account.key"
+                  @click="runFiveForces('workspace')"
+                  :disabled="fiveForcesRunning === 'workspace'"
                   class="px-3 py-2 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
                 >
-                  <i class="fa-solid fa-star-of-david text-xs" :class="{ 'animate-pulse': fiveForcesRunning === account.key }"></i>
-                  {{ fiveForcesRunning === account.key ? $t('settings.profiles.fiveForcesRunning') : $t('settings.profiles.fiveForces') }}
+                  <i class="fa-solid fa-star-of-david text-xs" :class="{ 'animate-pulse': fiveForcesRunning === 'workspace' }"></i>
+                  {{ fiveForcesRunning === 'workspace' ? $t('settings.profiles.fiveForcesRunning') : $t('settings.profiles.fiveForces') }}
                 </button>
                 <button
-                  @click="diagnoseIndustry(account.key)"
-                  :disabled="industryDiagnosing === account.key"
+                  @click="diagnoseIndustry('workspace')"
+                  :disabled="industryDiagnosing === 'workspace'"
                   class="px-3 py-2 bg-sky-800 hover:bg-sky-700 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
                 >
-                  <i class="fa-solid fa-flask text-xs" :class="{ 'animate-pulse': industryDiagnosing === account.key }"></i>
-                  {{ industryDiagnosing === account.key ? $t('settings.profiles.diagnosing') : $t('settings.profiles.diagnoseIndustry') }}
+                  <i class="fa-solid fa-flask text-xs" :class="{ 'animate-pulse': industryDiagnosing === 'workspace' }"></i>
+                  {{ industryDiagnosing === 'workspace' ? $t('settings.profiles.diagnosing') : $t('settings.profiles.diagnoseIndustry') }}
                 </button>
                 <button
-                  @click="auditProfile(account.key)"
-                  :disabled="profileAuditing === account.key"
+                  @click="auditProfile('workspace')"
+                  :disabled="profileAuditing === 'workspace'"
                   class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-1.5"
                 >
-                  <i class="fa-solid fa-magnifying-glass-chart text-xs" :class="{ 'animate-pulse': profileAuditing === account.key }"></i>
-                  {{ profileAuditing === account.key ? $t('settings.profiles.auditing') : $t('settings.profiles.auditProfile') }}
+                  <i class="fa-solid fa-magnifying-glass-chart text-xs" :class="{ 'animate-pulse': profileAuditing === 'workspace' }"></i>
+                  {{ profileAuditing === 'workspace' ? $t('settings.profiles.auditing') : $t('settings.profiles.auditProfile') }}
                 </button>
                 <button
-                  @click="saveProfile(account.key)"
-                  :disabled="profileSaving === account.key"
+                  @click="saveProfile('workspace')"
+                  :disabled="profileSaving === 'workspace'"
                   class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
                 >
-                  {{ profileSaving === account.key ? $t('settings.profiles.saving') : $t('settings.profiles.save') }}
+                  {{ profileSaving === 'workspace' ? $t('settings.profiles.saving') : $t('settings.profiles.save') }}
                 </button>
               </div>
 
               <!-- Profile audit results -->
-              <div v-if="profileAudits[account.key]" class="mt-4 border-t border-gray-700 pt-4">
+              <div v-if="profileAudits['workspace']" class="mt-4 border-t border-gray-700 pt-4">
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-medium text-white">{{ $t('settings.profiles.auditTitle') }}</span>
                     <span
                       class="text-sm font-bold px-2 py-0.5 rounded-lg"
-                      :class="profileAudits[account.key].score >= 70 ? 'text-green-300 bg-green-900/40' : profileAudits[account.key].score >= 40 ? 'text-amber-300 bg-amber-900/40' : 'text-red-300 bg-red-900/40'"
-                    >{{ profileAudits[account.key].score }}/100</span>
+                      :class="profileAudits['workspace'].score >= 70 ? 'text-green-300 bg-green-900/40' : profileAudits['workspace'].score >= 40 ? 'text-amber-300 bg-amber-900/40' : 'text-red-300 bg-red-900/40'"
+                    >{{ profileAudits['workspace'].score }}/100</span>
                   </div>
-                  <button @click="profileAudits[account.key] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+                  <button @click="profileAudits['workspace'] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
                 </div>
-                <p class="text-xs text-gray-400 mb-3">{{ profileAudits[account.key].summary }}</p>
-                <div v-if="profileAudits[account.key].issues?.length" class="space-y-2 mb-3">
+                <p class="text-xs text-gray-400 mb-3">{{ profileAudits['workspace'].summary }}</p>
+                <div v-if="profileAudits['workspace'].issues?.length" class="space-y-2 mb-3">
                   <div
-                    v-for="issue in profileAudits[account.key].issues"
+                    v-for="issue in profileAudits['workspace'].issues"
                     :key="issue.field"
                     class="p-2.5 rounded-lg text-xs"
                     :class="issue.severity === 'high' ? 'bg-red-900/30 border border-red-800/50' : issue.severity === 'medium' ? 'bg-amber-900/30 border border-amber-800/50' : 'bg-gray-800 border border-gray-700'"
@@ -709,10 +658,10 @@
                     <p class="text-gray-400 italic">→ {{ issue.fix }}</p>
                   </div>
                 </div>
-                <div v-if="profileAudits[account.key].strengths?.length">
+                <div v-if="profileAudits['workspace'].strengths?.length">
                   <div class="text-xs text-green-400 font-medium mb-1">{{ $t('settings.profiles.auditStrengths') }}</div>
                   <ul class="space-y-0.5">
-                    <li v-for="s in profileAudits[account.key].strengths" :key="s" class="flex gap-1.5 text-xs text-green-200">
+                    <li v-for="s in profileAudits['workspace'].strengths" :key="s" class="flex gap-1.5 text-xs text-green-200">
                       <span class="text-green-400 shrink-0">✓</span>{{ s }}
                     </li>
                   </ul>
@@ -720,52 +669,52 @@
               </div>
 
               <!-- Industry diagnosis results -->
-              <div v-if="industryDiagnoses[account.key]" class="mt-4 border-t border-gray-700 pt-4">
+              <div v-if="industryDiagnoses['workspace']" class="mt-4 border-t border-gray-700 pt-4">
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center gap-2">
                     <i class="fa-solid fa-flask text-xs text-sky-400"></i>
                     <span class="text-sm font-medium text-white">{{ $t('settings.profiles.diagnosisTitle') }}</span>
                     <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-900/50 border border-sky-700 text-sky-300">
-                      {{ industryDiagnoses[account.key].diagnosedType }}
+                      {{ industryDiagnoses['workspace'].diagnosedType }}
                     </span>
-                    <span class="text-xs text-gray-500">{{ industryDiagnoses[account.key].confidence }}% confidence</span>
+                    <span class="text-xs text-gray-500">{{ industryDiagnoses['workspace'].confidence }}% confidence</span>
                   </div>
-                  <button @click="industryDiagnoses[account.key] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+                  <button @click="industryDiagnoses['workspace'] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
                 </div>
-                <p class="text-xs text-gray-400 mb-3 leading-relaxed">{{ industryDiagnoses[account.key].summary }}</p>
+                <p class="text-xs text-gray-400 mb-3 leading-relaxed">{{ industryDiagnoses['workspace'].summary }}</p>
 
                 <!-- Characteristics -->
-                <div v-if="industryDiagnoses[account.key].characteristics?.length" class="mb-3">
+                <div v-if="industryDiagnoses['workspace'].characteristics?.length" class="mb-3">
                   <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.diagnosisCharacteristics') }}</div>
                   <ul class="space-y-0.5">
-                    <li v-for="c in industryDiagnoses[account.key].characteristics" :key="c" class="flex gap-1.5 text-xs text-gray-300">
+                    <li v-for="c in industryDiagnoses['workspace'].characteristics" :key="c" class="flex gap-1.5 text-xs text-gray-300">
                       <span class="text-sky-400 shrink-0">›</span>{{ c }}
                     </li>
                   </ul>
                 </div>
 
                 <!-- Content mix -->
-                <div v-if="industryDiagnoses[account.key].contentMix" class="mb-3">
+                <div v-if="industryDiagnoses['workspace'].contentMix" class="mb-3">
                   <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.diagnosisContentMix') }}</div>
                   <div class="flex gap-1 h-3 rounded-full overflow-hidden">
-                    <div class="bg-blue-500" :style="{ width: industryDiagnoses[account.key].contentMix.educational + '%' }" :title="'Educational: ' + industryDiagnoses[account.key].contentMix.educational + '%'"></div>
-                    <div class="bg-green-500" :style="{ width: industryDiagnoses[account.key].contentMix.social_proof + '%' }" :title="'Social proof: ' + industryDiagnoses[account.key].contentMix.social_proof + '%'"></div>
-                    <div class="bg-amber-500" :style="{ width: industryDiagnoses[account.key].contentMix.promotional + '%' }" :title="'Promotional: ' + industryDiagnoses[account.key].contentMix.promotional + '%'"></div>
-                    <div class="bg-purple-500" :style="{ width: industryDiagnoses[account.key].contentMix.engagement + '%' }" :title="'Engagement: ' + industryDiagnoses[account.key].contentMix.engagement + '%'"></div>
+                    <div class="bg-blue-500" :style="{ width: industryDiagnoses['workspace'].contentMix.educational + '%' }" :title="'Educational: ' + industryDiagnoses['workspace'].contentMix.educational + '%'"></div>
+                    <div class="bg-green-500" :style="{ width: industryDiagnoses['workspace'].contentMix.social_proof + '%' }" :title="'Social proof: ' + industryDiagnoses['workspace'].contentMix.social_proof + '%'"></div>
+                    <div class="bg-amber-500" :style="{ width: industryDiagnoses['workspace'].contentMix.promotional + '%' }" :title="'Promotional: ' + industryDiagnoses['workspace'].contentMix.promotional + '%'"></div>
+                    <div class="bg-purple-500" :style="{ width: industryDiagnoses['workspace'].contentMix.engagement + '%' }" :title="'Engagement: ' + industryDiagnoses['workspace'].contentMix.engagement + '%'"></div>
                   </div>
                   <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-blue-500 inline-block"></span>Educational {{ industryDiagnoses[account.key].contentMix.educational }}%</span>
-                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-green-500 inline-block"></span>Social proof {{ industryDiagnoses[account.key].contentMix.social_proof }}%</span>
-                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-amber-500 inline-block"></span>Promotional {{ industryDiagnoses[account.key].contentMix.promotional }}%</span>
-                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-purple-500 inline-block"></span>Engagement {{ industryDiagnoses[account.key].contentMix.engagement }}%</span>
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-blue-500 inline-block"></span>Educational {{ industryDiagnoses['workspace'].contentMix.educational }}%</span>
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-green-500 inline-block"></span>Social proof {{ industryDiagnoses['workspace'].contentMix.social_proof }}%</span>
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-amber-500 inline-block"></span>Promotional {{ industryDiagnoses['workspace'].contentMix.promotional }}%</span>
+                    <span class="flex items-center gap-1 text-xs text-gray-500"><span class="w-2 h-2 rounded-sm bg-purple-500 inline-block"></span>Engagement {{ industryDiagnoses['workspace'].contentMix.engagement }}%</span>
                   </div>
                 </div>
 
                 <!-- Tactics -->
-                <div v-if="industryDiagnoses[account.key].tactics?.length">
+                <div v-if="industryDiagnoses['workspace'].tactics?.length">
                   <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.diagnosisTactics') }}</div>
                   <div class="space-y-2">
-                    <div v-for="tactic in industryDiagnoses[account.key].tactics" :key="tactic.title" class="p-2.5 bg-gray-800 border border-gray-700 rounded-lg text-xs">
+                    <div v-for="tactic in industryDiagnoses['workspace'].tactics" :key="tactic.title" class="p-2.5 bg-gray-800 border border-gray-700 rounded-lg text-xs">
                       <div class="font-medium text-sky-300 mb-0.5">{{ tactic.title }}</div>
                       <p class="text-gray-400 mb-1">{{ tactic.rationale }}</p>
                       <p class="text-gray-200 italic">→ {{ tactic.action }}</p>
@@ -775,25 +724,25 @@
               </div>
 
               <!-- Five Forces results -->
-              <div v-if="fiveForcesResults[account.key]" class="mt-4 border-t border-gray-700 pt-4">
+              <div v-if="fiveForcesResults['workspace']" class="mt-4 border-t border-gray-700 pt-4">
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center gap-2">
                     <i class="fa-solid fa-star-of-david text-xs text-emerald-400"></i>
                     <span class="text-sm font-medium text-white">{{ $t('settings.profiles.fiveForcesTitle') }}</span>
                     <span class="px-2 py-0.5 rounded-full text-xs font-semibold"
-                      :class="fiveForcesResults[account.key].overallScore >= 60 ? 'bg-green-900/50 border border-green-700 text-green-300' : fiveForcesResults[account.key].overallScore >= 40 ? 'bg-amber-900/50 border border-amber-700 text-amber-300' : 'bg-red-900/50 border border-red-700 text-red-300'"
-                    >{{ fiveForcesResults[account.key].overallScore }}/100</span>
+                      :class="fiveForcesResults['workspace'].overallScore >= 60 ? 'bg-green-900/50 border border-green-700 text-green-300' : fiveForcesResults['workspace'].overallScore >= 40 ? 'bg-amber-900/50 border border-amber-700 text-amber-300' : 'bg-red-900/50 border border-red-700 text-red-300'"
+                    >{{ fiveForcesResults['workspace'].overallScore }}/100</span>
                   </div>
-                  <button @click="fiveForcesResults[account.key] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+                  <button @click="fiveForcesResults['workspace'] = null" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
                 </div>
-                <p class="text-xs text-gray-400 mb-3 leading-relaxed italic">{{ fiveForcesResults[account.key].attractiveness }}</p>
-                <p v-if="fiveForcesResults[account.key].governingForce" class="text-xs text-emerald-400 font-medium mb-3">
-                  {{ $t('settings.profiles.fiveForcesGoverning') }}: {{ fiveForcesResults[account.key].governingForce }}
+                <p class="text-xs text-gray-400 mb-3 leading-relaxed italic">{{ fiveForcesResults['workspace'].attractiveness }}</p>
+                <p v-if="fiveForcesResults['workspace'].governingForce" class="text-xs text-emerald-400 font-medium mb-3">
+                  {{ $t('settings.profiles.fiveForcesGoverning') }}: {{ fiveForcesResults['workspace'].governingForce }}
                 </p>
 
                 <!-- Force rows -->
                 <div class="space-y-2 mb-3">
-                  <div v-for="force in fiveForcesResults[account.key].forces" :key="force.name" class="p-2.5 bg-gray-800 border border-gray-700 rounded-lg text-xs">
+                  <div v-for="force in fiveForcesResults['workspace'].forces" :key="force.name" class="p-2.5 bg-gray-800 border border-gray-700 rounded-lg text-xs">
                     <div class="flex items-center justify-between mb-1">
                       <span class="font-medium text-gray-200">{{ force.name }}</span>
                       <span class="font-semibold" :class="force.score <= 3 ? 'text-green-400' : force.score <= 6 ? 'text-amber-400' : 'text-red-400'">{{ force.score }}/10</span>
@@ -809,18 +758,16 @@
                 </div>
 
                 <!-- Positioning recommendations -->
-                <div v-if="fiveForcesResults[account.key].positioning?.length">
+                <div v-if="fiveForcesResults['workspace'].positioning?.length">
                   <div class="text-xs font-medium text-gray-400 mb-1.5">{{ $t('settings.profiles.fiveForcesPositioning') }}</div>
                   <ul class="space-y-0.5">
-                    <li v-for="p in fiveForcesResults[account.key].positioning" :key="p" class="flex gap-1.5 text-xs text-gray-300">
+                    <li v-for="p in fiveForcesResults['workspace'].positioning" :key="p" class="flex gap-1.5 text-xs text-gray-300">
                       <span class="text-emerald-400 shrink-0">›</span>{{ p }}
                     </li>
                   </ul>
                 </div>
               </div>
 
-            </div>
-          </div>
         </div>
 
       </div>
@@ -1535,7 +1482,6 @@ function emptyProfile(): AccountProfile {
   return { businessName: '', description: '', websiteUrl: '', industry: '', targetAudience: '', toneOfVoice: '', keywords: '', hashtags: '', postingGuidelines: '', timezone: '' }
 }
 
-const expandedProfileKey = ref<string | null>(null)
 const editingProfiles = ref<Record<string, AccountProfile>>({})
 const profileSaving   = ref<string | null>(null)
 const profileSavedKey = ref<string | null>(null)
@@ -1587,23 +1533,6 @@ const allConnectedAccounts = computed((): ProfileAccount[] => {
 function profileFilled(key: string): boolean {
   const p = editingProfiles.value[key]
   return !!p && !!(p.businessName || p.description || p.industry)
-}
-
-async function toggleProfile(key: string) {
-  if (expandedProfileKey.value === key) {
-    expandedProfileKey.value = null
-    return
-  }
-  expandedProfileKey.value = key
-  if (!editingProfiles.value[key]) {
-    try {
-      const res = await axios.get(`/api/profiles/${encodeURIComponent(key)}`)
-      const { _id, updatedAt, ...data } = res.data
-      editingProfiles.value[key] = { ...emptyProfile(), ...data }
-    } catch {
-      editingProfiles.value[key] = emptyProfile()
-    }
-  }
 }
 
 async function runFiveForces(key: string) {
@@ -1698,5 +1627,14 @@ onMounted(async () => {
   // Seed workspace page/account selection from current saved state
   workspaceFbPageIds.value = platformsStore.allFbPages.filter((p) => p.selected).map((p) => p.id)
   workspaceIgAccountIds.value = platformsStore.allIgAccounts.filter((a) => a.selected).map((a) => a.id)
+
+  // Load workspace business profile
+  try {
+    const res = await axios.get(`/api/profiles/${encodeURIComponent('workspace')}`)
+    const { _id, updatedAt, ...data } = res.data
+    editingProfiles.value['workspace'] = { ...emptyProfile(), ...data }
+  } catch {
+    editingProfiles.value['workspace'] = emptyProfile()
+  }
 })
 </script>
