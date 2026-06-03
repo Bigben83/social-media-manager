@@ -29,6 +29,23 @@ function resolveInstagramMediaUrl(url) {
   return url;
 }
 
+// Instagram's two-step publish requires the container to reach FINISHED status before
+// calling media_publish. Poll up to maxAttempts × intervalMs ms before giving up.
+async function waitForContainerReady(creationId, accessToken, maxAttempts = 12, intervalMs = 3000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await axios.get(`${GRAPH_API}/${creationId}`, {
+      params: { fields: 'status_code,status', access_token: accessToken },
+    });
+    const { status_code, status } = res.data;
+    if (status_code === 'FINISHED') return;
+    if (status_code === 'ERROR') throw new Error(`Instagram media processing failed: ${status || 'unknown error'}`);
+    if (status_code === 'EXPIRED') throw new Error('Instagram media container expired before it could be published');
+    // IN_PROGRESS — wait and retry
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error('Instagram media container did not finish processing in time (36s). Try again or use a faster-loading image URL.');
+}
+
 class InstagramService extends BasePlatformService {
   constructor() {
     super('instagram');
@@ -172,10 +189,15 @@ class InstagramService extends BasePlatformService {
         null,
         { params: containerParams }
       );
+      const creationId = containerRes.data.id;
+
+      // Wait for Instagram to finish processing the media before publishing
+      await waitForContainerReady(creationId, account.accessToken);
+
       const publishRes = await axios.post(
         `${GRAPH_API}/${account.id}/media_publish`,
         null,
-        { params: { creation_id: containerRes.data.id, access_token: account.accessToken } }
+        { params: { creation_id: creationId, access_token: account.accessToken } }
       );
       const postId = publishRes.data.id;
 
