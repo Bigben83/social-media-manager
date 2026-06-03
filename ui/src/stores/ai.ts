@@ -151,6 +151,17 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
+  async function generateImage(options: {
+    prompt: string
+    size?: string
+    quality?: 'standard' | 'hd'
+    style?: 'vivid' | 'natural'
+    referenceImageUrl?: string
+  }): Promise<{ mediaUrl: string; provider: string; model: string }> {
+    const res = await axios.post('/api/ai/image', options)
+    return res.data
+  }
+
   async function generateCaption(imageUrl: string): Promise<string> {
     loading.value = true
     error.value = null
@@ -218,6 +229,6 @@ export const useAiStore = defineStore('ai', () => {
   return {
     config, providers, models, loading, saving, modelsLoading, error,
     fetchConfig, fetchProviders, saveProvider, deleteProvider, fetchProviderModels,
-    saveConfig, fetchModels, generate, generateCaption, streamGenerate,
+    saveConfig, fetchModels, generate, generateImage, generateCaption, streamGenerate,
   }
 })

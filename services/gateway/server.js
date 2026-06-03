@@ -790,6 +790,17 @@ const PROVIDER_BASE_URLS = {
   groq:   'https://api.groq.com/openai/v1',
 };
 
+// Extensible registry of image-generation providers.
+// Add new providers here when integrating Stable Diffusion, Midjourney, Flux, etc.
+const IMAGE_GENERATION_PROVIDERS = {
+  openai: {
+    name: 'OpenAI DALL-E',
+    textToImage: { model: 'dall-e-3', sizes: ['1024x1024', '1792x1024', '1024x1792'] },
+    imageVariations: { model: 'dall-e-2', sizes: ['256x256', '512x512', '1024x1024'] },
+  },
+  // future: { stable_diffusion: { ... }, midjourney: { ... } }
+};
+
 // Returns decrypted runtime config for the currently active provider
 async function getActiveProviderConfig(ws = 'default') {
   const aiConfig = await getCredentials(ws, 'ai_config');
@@ -1329,6 +1340,148 @@ app.post('/ai/stream', async (request, reply) => {
     writeError(`Unknown provider: ${pconf.provider}`);
   } catch (err) {
     writeError(err.message);
+  }
+});
+
+// ─── AI Image Generation ──────────────────────────────────────────────────────
+
+// GET /ai/image-providers — return configured providers that support image generation
+app.get('/ai/image-providers', async (request, reply) => {
+  const ws = request.workspaceId;
+  const configured = [];
+
+  // OpenAI — check if API key is saved
+  const openaiDoc = await getCredentials(ws, 'openai_config');
+  if (openaiDoc?.apiKey) {
+    configured.push({
+      name: 'openai',
+      label: IMAGE_GENERATION_PROVIDERS.openai.name,
+      textToImage: IMAGE_GENERATION_PROVIDERS.openai.textToImage,
+      imageVariations: IMAGE_GENERATION_PROVIDERS.openai.imageVariations,
+    });
+  }
+
+  // Future providers (stable_diffusion, midjourney, etc.) would be appended here
+
+  return { providers: configured };
+});
+
+// POST /ai/image — generate or vary an image, save to media library, return local URL
+// Body: { prompt, size?, quality?, style?, referenceImageUrl? }
+//   prompt            — text description of the desired image
+//   size              — one of the provider's supported sizes (default 1024x1024)
+//   quality           — 'standard' | 'hd' (DALL-E 3 only, default 'standard')
+//   style             — 'vivid' | 'natural' (DALL-E 3 only, default 'vivid')
+//   referenceImageUrl — local /media/ path or external URL; triggers image variations (DALL-E 2)
+app.post('/ai/image', async (request, reply) => {
+  const { prompt, size = '1024x1024', quality = 'standard', style = 'vivid', referenceImageUrl } = request.body || {};
+  if (!prompt?.trim() && !referenceImageUrl) {
+    return reply.code(400).send({ error: 'prompt is required' });
+  }
+
+  const ws = request.workspaceId;
+  const openaiDoc = await getCredentials(ws, 'openai_config');
+  if (!openaiDoc?.apiKey) {
+    return reply.code(503).send({ error: 'Image generation requires an OpenAI API key. Add it in Global Settings → OpenAI.' });
+  }
+
+  const apiKey = decryptToken(openaiDoc.apiKey);
+  const OPENAI_API = PROVIDER_BASE_URLS.openai;
+
+  try {
+    let remoteUrl;
+    let model;
+
+    if (referenceImageUrl) {
+      // ── Image variations via DALL-E 2 ─────────────────────────────────────
+      model = IMAGE_GENERATION_PROVIDERS.openai.imageVariations.model;
+
+      // Load the reference image (support local /media/ paths and external URLs)
+      let imgBuffer;
+      if (referenceImageUrl.startsWith('/media/')) {
+        imgBuffer = fs.readFileSync(path.join(UPLOAD_DIR, path.basename(referenceImageUrl)));
+      } else if (referenceImageUrl.match(/https?:\/\/(localhost|127\.0\.0\.1)/)) {
+        const internalUrl = referenceImageUrl.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/, 'http://nginx:8081');
+        const res = await axios.get(internalUrl, { responseType: 'arraybuffer', timeout: 15000 });
+        imgBuffer = Buffer.from(res.data);
+      } else {
+        const res = await axios.get(referenceImageUrl, { responseType: 'arraybuffer', timeout: 15000 });
+        imgBuffer = Buffer.from(res.data);
+      }
+
+      const allowedVariationSizes = IMAGE_GENERATION_PROVIDERS.openai.imageVariations.sizes;
+      const variationSize = allowedVariationSizes.includes(size) ? size : '1024x1024';
+
+      const form = new FormData();
+      form.append('image', new Blob([imgBuffer], { type: 'image/png' }), 'reference.png');
+      form.append('n', '1');
+      form.append('size', variationSize);
+      form.append('response_format', 'url');
+
+      const res = await fetch(`${OPENAI_API}/images/variations`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error?.message || `OpenAI variations API error ${res.status}`);
+      }
+      remoteUrl = (await res.json()).data?.[0]?.url;
+
+    } else {
+      // ── Text-to-image via DALL-E 3 ────────────────────────────────────────
+      model = IMAGE_GENERATION_PROVIDERS.openai.textToImage.model;
+
+      const allowedSizes = IMAGE_GENERATION_PROVIDERS.openai.textToImage.sizes;
+      const imageSize = allowedSizes.includes(size) ? size : '1024x1024';
+
+      const res = await axios.post(`${OPENAI_API}/images/generations`, {
+        model,
+        prompt: prompt.trim().slice(0, 4000),
+        n: 1,
+        size: imageSize,
+        quality: quality === 'hd' ? 'hd' : 'standard',
+        style: style === 'natural' ? 'natural' : 'vivid',
+        response_format: 'url',
+      }, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 120000,
+      });
+      remoteUrl = res.data.data?.[0]?.url;
+    }
+
+    if (!remoteUrl) throw new Error('No image URL returned from OpenAI');
+
+    // Download and persist — OpenAI URLs expire after ~1 hour
+    const imgRes = await axios.get(remoteUrl, { responseType: 'arraybuffer', timeout: 30000 });
+    const imgBuffer = Buffer.from(imgRes.data);
+    const filename = `${crypto.randomUUID()}.png`;
+    fs.writeFileSync(path.join(UPLOAD_DIR, filename), imgBuffer);
+
+    const appBase = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+    const mediaUrl = appBase ? `${appBase}/media/${filename}` : `/media/${filename}`;
+
+    const db = await getDb();
+    await db.collection('media_files').insertOne({
+      filename,
+      originalName: `ai-image-${model}-${Date.now()}.png`,
+      url: mediaUrl,
+      mimetype: 'image/png',
+      size: imgBuffer.length,
+      folder: null,
+      tags: ['ai-generated'],
+      workspaceId: ws,
+      uploadedAt: new Date(),
+    });
+
+    log.info({ action: 'image_generate', provider: 'openai', model, size, outcome: 'success' });
+    return { mediaUrl, provider: 'openai', model };
+
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.message;
+    log.error({ action: 'image_generate', provider: 'openai', outcome: 'failure', err: detail });
+    return reply.code(502).send({ error: 'Image generation failed', detail });
   }
 });
 

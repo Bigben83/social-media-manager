@@ -184,6 +184,17 @@
               <span>{{ $t('compose.aiButton') }}</span>
             </button>
 
+            <!-- Image generation toggle — only shown when a provider is configured -->
+            <button
+              v-if="imageGenAvailable"
+              @click="toggleImagePanel"
+              class="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors"
+              :class="imagePanelOpen ? 'text-emerald-400 bg-emerald-900/30' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'"
+            >
+              <i class="fa-solid fa-image text-[10px]"></i>
+              <span>{{ $t('compose.imageButton') }}</span>
+            </button>
+
             <span class="ml-auto text-xs font-mono" :class="overLimit ? 'text-red-400' : charNearLimit ? 'text-amber-400' : 'text-gray-600'">
               {{ composeStore.content.length }}<template v-if="composeStore.activeCharLimit">/{{ composeStore.activeCharLimit }}</template>
             </span>
@@ -321,6 +332,90 @@
                 </div>
               </div>
             </template>
+          </div>
+        </div>
+
+        <!-- Image Generation Panel -->
+        <div v-if="imagePanelOpen && imageGenAvailable" class="bg-gray-900 border border-emerald-800/40 rounded-xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
+            <i class="fa-solid fa-image text-emerald-400 text-xs"></i>
+            <span class="text-sm font-medium text-white">{{ $t('compose.imageGenerateTitle') }}</span>
+            <span class="text-xs text-gray-500 ml-auto">{{ $t('compose.imageGeneratePowered') }}</span>
+          </div>
+          <div class="px-4 py-3 space-y-3">
+            <!-- Prompt -->
+            <div>
+              <label class="block text-xs text-gray-400 mb-1.5">{{ $t('compose.imagePrompt') }}</label>
+              <textarea
+                v-model="imagePrompt"
+                rows="2"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 resize-none focus:outline-none focus:border-emerald-600 placeholder-gray-600"
+                :placeholder="$t('compose.imagePromptPlaceholder')"
+              />
+            </div>
+
+            <!-- Controls row -->
+            <div class="flex flex-wrap gap-2 items-center">
+              <!-- Aspect ratio -->
+              <div class="flex rounded-lg overflow-hidden border border-gray-700 shrink-0">
+                <button
+                  v-for="s in IMAGE_SIZES" :key="s.value"
+                  @click="imageSize = s.value"
+                  class="px-2.5 py-1 text-xs transition-colors"
+                  :class="imageSize === s.value ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-gray-300 bg-gray-800'"
+                >{{ s.label }}</button>
+              </div>
+
+              <!-- HD quality toggle -->
+              <button
+                @click="imageQuality = imageQuality === 'hd' ? 'standard' : 'hd'"
+                class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors shrink-0"
+                :class="imageQuality === 'hd' ? 'bg-amber-700/40 border-amber-600 text-amber-300' : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'"
+              >
+                <i class="fa-solid fa-star text-[9px]"></i> HD
+              </button>
+
+              <!-- Style toggle -->
+              <div class="flex rounded-lg overflow-hidden border border-gray-700 shrink-0">
+                <button
+                  @click="imageStyle = 'vivid'"
+                  class="px-2.5 py-1 text-xs transition-colors"
+                  :class="imageStyle === 'vivid' ? 'bg-violet-700 text-white' : 'text-gray-400 hover:text-gray-300 bg-gray-800'"
+                >{{ $t('compose.imageStyleVivid') }}</button>
+                <button
+                  @click="imageStyle = 'natural'"
+                  class="px-2.5 py-1 text-xs transition-colors"
+                  :class="imageStyle === 'natural' ? 'bg-violet-700 text-white' : 'text-gray-400 hover:text-gray-300 bg-gray-800'"
+                >{{ $t('compose.imageStyleNatural') }}</button>
+              </div>
+            </div>
+
+            <!-- Variation option (when an image is already attached) -->
+            <label
+              v-if="composeStore.mediaUrl && isImage(composeStore.mediaUrl)"
+              class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer"
+            >
+              <input type="checkbox" v-model="useImageVariation" class="w-3.5 h-3.5 accent-emerald-500" />
+              {{ $t('compose.imageVariation') }}
+            </label>
+
+            <!-- Generate button + error -->
+            <div class="flex items-center gap-3">
+              <button
+                @click="generateImage"
+                :disabled="imageGenerating || (!imagePrompt.trim() && !useImageVariation)"
+                class="flex items-center gap-1.5 text-xs px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-lg transition-colors font-medium"
+              >
+                <svg v-if="imageGenerating" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                <i v-else class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>
+                {{ imageGenerating ? $t('compose.imageGenerating') : $t('compose.imageGenerate') }}
+              </button>
+              <span v-if="imageError" class="text-xs text-red-400">{{ imageError }}</span>
+              <span v-if="imageGenerating" class="text-xs text-gray-500">{{ $t('compose.imageGeneratingHint') }}</span>
+            </div>
           </div>
         </div>
 
@@ -545,6 +640,14 @@ onMounted(async () => {
     competitorStore.fetchCompetitors(),
   ])
   composeStore.initDestinations()
+
+  // Check whether an image generation provider is configured
+  try {
+    const imgRes = await axios.get('/api/ai/image-providers')
+    imageGenAvailable.value = (imgRes.data.providers?.length ?? 0) > 0
+  } catch {
+    imageGenAvailable.value = false
+  }
 
   // Pre-fill content when arriving from Competitor Roadmap ("Draft this post")
   if (route.query.prefill) {
@@ -897,6 +1000,52 @@ async function generateCaption() {
     captionError.value = true
   } finally {
     captionGenerating.value = false
+  }
+}
+
+// ─── Image Generation ────────────────────────────────────────────────────────
+
+const IMAGE_SIZES = [
+  { value: '1024x1024', label: '1:1' },
+  { value: '1792x1024', label: '16:9' },
+  { value: '1024x1792', label: '9:16' },
+]
+
+const imageGenAvailable = ref(false)
+const imagePanelOpen = ref(false)
+const imagePrompt = ref('')
+const imageSize = ref('1024x1024')
+const imageQuality = ref<'standard' | 'hd'>('standard')
+const imageStyle = ref<'vivid' | 'natural'>('vivid')
+const useImageVariation = ref(false)
+const imageGenerating = ref(false)
+const imageError = ref('')
+
+function toggleImagePanel() {
+  imagePanelOpen.value = !imagePanelOpen.value
+  if (imagePanelOpen.value && !imagePrompt.value) {
+    imagePrompt.value = composeStore.content.slice(0, 500)
+  }
+}
+
+async function generateImage() {
+  imageGenerating.value = true
+  imageError.value = ''
+  try {
+    const result = await aiStore.generateImage({
+      prompt: imagePrompt.value,
+      size: imageSize.value,
+      quality: imageQuality.value,
+      style: imageStyle.value,
+      referenceImageUrl: useImageVariation.value && composeStore.mediaUrl ? composeStore.mediaUrl : undefined,
+    })
+    composeStore.mediaUrl = result.mediaUrl
+    mediaLoadError.value = false
+    imagePanelOpen.value = false
+  } catch (err: any) {
+    imageError.value = err.response?.data?.detail || err.response?.data?.error || t('compose.imageGenerateFailed')
+  } finally {
+    imageGenerating.value = false
   }
 }
 
