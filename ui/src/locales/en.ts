@@ -125,11 +125,15 @@ export default {
     theme: 'Monthly theme',
     pillars: 'Content pillars',
     toneGuidance: 'Tone guidance',
-    saveAllDrafts: 'Save {count} posts as Drafts',
+    postsPerWeek: 'Posts per week',
+    postsPerWeekHint: '≈ {total} posts per platform · {grand} total',
+    saveAllDrafts: 'Save {count} as Drafts',
+    saveAllDraftsScheduled: 'Save {count} as Scheduled Drafts',
     savingAll: 'Saving drafts…',
     draft: 'Draft',
     week: 'Week {n}',
     exportCsv: 'Export CSV',
+    at: 'at',
   },
 
   media: {

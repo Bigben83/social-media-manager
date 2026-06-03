@@ -1423,16 +1423,19 @@ Return ONLY valid JSON.`;
 });
 
 // POST /ai/content-calendar — generate a monthly content plan with narrative brief + sample posts
-// Body: { accountKey?, platforms[], month? (YYYY-MM), approvedBrief? }
+// Body: { accountKey?, platforms[], month? (YYYY-MM), approvedBrief?, postsPerWeek? }
 app.post('/ai/content-calendar', async (request, reply) => {
   const ws = request.workspaceId;
-  const { accountKey, platforms = [], month, approvedBrief } = request.body || {};
+  const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw } = request.body || {};
   if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
 
   const db = await getDb();
   const calMonth = month || new Date().toISOString().slice(0, 7);
   const [year, mon] = calMonth.split('-');
   const monthName = new Date(`${calMonth}-01`).toLocaleString('en', { month: 'long', year: 'numeric' });
+
+  // Validate postsPerWeek: 1–7, default 3
+  const postsPerWeek = Math.min(7, Math.max(1, parseInt(rawPpw) || 3));
 
   // Load account profile for context
   const profileKey = accountKey || null;
@@ -1454,13 +1457,15 @@ app.post('/ai/content-calendar', async (request, reply) => {
 
   const activePlatforms = platforms.slice(0, 5);
   const platformList = activePlatforms.join(', ');
-  const postsPerPlatform = 2;
-  const totalPosts = activePlatforms.length * postsPerPlatform;
+  // Cap total posts to 60 to keep response size manageable
+  const postsPerPlatform = postsPerWeek * 4;
+  const totalPosts = Math.min(activePlatforms.length * postsPerPlatform, 60);
+  const cappedPerPlatform = Math.ceil(totalPosts / activePlatforms.length);
 
   const system = 'You are a social media content strategist. Return ONLY a valid JSON object — no markdown, no explanation, no code fences.';
 
   const platformNoteKeys = activePlatforms.map((p) => `"${p}"`).join(', ');
-  const postSchema = `{ "platform": "<one of: ${platformList}>", "week": <1 or 2>, "content": "<ready-to-publish post>", "hashtags": ["<tag>"], "postType": "<educational|promotional|engagement|storytelling>", "suggestedDay": "<day>" }`;
+  const postSchema = `{ "platform": "<one of: ${platformList}>", "week": <1-4>, "suggestedDay": "<Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday>", "suggestedTime": "<HH:MM in 24h>", "content": "<ready-to-publish post>", "hashtags": ["<tag>"], "postType": "<educational|promotional|engagement|storytelling>" }`;
 
   // If an approved brief was passed, use it directly — only generate posts
   const briefSection = approvedBrief
@@ -1476,14 +1481,25 @@ Generate posts that faithfully follow this approved brief.`
 
 ${briefSection}
 Create a ${monthName} content calendar for: ${platformList}.
-Generate ${postsPerPlatform} posts per platform (${totalPosts} posts total across weeks 1 and 2).
+Generate exactly ${postsPerWeek} posts per platform per week, covering all 4 weeks (${cappedPerPlatform} posts per platform, ${totalPosts} posts total).
+Distribute evenly: week 1 = days 1–7, week 2 = days 8–14, week 3 = days 15–21, week 4 = days 22–28.
 
-Platform conventions to follow:
-- LinkedIn: professional hook in first line, insights, 1300-char max
+For "suggestedTime" use these platform-native peak times (24-hour HH:MM):
+- LinkedIn: 08:00, 09:00, 10:00, or 17:00 on weekdays
+- Instagram: 07:00, 12:00, 19:00, or 20:00
+- Facebook: 09:00, 12:00, or 15:00
+- Twitter/X: 08:00, 12:00, or 17:00
+- TikTok: 07:00, 19:00, 20:00, or 21:00
+- Pinterest: 14:00, 20:00, or 21:00
+- YouTube: 14:00 or 15:00, prefer Thursday–Saturday
+- Mastodon/Bluesky: 09:00 or 17:00
+
+Platform content conventions:
+- LinkedIn: professional hook first line, insights, 1300-char max
 - Instagram: visual-first, emojis ok, 2200-char max, 5-10 hashtags
 - Facebook: conversational, question or story, 500-char ideal
-- Twitter: concise, punchy, under 280 chars
-- TikTok: caption hook in first 3 words, trending angle
+- Twitter/X: concise, punchy, under 280 chars
+- TikTok: hook in first 3 words, trending angle, keep under 150 chars
 - Pinterest: keyword-rich description, action-oriented
 - Mastodon/Bluesky: authentic, community-focused, 300/500 chars
 
@@ -1535,7 +1551,14 @@ Return ONLY the JSON object.`;
       if (!calendar.brief || !Array.isArray(calendar.posts)) throw new Error('Missing brief or posts array');
       if (!Array.isArray(calendar.brief.pillars)) calendar.brief.pillars = [];
       if (typeof calendar.brief.theme !== 'string') calendar.brief.theme = '';
-      calendar.posts = calendar.posts.filter((p) => p && typeof p.content === 'string').slice(0, totalPosts);
+      // Normalise suggestedTime: ensure HH:MM format, default 09:00
+      calendar.posts = calendar.posts
+        .filter((p) => p && typeof p.content === 'string')
+        .slice(0, totalPosts)
+        .map((p) => ({
+          ...p,
+          suggestedTime: /^\d{2}:\d{2}$/.test(p.suggestedTime || '') ? p.suggestedTime : '09:00',
+        }));
       if (calendar.posts.length === 0) throw new Error('No valid posts in response');
     } catch (parseErr) {
       log.warn({ action: 'content_calendar', outcome: 'parse_failure', err: parseErr.message });
@@ -1547,6 +1570,7 @@ Return ONLY the JSON object.`;
       month: calMonth,
       monthName,
       platforms,
+      postsPerWeek,
       brief: calendar.brief,
       posts: calendar.posts,
       workspaceId: ws,

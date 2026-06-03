@@ -125,11 +125,15 @@ export default {
     theme: 'Aylık tema',
     pillars: 'İçerik sütunları',
     toneGuidance: 'Ton rehberi',
+    postsPerWeek: 'Haftada gönderi',
+    postsPerWeekHint: '≈ Platform başına {total} gönderi · Toplam {grand}',
     saveAllDrafts: '{count} gönderiyi Taslak olarak kaydet',
+    saveAllDraftsScheduled: '{count} gönderiyi Zamanlanmış Taslak olarak kaydet',
     savingAll: 'Taslaklar kaydediliyor…',
     draft: 'Taslağa al',
     week: '{n}. hafta',
     exportCsv: 'CSV Dışa Aktar',
+    at: 'saat',
   },
 
   media: {

@@ -33,12 +33,51 @@
             </select>
           </div>
 
-          <!-- Step buttons -->
-          <div class="flex items-end gap-2">
+          <!-- Posts per week -->
+          <div>
+            <label class="block text-xs text-gray-400 mb-1.5">{{ $t('calendarPlan.postsPerWeek') }}</label>
+            <div class="flex items-center gap-2">
+              <button
+                @click="postsPerWeek = Math.max(1, postsPerWeek - 1)"
+                class="w-8 h-9 flex items-center justify-center rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-lg font-medium transition-colors"
+              >−</button>
+              <span class="flex-1 text-center text-sm font-semibold text-white">{{ postsPerWeek }}</span>
+              <button
+                @click="postsPerWeek = Math.min(7, postsPerWeek + 1)"
+                class="w-8 h-9 flex items-center justify-center rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-lg font-medium transition-colors"
+              >+</button>
+            </div>
+            <p class="text-[11px] text-gray-600 mt-1 text-center">
+              {{ $t('calendarPlan.postsPerWeekHint', { total: postsPerWeek * 4, grand: Math.min(selectedPlatforms.length * postsPerWeek * 4, 60) }) }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Platform checkboxes + action buttons row -->
+        <div class="flex flex-wrap items-end gap-4">
+          <div class="flex-1 min-w-0">
+            <label class="block text-xs text-gray-400 mb-2">{{ $t('calendarPlan.platforms') }}</label>
+            <div class="flex flex-wrap gap-2">
+              <label
+                v-for="p in PLATFORMS"
+                :key="p.key"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-colors"
+                :class="selectedPlatforms.includes(p.key)
+                  ? 'text-white border-transparent'
+                  : 'border-gray-700 text-gray-400 hover:border-gray-500'"
+                :style="selectedPlatforms.includes(p.key) ? { background: p.color + '33', borderColor: p.color } : {}"
+              >
+                <input type="checkbox" class="sr-only" :value="p.key" v-model="selectedPlatforms" />
+                <i :class="p.icon" class="text-[11px]"></i>
+                {{ p.label }}
+              </label>
+            </div>
+          </div>
+          <div class="flex gap-2 shrink-0">
             <button
               @click="generateBrief"
               :disabled="briefLoading || loading || !selectedPlatforms.length"
-              class="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-sky-700 hover:bg-sky-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
+              class="flex items-center justify-center gap-2 px-4 py-2 bg-sky-700 hover:bg-sky-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
             >
               <i class="fa-solid fa-file-lines text-xs" :class="{ 'animate-pulse': briefLoading }"></i>
               {{ briefLoading ? $t('calendarPlan.generatingBrief') : $t('calendarPlan.generateBrief') }}
@@ -46,31 +85,11 @@
             <button
               @click="generate"
               :disabled="loading || !selectedPlatforms.length"
-              class="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
+              class="flex items-center justify-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
             >
               <i class="fa-solid fa-calendar-days text-xs" :class="{ 'animate-pulse': loading }"></i>
               {{ loading ? $t('calendarPlan.generating') : $t('calendarPlan.generate') }}
             </button>
-          </div>
-        </div>
-
-        <!-- Platform checkboxes -->
-        <div>
-          <label class="block text-xs text-gray-400 mb-2">{{ $t('calendarPlan.platforms') }}</label>
-          <div class="flex flex-wrap gap-2">
-            <label
-              v-for="p in PLATFORMS"
-              :key="p.key"
-              class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-colors"
-              :class="selectedPlatforms.includes(p.key)
-                ? 'text-white border-transparent'
-                : 'border-gray-700 text-gray-400 hover:border-gray-500'"
-              :style="selectedPlatforms.includes(p.key) ? { background: p.color + '33', borderColor: p.color } : {}"
-            >
-              <input type="checkbox" class="sr-only" :value="p.key" v-model="selectedPlatforms" />
-              <i :class="p.icon" class="text-[11px]"></i>
-              {{ p.label }}
-            </label>
           </div>
         </div>
       </div>
@@ -152,7 +171,7 @@
                 class="flex items-center gap-1.5 text-sm px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded-lg text-white transition-colors"
               >
                 <i class="fa-solid fa-floppy-disk text-xs"></i>
-                {{ savingAll ? $t('calendarPlan.savingAll') : $t('calendarPlan.saveAllDrafts', { count: calendar.posts.length }) }}
+                {{ savingAll ? $t('calendarPlan.savingAll') : $t('calendarPlan.saveAllDraftsScheduled', { count: calendar.posts.length }) }}
               </button>
             </div>
           </div>
@@ -204,6 +223,7 @@
                     <div class="flex items-center gap-2 mb-1.5">
                       <span class="text-xs text-gray-500">{{ $t('calendarPlan.week', { n: post.week }) }}</span>
                       <span v-if="post.suggestedDay" class="text-xs text-gray-500">· {{ post.suggestedDay }}</span>
+                      <span v-if="post.suggestedTime" class="text-xs text-gray-500">{{ $t('calendarPlan.at') }} {{ post.suggestedTime }}</span>
                       <span
                         class="text-xs px-1.5 py-0.5 rounded capitalize"
                         :class="{
@@ -220,7 +240,7 @@
                     </div>
                   </div>
                   <button
-                    @click="draftPost(post.content)"
+                    @click="draftPost(post)"
                     class="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 bg-violet-700 hover:bg-violet-600 text-white rounded-lg"
                   >
                     <i class="fa-solid fa-pen-to-square text-[10px]"></i>
@@ -264,6 +284,7 @@ const PLATFORMS = [
 const selectedMonth   = ref(new Date().toISOString().slice(0, 7))
 const selectedAccount = ref('')
 const selectedPlatforms = ref<string[]>(['linkedin', 'instagram'])
+const postsPerWeek = ref(3)
 const loading    = ref(false)
 const savingAll  = ref(false)
 const error      = ref('')
@@ -332,6 +353,7 @@ async function approveAndGenerate() {
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
       approvedBrief: pendingBrief.value,
+      postsPerWeek: postsPerWeek.value,
     })
     calendar.value = res.data
     pendingBrief.value = null
@@ -352,6 +374,7 @@ async function generate() {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
+      postsPerWeek: postsPerWeek.value,
     })
     calendar.value = res.data
   } catch (err: any) {
@@ -361,12 +384,24 @@ async function generate() {
   }
 }
 
+function computeScheduledDate(month: string, week: number, suggestedDay: string, suggestedTime: string): string {
+  const DAY_MAP: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 }
+  const firstDay = new Date(month + '-01')
+  const targetDow = DAY_MAP[suggestedDay] ?? 1
+  const firstDow = firstDay.getDay()
+  const offset = (targetDow - firstDow + 7) % 7
+  const d = new Date(firstDay)
+  d.setDate(1 + offset + (week - 1) * 7)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${suggestedTime || '09:00'}`
+}
+
 function exportCalendarCsv() {
   if (!calendar.value?.posts?.length) return
   const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`
-  const header = ['Platform', 'Week', 'Suggested Day', 'Post Type', 'Content', 'Hashtags']
+  const header = ['Platform', 'Week', 'Suggested Day', 'Suggested Time', 'Post Type', 'Content', 'Hashtags']
   const rows = calendar.value.posts.map((p: any) => [
-    p.platform, p.week, p.suggestedDay || '', p.postType || '', escape(p.content), (p.hashtags || []).join(' '),
+    p.platform, p.week, p.suggestedDay || '', p.suggestedTime || '', p.postType || '', escape(p.content), (p.hashtags || []).join(' '),
   ].join(','))
   const csv = '﻿' + [header.join(','), ...rows].join('\r\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -378,8 +413,11 @@ function exportCalendarCsv() {
   URL.revokeObjectURL(url)
 }
 
-function draftPost(content: string) {
-  composeStore.content = content
+function draftPost(post: any) {
+  composeStore.content = post.content
+  if (post.week && post.suggestedDay) {
+    composeStore.scheduledAt = computeScheduledDate(selectedMonth.value, post.week, post.suggestedDay, post.suggestedTime || '09:00')
+  }
   router.push('/compose')
 }
 
@@ -388,10 +426,13 @@ async function saveAllDrafts() {
   savingAll.value = true
   try {
     for (const post of calendar.value.posts) {
+      const scheduledAt = post.week && post.suggestedDay
+        ? computeScheduledDate(calendar.value.month, post.week, post.suggestedDay, post.suggestedTime || '09:00')
+        : ''
       await axios.post('/api/drafts', {
         content: post.content,
         mediaUrl: '',
-        scheduledAt: '',
+        scheduledAt,
         destinations: [],
       })
     }
