@@ -3,6 +3,7 @@ const axios = require('axios');
 const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
 const { decryptToken, warnIfNoKey } = require('./utils/crypto');
+const { getWorkspaceCredential } = require('./utils/credentials');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 
@@ -13,10 +14,10 @@ class FacebookService extends BasePlatformService {
 
   // Read selected Facebook Pages from MongoDB.
   // Falls back to env vars for backwards compatibility.
-  async _getPages() {
+  async _getPages(workspaceId = 'default') {
     try {
       const db = await getDb();
-      const cred = await db.collection('platform_credentials').findOne({ _id: 'facebook' });
+      const cred = await getWorkspaceCredential(db, 'facebook', workspaceId);
       const dbPages = (cred?.pages || []).filter((p) => p.selected);
       if (dbPages.length > 0) {
         return dbPages.map((p) => ({ ...p, accessToken: decryptToken(p.accessToken) })).filter((p) => p.accessToken);
@@ -32,8 +33,8 @@ class FacebookService extends BasePlatformService {
     return [];
   }
 
-  async getStatus() {
-    const pages = await this._getPages();
+  async getStatus(workspaceId = 'default') {
+    const pages = await this._getPages(workspaceId);
     if (pages.length === 0) {
       return { connected: false, platform: 'facebook', error: 'No Facebook Pages connected — use Settings to connect via Facebook OAuth' };
     }
@@ -58,8 +59,8 @@ class FacebookService extends BasePlatformService {
     }
   }
 
-  async fetchFeed({ limit = 20 } = {}) {
-    const pages = await this._getPages();
+  async fetchFeed({ limit = 20, workspaceId = 'default' } = {}) {
+    const pages = await this._getPages(workspaceId);
     if (pages.length === 0) throw new Error('No Facebook Pages connected');
 
     const allItems = [];
@@ -100,8 +101,8 @@ class FacebookService extends BasePlatformService {
       const col = db.collection('feeds');
       for (const item of allItems) {
         await col.updateOne(
-          { platform: 'facebook', originalId: item.originalId },
-          { $set: item },
+          { platform: 'facebook', originalId: item.originalId, workspaceId },
+          { $set: { ...item, workspaceId } },
           { upsert: true }
         );
       }
@@ -112,8 +113,8 @@ class FacebookService extends BasePlatformService {
     return allItems;
   }
 
-  async publishPost({ content, link, imageUrl, accountId, firstComment } = {}) {
-    const allPages = await this._getPages();
+  async publishPost({ content, link, imageUrl, accountId, firstComment, workspaceId = 'default' } = {}) {
+    const allPages = await this._getPages(workspaceId);
     if (allPages.length === 0) throw new Error('No Facebook Pages connected');
     if (!content) throw new Error('content is required');
 

@@ -3,6 +3,7 @@ const axios = require('axios');
 const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
 const { decryptToken, warnIfNoKey } = require('./utils/crypto');
+const { getWorkspaceCredential } = require('./utils/credentials');
 
 const PINTEREST_API = 'https://api.pinterest.com/v5';
 
@@ -11,10 +12,10 @@ class PinterestService extends BasePlatformService {
     super('pinterest');
   }
 
-  async _getAccount() {
+  async _getAccount(workspaceId = 'default') {
     try {
       const db = await getDb();
-      const cred = await db.collection('platform_credentials').findOne({ _id: 'pinterest' });
+      const cred = await getWorkspaceCredential(db, 'pinterest', workspaceId);
       if (cred?.accessToken) {
         return { ...cred, accessToken: decryptToken(cred.accessToken) };
       }
@@ -22,8 +23,8 @@ class PinterestService extends BasePlatformService {
     return null;
   }
 
-  async getStatus() {
-    const account = await this._getAccount();
+  async getStatus(workspaceId = 'default') {
+    const account = await this._getAccount(workspaceId);
     if (!account?.accessToken) {
       return { connected: false, platform: 'pinterest', error: 'Not connected — use Settings to connect via Pinterest OAuth' };
     }
@@ -46,8 +47,8 @@ class PinterestService extends BasePlatformService {
     }
   }
 
-  async fetchFeed({ limit = 25 } = {}) {
-    const account = await this._getAccount();
+  async fetchFeed({ limit = 25, workspaceId = 'default' } = {}) {
+    const account = await this._getAccount(workspaceId);
     if (!account?.accessToken) throw new Error('Pinterest not connected');
 
     const allItems = [];
@@ -90,8 +91,8 @@ class PinterestService extends BasePlatformService {
       const col = db.collection('feeds');
       for (const item of allItems) {
         await col.updateOne(
-          { platform: 'pinterest', originalId: item.originalId },
-          { $set: item },
+          { platform: 'pinterest', originalId: item.originalId, workspaceId },
+          { $set: { ...item, workspaceId } },
           { upsert: true }
         );
       }
@@ -102,8 +103,8 @@ class PinterestService extends BasePlatformService {
     return allItems;
   }
 
-  async publishPost({ content, imageUrl, accountId: boardId } = {}) {
-    const account = await this._getAccount();
+  async publishPost({ content, imageUrl, accountId: boardId, workspaceId = 'default' } = {}) {
+    const account = await this._getAccount(workspaceId);
     if (!account?.accessToken) throw new Error('Pinterest not connected');
     if (!boardId) throw new Error('boardId is required for Pinterest — select a board as destination');
     if (!imageUrl) throw new Error('Pinterest requires an image URL');
@@ -144,7 +145,8 @@ const service = new PinterestService();
 // Returns selected boards from DB (used by gateway/compose to list destinations)
 service.app.get('/boards', async (request, reply) => {
   try {
-    const account = await service._getAccount();
+    const workspaceId = request.headers['x-workspace-id'] || 'default';
+    const account = await service._getAccount(workspaceId);
     if (!account) return { boards: [] };
     const selected = (account.boards || []).filter((b) => b.selected);
     return { boards: selected };

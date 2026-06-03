@@ -31,7 +31,7 @@ let redis;
 async function processPostJob(job) {
   // destinations: [{ platform, accountId?, imageUrl?, videoUrl?, link? }]
   // Falls back to legacy { platforms: string[] } format
-  const { postId, content, destinations, platforms, media = [], firstComment } = job.data;
+  const { postId, content, destinations, platforms, media = [], firstComment, workspaceId = 'default' } = job.data;
   // Ensure every post has a stable ID for analytics tracking
   const effectivePostId = postId || randomUUID();
 
@@ -60,7 +60,11 @@ async function processPostJob(job) {
       continue;
     }
     try {
-      const response = await axios.post(`${serviceUrl}/post`, { content, accountId, imageUrl, videoUrl, link, media, firstComment: firstComment?.trim() || undefined }, { timeout: 30000 });
+      const response = await axios.post(
+        `${serviceUrl}/post`,
+        { content, accountId, imageUrl, videoUrl, link, media, firstComment: firstComment?.trim() || undefined },
+        { timeout: 30000, headers: { 'X-Workspace-Id': workspaceId } }
+      );
       results[resultKey] = { success: true, ...response.data.result };
     } catch (err) {
       results[resultKey] = { success: false, error: err.message };
@@ -81,6 +85,7 @@ async function processPostJob(job) {
         status: postStatus,
         publishedAt: new Date(),
         platformResults: results,
+        workspaceId,
       },
       $setOnInsert: { createdAt: new Date() },
     },
@@ -132,6 +137,7 @@ app.get('/health', async () => ({ status: 'ok', service: 'scheduler' }));
 // Legacy { platforms: string[] } still accepted for backwards compatibility.
 app.post('/schedule', async (request, reply) => {
   const { postId, content, destinations, platforms, scheduledAt, media = [], firstComment } = request.body;
+  const workspaceId = request.headers['x-workspace-id'] || 'default';
 
   const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
 
@@ -146,7 +152,7 @@ app.post('/schedule', async (request, reply) => {
 
   const job = await postQueue.add(
     'scheduled-post',
-    { postId, content, destinations: destList, media, firstComment: firstComment?.trim() || undefined },
+    { postId, content, destinations: destList, media, firstComment: firstComment?.trim() || undefined, workspaceId },
     { delay, attempts: 3, backoff: { type: 'exponential', delay: 60000 } }
   );
 
@@ -161,6 +167,7 @@ app.post('/schedule', async (request, reply) => {
     attempts: 0,
     maxAttempts: 3,
     bullJobId: String(job.id),
+    workspaceId,
     createdAt: new Date(),
   });
 
@@ -170,10 +177,13 @@ app.post('/schedule', async (request, reply) => {
 // Zamanlanmış görevleri listele
 app.get('/jobs', async (request) => {
   const { status = 'pending' } = request.query;
+  const workspaceId = request.headers['x-workspace-id'] || 'default';
   const db = await getDb();
+  // Include legacy jobs without workspaceId (backwards compat)
+  const filter = { status, $or: [{ workspaceId }, { workspaceId: { $exists: false } }] };
   const jobs = await db
     .collection('scheduled_jobs')
-    .find({ status })
+    .find(filter)
     .sort({ scheduledAt: 1 })
     .toArray();
   return { success: true, count: jobs.length, jobs };
@@ -182,12 +192,18 @@ app.get('/jobs', async (request) => {
 // Görevi iptal et
 app.delete('/jobs/:jobId', async (request, reply) => {
   const { jobId } = request.params;
-  const job = await postQueue.getJob(jobId);
-  if (!job) return reply.code(404).send({ error: 'Job bulunamadı' });
-
-  await job.remove();
+  const workspaceId = request.headers['x-workspace-id'] || 'default';
 
   const db = await getDb();
+  const jobDoc = await db.collection('scheduled_jobs').findOne({
+    bullJobId: jobId,
+    $or: [{ workspaceId }, { workspaceId: { $exists: false } }],
+  });
+  if (!jobDoc) return reply.code(404).send({ error: 'Job bulunamadı' });
+
+  const job = await postQueue.getJob(jobId);
+  if (job) await job.remove();
+
   await db.collection('scheduled_jobs').updateOne(
     { bullJobId: jobId },
     { $set: { status: 'cancelled' } }

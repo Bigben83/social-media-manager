@@ -25,9 +25,12 @@ let producer;
 
 // ─── Feed Çekme ──────────────────────────────────────────────────────────────
 
-async function fetchPlatformFeed(platform, serviceUrl) {
+async function fetchPlatformFeed(platform, serviceUrl, workspaceId = 'default') {
   try {
-    const response = await axios.get(`${serviceUrl}/feed`, { timeout: 15000 });
+    const response = await axios.get(`${serviceUrl}/feed`, {
+      timeout: 15000,
+      headers: { 'X-Workspace-Id': workspaceId },
+    });
     const items = response.data.items || [];
     log.info({ action: 'feed_fetch', platform, count: items.length, outcome: 'success' });
 
@@ -67,8 +70,9 @@ app.get('/health', async () => ({ status: 'ok', service: 'feed-aggregator' }));
 
 app.post('/fetch', async (request) => {
   const { platform } = request.body || {};
+  const workspaceId = request.headers['x-workspace-id'] || 'default';
   if (platform && PLATFORM_SERVICES[platform]) {
-    const items = await fetchPlatformFeed(platform, PLATFORM_SERVICES[platform]);
+    const items = await fetchPlatformFeed(platform, PLATFORM_SERVICES[platform], workspaceId);
     return { success: true, platform, count: items.length };
   }
   const summary = await fetchAllFeeds();
@@ -77,10 +81,12 @@ app.post('/fetch', async (request) => {
 
 app.get('/feeds', async (request) => {
   const { platform, tag, limit = 50, skip = 0 } = request.query;
+  const workspaceId = request.headers['x-workspace-id'] || 'default';
   const db = await getDb();
   const col = db.collection('feeds');
 
-  const filter = {};
+  // Include legacy items without workspaceId (backwards compat)
+  const filter = { $or: [{ workspaceId }, { workspaceId: { $exists: false } }] };
   if (platform) filter.platform = platform;
   if (tag) filter.tags = tag;
 
@@ -94,10 +100,14 @@ app.get('/feeds', async (request) => {
   return { success: true, count: items.length, items };
 });
 
-app.get('/platform-status', async () => {
+app.get('/platform-status', async (request) => {
+  const workspaceId = request.headers['x-workspace-id'] || 'default';
   const statuses = await Promise.allSettled(
     Object.entries(PLATFORM_SERVICES).map(async ([platform, url]) => {
-      const response = await axios.get(`${url}/status`, { timeout: 5000 });
+      const response = await axios.get(`${url}/status`, {
+        timeout: 5000,
+        headers: { 'X-Workspace-Id': workspaceId },
+      });
       return { platform, ...response.data };
     })
   );

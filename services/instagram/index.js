@@ -3,6 +3,7 @@ const axios = require('axios');
 const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
 const { decryptToken, warnIfNoKey } = require('./utils/crypto');
+const { getWorkspaceCredential } = require('./utils/credentials');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 
@@ -13,10 +14,10 @@ class InstagramService extends BasePlatformService {
 
   // Read selected Instagram Business Accounts from MongoDB.
   // Falls back to env vars for backwards compatibility.
-  async _getAccounts() {
+  async _getAccounts(workspaceId = 'default') {
     try {
       const db = await getDb();
-      const cred = await db.collection('platform_credentials').findOne({ _id: 'instagram' });
+      const cred = await getWorkspaceCredential(db, 'instagram', workspaceId);
       const dbAccounts = (cred?.accounts || []).filter((a) => a.selected);
       if (dbAccounts.length > 0) {
         return dbAccounts.map((a) => ({ ...a, accessToken: decryptToken(a.accessToken) })).filter((a) => a.accessToken);
@@ -32,8 +33,8 @@ class InstagramService extends BasePlatformService {
     return [];
   }
 
-  async getStatus() {
-    const accounts = await this._getAccounts();
+  async getStatus(workspaceId = 'default') {
+    const accounts = await this._getAccounts(workspaceId);
     if (accounts.length === 0) {
       return { connected: false, platform: 'instagram', error: 'No Instagram accounts connected — use Settings to connect via Facebook OAuth' };
     }
@@ -58,8 +59,8 @@ class InstagramService extends BasePlatformService {
     }
   }
 
-  async fetchFeed({ limit = 20 } = {}) {
-    const accounts = await this._getAccounts();
+  async fetchFeed({ limit = 20, workspaceId = 'default' } = {}) {
+    const accounts = await this._getAccounts(workspaceId);
     if (accounts.length === 0) throw new Error('No Instagram accounts connected');
 
     const allItems = [];
@@ -106,8 +107,8 @@ class InstagramService extends BasePlatformService {
       const col = db.collection('feeds');
       for (const item of allItems) {
         await col.updateOne(
-          { platform: 'instagram', originalId: item.originalId },
-          { $set: item },
+          { platform: 'instagram', originalId: item.originalId, workspaceId },
+          { $set: { ...item, workspaceId } },
           { upsert: true }
         );
       }
@@ -119,8 +120,8 @@ class InstagramService extends BasePlatformService {
   }
 
   // Instagram requires media (image_url or video_url) — text-only posts are not supported.
-  async publishPost({ content, imageUrl, videoUrl, accountId, firstComment } = {}) {
-    const allAccounts = await this._getAccounts();
+  async publishPost({ content, imageUrl, videoUrl, accountId, firstComment, workspaceId = 'default' } = {}) {
+    const allAccounts = await this._getAccounts(workspaceId);
     if (allAccounts.length === 0) throw new Error('No Instagram accounts connected');
 
     if (!imageUrl && !videoUrl) {

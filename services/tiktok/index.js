@@ -3,6 +3,7 @@ const axios = require('axios');
 const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
 const { encryptToken, decryptToken, warnIfNoKey } = require('./utils/crypto');
+const { getWorkspaceCredential } = require('./utils/credentials');
 
 const TIKTOK_API = 'https://open.tiktokapis.com/v2';
 const TOKEN_URL = `${TIKTOK_API}/oauth/token/`;
@@ -12,11 +13,11 @@ class TikTokService extends BasePlatformService {
     super('tiktok');
   }
 
-  async _getAccount() {
+  async _getAccount(workspaceId = 'default') {
     try {
       const db = await getDb();
       const [cred, appCred] = await Promise.all([
-        db.collection('platform_credentials').findOne({ _id: 'tiktok' }),
+        getWorkspaceCredential(db, 'tiktok', workspaceId),
         db.collection('platform_credentials').findOne({ _id: 'tiktok_app' }),
       ]);
 
@@ -44,7 +45,7 @@ class TikTokService extends BasePlatformService {
               : cred.refreshExpiry;
 
             await db.collection('platform_credentials').updateOne(
-              { _id: 'tiktok' },
+              { _id: cred._id },
               {
                 $set: {
                   accessToken: encryptToken(access_token),
@@ -69,8 +70,8 @@ class TikTokService extends BasePlatformService {
     return null;
   }
 
-  async getStatus() {
-    const account = await this._getAccount();
+  async getStatus(workspaceId = 'default') {
+    const account = await this._getAccount(workspaceId);
     if (!account?.accessToken) {
       return { connected: false, platform: 'tiktok', error: 'Not connected — use Settings to connect via TikTok OAuth' };
     }
@@ -93,8 +94,8 @@ class TikTokService extends BasePlatformService {
     }
   }
 
-  async fetchFeed({ limit = 20 } = {}) {
-    const account = await this._getAccount();
+  async fetchFeed({ limit = 20, workspaceId = 'default' } = {}) {
+    const account = await this._getAccount(workspaceId);
     if (!account?.accessToken) throw new Error('TikTok not connected');
 
     const res = await axios.post(
@@ -137,8 +138,8 @@ class TikTokService extends BasePlatformService {
       const col = db.collection('feeds');
       for (const item of items) {
         await col.updateOne(
-          { platform: 'tiktok', originalId: item.originalId },
-          { $set: item },
+          { platform: 'tiktok', originalId: item.originalId, workspaceId },
+          { $set: { ...item, workspaceId } },
           { upsert: true }
         );
       }
@@ -149,8 +150,8 @@ class TikTokService extends BasePlatformService {
     return items;
   }
 
-  async publishPost({ content, videoUrl } = {}) {
-    const account = await this._getAccount();
+  async publishPost({ content, videoUrl, workspaceId = 'default' } = {}) {
+    const account = await this._getAccount(workspaceId);
     if (!account?.accessToken) throw new Error('TikTok not connected');
     if (!videoUrl) throw new Error('TikTok requires a video URL — text-only posts are not supported');
 

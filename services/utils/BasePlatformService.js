@@ -22,13 +22,15 @@ class BasePlatformService extends RabbitMQConnector {
 
   /** HTTP route'ları kaydet — platform servisleri override edebilir */
   _setupRoutes() {
-    this.app.get('/status', async () => {
-      return this.getStatus();
+    this.app.get('/status', async (request) => {
+      const workspaceId = request.headers['x-workspace-id'] || 'default';
+      return this.getStatus(workspaceId);
     });
 
     this.app.get('/feed', async (request, reply) => {
+      const workspaceId = request.headers['x-workspace-id'] || 'default';
       try {
-        const items = await this.fetchFeed(request.query);
+        const items = await this.fetchFeed({ ...request.query, workspaceId });
         return { success: true, platform: this.platformName, count: items.length, items };
       } catch (err) {
         reply.code(500).send({ success: false, error: err.message });
@@ -36,8 +38,9 @@ class BasePlatformService extends RabbitMQConnector {
     });
 
     this.app.post('/post', async (request, reply) => {
+      const workspaceId = request.headers['x-workspace-id'] || 'default';
       try {
-        const result = await this.publishPost(request.body);
+        const result = await this.publishPost({ ...request.body, workspaceId });
         return { success: true, platform: this.platformName, result };
       } catch (err) {
         reply.code(500).send({ success: false, error: err.message });
