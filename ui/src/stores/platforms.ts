@@ -129,8 +129,8 @@ export const usePlatformsStore = defineStore('platforms', () => {
 
   async function fetchMetaConnections() {
     try {
-      const res = await fetch('/api/credentials')
-      const data = await res.json()
+      const res = await axios.get('/api/credentials')
+      const data = res.data
       connectedPages.value = data.facebook?.pages || []
       allFbPages.value = data.facebook?.allPages || []
       connectedIgAccounts.value = data.instagram?.accounts || []
