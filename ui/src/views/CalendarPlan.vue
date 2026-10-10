@@ -143,6 +143,20 @@
         </div>
       </div>
 
+      <!-- Progress (background job) -->
+      <div v-if="(loading || briefLoading) && progress" class="mb-6 p-4 bg-gray-900 border border-violet-800/40 rounded-2xl">
+        <div class="flex items-center justify-between text-xs text-gray-300 mb-2">
+          <span class="flex items-center gap-2">
+            <i class="fa-solid fa-circle-notch animate-spin text-violet-400"></i>
+            {{ progressLabel() }}
+          </span>
+          <span class="text-gray-500">{{ $t('calendarPlan.progressHint') }}</span>
+        </div>
+        <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          <div class="h-full bg-violet-600 transition-all duration-500" :style="{ width: progress.total ? Math.max(5, Math.round((progress.completed / progress.total) * 100)) + '%' : '5%' }"></div>
+        </div>
+      </div>
+
       <!-- Error -->
       <div v-if="error" class="mb-6 p-3 bg-red-900/40 border border-red-700 rounded-xl text-red-300 text-sm">
         {{ error }}
@@ -260,10 +274,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
 import { useComposeStore } from '../stores/compose'
 
+const { t } = useI18n()
 const router = useRouter()
 const platformsStore = usePlatformsStore()
 const composeStore = useComposeStore()
@@ -323,23 +339,61 @@ function postsForPlatform(platform: string) {
   return (calendar.value?.posts ?? []).filter((p: any) => p.platform === platform)
 }
 
+// ─── Background job polling ───────────────────────────────────────────────────
+// Brief and calendar generation run as background jobs on the gateway
+// (POST returns 202 + jobId). Local models can take several minutes, which is
+// longer than most reverse proxies allow a single request to stay open.
+const progress = ref<{ step: string; completed: number; total: number } | null>(null)
+const POLL_INTERVAL_MS = 2000
+const JOB_TIMEOUT_MS = 20 * 60 * 1000
+
+function progressLabel(): string {
+  const p = progress.value
+  if (!p || !p.total) return ''
+  const stepLabel = p.step === 'brief'
+    ? t('calendarPlan.progressBrief')
+    : (PLATFORMS.find((x) => x.key === p.step)?.label ?? p.step)
+  return t('calendarPlan.progress', { step: stepLabel, completed: p.completed, total: p.total })
+}
+
+async function runAiJob(url: string, body: Record<string, unknown>): Promise<any> {
+  const start = await axios.post(url, body)
+  const jobId: string = start.data.jobId
+  if (!jobId) return start.data // synchronous fallback
+  const deadline = Date.now() + JOB_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+    const res = await axios.get(`/api/ai/jobs/${jobId}`)
+    progress.value = res.data.progress ?? null
+    if (res.data.status === 'done') return res.data.result
+    if (res.data.status === 'failed') throw new Error(res.data.error || 'AI job failed')
+  }
+  throw new Error(t('calendarPlan.jobTimedOut'))
+}
+
+function errorMessage(err: any, fallback: string): string {
+  return err?.response?.data?.error || err?.message || fallback
+}
+
 async function generateBrief() {
   if (!selectedPlatforms.value.length) return
   briefLoading.value = true
   error.value = ''
   calendar.value = null
+  progress.value = null
   try {
-    const res = await axios.post('/api/ai/content-brief', {
+    const result = await runAiJob('/api/ai/content-brief', {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
     })
-    pendingBrief.value = res.data.brief
-    pendingBriefMonthName.value = res.data.monthName
+    pendingBrief.value = result.brief
+    pendingBriefMonthName.value = result.monthName
   } catch (err: any) {
-    error.value = err.response?.data?.error || 'Brief generation failed'
+    error.value = errorMessage(err, 'Brief generation failed')
   } finally {
     briefLoading.value = false
+    progress.value = null
   }
 }
 
@@ -347,20 +401,21 @@ async function approveAndGenerate() {
   if (!pendingBrief.value) return
   loading.value = true
   error.value = ''
+  progress.value = null
   try {
-    const res = await axios.post('/api/ai/content-calendar', {
+    calendar.value = await runAiJob('/api/ai/content-calendar', {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
       approvedBrief: pendingBrief.value,
       postsPerWeek: postsPerWeek.value,
     })
-    calendar.value = res.data
     pendingBrief.value = null
   } catch (err: any) {
-    error.value = err.response?.data?.error || 'Calendar generation failed'
+    error.value = errorMessage(err, 'Calendar generation failed')
   } finally {
     loading.value = false
+    progress.value = null
   }
 }
 
@@ -369,18 +424,19 @@ async function generate() {
   loading.value = true
   error.value = ''
   pendingBrief.value = null
+  progress.value = null
   try {
-    const res = await axios.post('/api/ai/content-calendar', {
+    calendar.value = await runAiJob('/api/ai/content-calendar', {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
       postsPerWeek: postsPerWeek.value,
     })
-    calendar.value = res.data
   } catch (err: any) {
-    error.value = err.response?.data?.error || 'Calendar generation failed'
+    error.value = errorMessage(err, 'Calendar generation failed')
   } finally {
     loading.value = false
+    progress.value = null
   }
 }
 

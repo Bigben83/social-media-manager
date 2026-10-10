@@ -134,6 +134,10 @@ export default {
     week: 'Week {n}',
     exportCsv: 'Export CSV',
     at: 'at',
+    progress: 'Generating {step} ({completed}/{total} done)',
+    progressBrief: 'narrative brief',
+    progressHint: 'Runs in the background — local models can take a few minutes.',
+    jobTimedOut: 'Generation is taking too long — check the AI provider in Global Settings and try again.',
   },
 
   media: {
@@ -557,20 +561,36 @@ export default {
     connectAndActivate: 'Connect & Set Active',
     saveProvider: 'Save',
     providerSaved: 'Saved!',
+    modelInputPlaceholder: 'Model name, e.g. llama3.2',
+    modelsLive: 'Live model list from provider',
+    modelsStatic: 'Built-in model list (save a key to fetch live models)',
+    baseUrlLabel: 'Base URL',
+    baseUrlPlaceholder: 'http://host.docker.internal:1234/v1',
+    apiKeyOptional: 'API key (optional)',
+    anthropic: {
+      sectionTitle: 'Anthropic Claude',
+      sectionSubtitle: 'Claude Opus, Sonnet and Haiku via the Anthropic API, with vision support.',
+      getKeyHint: 'Get an API key at console.anthropic.com',
+    },
     openai: {
       sectionTitle: 'OpenAI',
-      sectionSubtitle: 'GPT-4o and GPT-4o-mini via the OpenAI API.',
+      sectionSubtitle: 'GPT-5 and GPT-4.1 family via the OpenAI API, with vision support.',
       getKeyHint: 'Get an API key at platform.openai.com',
     },
     groq: {
       sectionTitle: 'Groq',
-      sectionSubtitle: 'Ultra-fast inference with Llama and Mixtral models.',
+      sectionSubtitle: 'Ultra-fast inference with Llama and GPT-OSS open models.',
       getKeyHint: 'Get an API key at console.groq.com',
     },
     gemini: {
       sectionTitle: 'Google Gemini',
-      sectionSubtitle: 'Gemini 2.0 Flash and 1.5 Pro with native vision support.',
+      sectionSubtitle: 'Gemini 2.5 Flash and Pro with native vision support.',
       getKeyHint: 'Get an API key at aistudio.google.com',
+    },
+    custom: {
+      sectionTitle: 'OpenAI-compatible server',
+      sectionSubtitle: 'Any server that speaks the OpenAI Chat Completions API: LM Studio, vLLM, OpenRouter, LiteLLM, Ollama\'s /v1 endpoint…',
+      getKeyHint: 'Base URL should end in /v1. Leave the API key empty for local servers that don\'t need one.',
     },
   },
 

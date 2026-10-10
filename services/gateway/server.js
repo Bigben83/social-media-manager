@@ -12,6 +12,10 @@ const { ObjectId } = require('mongodb');
 const { getDb } = require('./utils/MongoDBConnector');
 const { encryptToken, decryptToken, warnIfNoKey } = require('./utils/crypto');
 const RabbitMQProducer = require('./utils/RabbitMQProducer');
+const {
+  generateText, streamText, listModels, extractJson,
+  PROVIDER_MODELS, PROVIDER_BASE_URLS, CLOUD_PROVIDERS, VISION_PROVIDERS,
+} = require('./ai');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi']);
@@ -134,7 +138,7 @@ function credId(ws, type) { return `${ws}:${type}`; }
 
 // Global credential types are not workspace-scoped (AI config, app credentials)
 const GLOBAL_CREDENTIAL_TYPES = new Set([
-  'ai_config', 'openai_config', 'groq_config', 'gemini_config',
+  'ai_config', 'openai_config', 'groq_config', 'gemini_config', 'anthropic_config', 'custom_config',
   'meta_app', 'pinterest_app', 'tiktok_app', 'google_places',
 ]);
 
@@ -733,26 +737,7 @@ Return [] for issues if no problems found. Return ONLY the JSON object.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 90000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 90000, json: true });
 
     let result = null;
     try {
@@ -775,20 +760,11 @@ Return [] for issues if no problems found. Return ONLY the JSON object.`;
 });
 
 // ─── AI / Multi-provider ─────────────────────────────────────────────────────
+// All LLM calls go through services/gateway/ai.js (generateText / streamText).
+// This section only resolves which provider is active and manages credentials.
 
 const DEFAULT_OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://ollama:11434';
 const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
-
-const PROVIDER_MODELS = {
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  groq:   ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
-  gemini: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
-};
-
-const PROVIDER_BASE_URLS = {
-  openai: 'https://api.openai.com/v1',
-  groq:   'https://api.groq.com/openai/v1',
-};
 
 // Extensible registry of image-generation providers.
 // Add new providers here when integrating Stable Diffusion, Midjourney, Flux, etc.
@@ -801,27 +777,22 @@ const IMAGE_GENERATION_PROVIDERS = {
   // future: { stable_diffusion: { ... }, midjourney: { ... } }
 };
 
-// Returns decrypted runtime config for the currently active provider
+// Returns decrypted runtime config for the currently active provider.
+// Shape: { provider, model, endpoint?, apiKey?, baseUrl?, visionModel? }
 async function getActiveProviderConfig(ws = 'default') {
   const aiConfig = await getCredentials(ws, 'ai_config');
   const provider = aiConfig?.provider || 'ollama';
-  if (provider === 'openai' || provider === 'groq') {
+
+  if (CLOUD_PROVIDERS.includes(provider)) {
     const doc = await getCredentials(ws, `${provider}_config`);
     return {
       provider,
       apiKey: doc?.apiKey ? decryptToken(doc.apiKey) : null,
-      model: doc?.model || PROVIDER_MODELS[provider][0],
-      baseUrl: PROVIDER_BASE_URLS[provider],
+      model: doc?.model || PROVIDER_MODELS[provider]?.[0] || '',
+      baseUrl: provider === 'custom' ? (doc?.baseUrl || '') : PROVIDER_BASE_URLS[provider],
     };
   }
-  if (provider === 'gemini') {
-    const doc = await getCredentials(ws, 'gemini_config');
-    return {
-      provider,
-      apiKey: doc?.apiKey ? decryptToken(doc.apiKey) : null,
-      model: doc?.model || PROVIDER_MODELS.gemini[0],
-    };
-  }
+
   return {
     provider: 'ollama',
     endpoint: aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT,
@@ -830,22 +801,12 @@ async function getActiveProviderConfig(ws = 'default') {
   };
 }
 
-function buildOpenAIMessages(prompt, system) {
-  const messages = [];
-  if (system) messages.push({ role: 'system', content: system });
-  messages.push({ role: 'user', content: prompt });
-  return messages;
-}
-
-// Gemini encodes system as a leading user/model conversation pair
-function buildGeminiContents(prompt, system) {
-  const contents = [];
-  if (system) {
-    contents.push({ role: 'user',  parts: [{ text: system }] });
-    contents.push({ role: 'model', parts: [{ text: 'Understood.' }] });
-  }
-  contents.push({ role: 'user', parts: [{ text: prompt }] });
-  return contents;
+function maskApiKey(encrypted) {
+  if (!encrypted) return null;
+  const key = decryptToken(encrypted);
+  if (!key) return null;
+  const prefix = key.length > 12 ? key.slice(0, 4) : '';
+  return `${prefix}…${key.slice(-4)}`;
 }
 
 app.get('/ai/config', async (request) => {
@@ -874,54 +835,41 @@ app.get('/ai/providers', async (request) => {
   const ws = request.workspaceId;
   const aiConfig = await getCredentials(ws, 'ai_config');
   const active = aiConfig?.provider || 'ollama';
-  const [openaiDoc, groqDoc, geminiDoc] = await Promise.all([
-    getCredentials(ws, 'openai_config'),
-    getCredentials(ws, 'groq_config'),
-    getCredentials(ws, 'gemini_config'),
-  ]);
-  return {
-    active,
-    providers: [
-      {
-        name: 'ollama',
-        configured: true,
-        active: active === 'ollama',
-        endpoint: aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT,
-        model: aiConfig?.model || DEFAULT_OLLAMA_MODEL,
-        visionModel: aiConfig?.visionModel || 'llava',
-      },
-      {
-        name: 'openai',
-        configured: !!openaiDoc?.apiKey,
-        active: active === 'openai',
-        model: openaiDoc?.model || PROVIDER_MODELS.openai[0],
-        apiKeyHint: openaiDoc?.apiKey ? `sk-...${decryptToken(openaiDoc.apiKey).slice(-4)}` : null,
-      },
-      {
-        name: 'groq',
-        configured: !!groqDoc?.apiKey,
-        active: active === 'groq',
-        model: groqDoc?.model || PROVIDER_MODELS.groq[0],
-        apiKeyHint: groqDoc?.apiKey ? `gsk_...${decryptToken(groqDoc.apiKey).slice(-4)}` : null,
-      },
-      {
-        name: 'gemini',
-        configured: !!geminiDoc?.apiKey,
-        active: active === 'gemini',
-        model: geminiDoc?.model || PROVIDER_MODELS.gemini[0],
-        apiKeyHint: geminiDoc?.apiKey ? `AIza...${decryptToken(geminiDoc.apiKey).slice(-4)}` : null,
-      },
-    ],
-  };
+  const docs = await Promise.all(CLOUD_PROVIDERS.map((name) => getCredentials(ws, `${name}_config`)));
+
+  const providers = [{
+    name: 'ollama',
+    configured: true,
+    active: active === 'ollama',
+    endpoint: aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT,
+    model: aiConfig?.model || DEFAULT_OLLAMA_MODEL,
+    visionModel: aiConfig?.visionModel || 'llava',
+  }];
+
+  CLOUD_PROVIDERS.forEach((name, i) => {
+    const doc = docs[i];
+    const configured = name === 'custom' ? !!doc?.baseUrl : !!doc?.apiKey;
+    providers.push({
+      name,
+      configured,
+      active: active === name,
+      model: doc?.model || PROVIDER_MODELS[name]?.[0] || '',
+      apiKeyHint: maskApiKey(doc?.apiKey),
+      ...(name === 'custom' ? { baseUrl: doc?.baseUrl || '' } : {}),
+    });
+  });
+
+  return { active, providers };
 });
 
 // PUT /ai/provider/:name — save credentials and optionally set as active
 // ollama body: { endpoint, model, visionModel, setActive? }
+// custom body: { baseUrl, apiKey?, model, setActive? }
 // others body: { apiKey, model, setActive? }
 app.put('/ai/provider/:name', async (request, reply) => {
   const ws = request.workspaceId;
   const { name } = request.params;
-  const { apiKey, model, endpoint, visionModel, setActive = false } = request.body || {};
+  const { apiKey, model, endpoint, baseUrl, visionModel, setActive = false } = request.body || {};
 
   if (name === 'ollama') {
     if (!endpoint) return reply.code(400).send({ error: 'endpoint is required for Ollama' });
@@ -933,20 +881,29 @@ app.put('/ai/provider/:name', async (request, reply) => {
       model: model || DEFAULT_OLLAMA_MODEL,
       visionModel: visionModel || 'llava',
     });
-  } else if (['openai', 'groq', 'gemini'].includes(name)) {
-    if (!apiKey) return reply.code(400).send({ error: 'apiKey is required' });
-    await setCredentials(ws, `${name}_config`, {
-      apiKey: encryptToken(apiKey),
-      model: model || PROVIDER_MODELS[name][0],
-    });
+  } else if (CLOUD_PROVIDERS.includes(name)) {
+    const existing = await getCredentials(ws, `${name}_config`) || {};
+    const update = { model: model || existing.model || PROVIDER_MODELS[name]?.[0] || '' };
+    if (apiKey) update.apiKey = encryptToken(apiKey);
+    if (name === 'custom') {
+      const url = (baseUrl || existing.baseUrl || '').trim().replace(/\/$/, '');
+      if (!url) return reply.code(400).send({ error: 'baseUrl is required for a custom OpenAI-compatible provider' });
+      if (!/^https?:\/\//.test(url)) return reply.code(400).send({ error: 'baseUrl must start with http:// or https://' });
+      update.baseUrl = url;
+      if (!update.model) return reply.code(400).send({ error: 'model is required for a custom provider' });
+    } else if (!update.apiKey && !existing.apiKey) {
+      return reply.code(400).send({ error: 'apiKey is required' });
+    }
+    await setCredentials(ws, `${name}_config`, update);
     if (setActive) {
-      const existing = await getCredentials(ws, 'ai_config') || {};
-      await setCredentials(ws, 'ai_config', { ...existing, provider: name });
+      const aiConfig = await getCredentials(ws, 'ai_config') || {};
+      await setCredentials(ws, 'ai_config', { ...aiConfig, provider: name });
     }
   } else {
     return reply.code(404).send({ error: `Unknown provider: ${name}` });
   }
 
+  log.info({ action: 'ai_provider_save', provider: name, setActive, outcome: 'success' });
   return { success: true };
 });
 
@@ -955,7 +912,7 @@ app.delete('/ai/provider/:name', async (request, reply) => {
   const ws = request.workspaceId;
   const { name } = request.params;
   if (name === 'ollama') return reply.code(400).send({ error: 'Cannot remove Ollama provider' });
-  if (!['openai', 'groq', 'gemini'].includes(name)) return reply.code(404).send({ error: `Unknown provider: ${name}` });
+  if (!CLOUD_PROVIDERS.includes(name)) return reply.code(404).send({ error: `Unknown provider: ${name}` });
   await deleteCredentials(ws, `${name}_config`);
   const aiConfig = await getCredentials(ws, 'ai_config') || {};
   if (aiConfig.provider === name) {
@@ -964,43 +921,47 @@ app.delete('/ai/provider/:name', async (request, reply) => {
   return { success: true };
 });
 
-// POST /ai/provider/:name/models — list models for a provider (test without saving key)
+// POST /ai/provider/:name/models — list models for a provider.
+// Uses the provider's live model endpoint when a key/endpoint is available,
+// falling back to the static PROVIDER_MODELS list. Body may carry an unsaved
+// apiKey / endpoint / baseUrl so the UI can test before saving.
 app.post('/ai/provider/:name/models', async (request, reply) => {
   const ws = request.workspaceId;
   const { name } = request.params;
-  const { apiKey: bodyApiKey, endpoint: bodyEndpoint } = request.body || {};
+  const { apiKey: bodyApiKey, endpoint: bodyEndpoint, baseUrl: bodyBaseUrl } = request.body || {};
 
   if (name === 'ollama') {
     const aiConfig = await getCredentials(ws, 'ai_config');
-    const ep = bodyEndpoint || aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
-    try {
-      const res = await axios.get(`${ep}/api/tags`, { timeout: 5000 });
-      return { models: (res.data.models || []).map((m) => m.name) };
-    } catch (err) {
-      return reply.code(503).send({ error: 'Could not reach Ollama', detail: err.message });
-    }
+    const endpoint = bodyEndpoint || aiConfig?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
+    const result = await listModels('ollama', { endpoint });
+    if (!result.live) return reply.code(503).send({ error: 'Could not reach Ollama — check the endpoint' });
+    return result;
   }
-  if (['openai', 'groq', 'gemini'].includes(name)) {
-    return { models: PROVIDER_MODELS[name] };
-  }
-  return reply.code(404).send({ error: `Unknown provider: ${name}` });
+  if (!CLOUD_PROVIDERS.includes(name)) return reply.code(404).send({ error: `Unknown provider: ${name}` });
+
+  const doc = await getCredentials(ws, `${name}_config`);
+  const apiKey = bodyApiKey || (doc?.apiKey ? decryptToken(doc.apiKey) : null);
+  const baseUrl = bodyBaseUrl || doc?.baseUrl || PROVIDER_BASE_URLS[name];
+  return listModels(name, { apiKey, baseUrl });
 });
 
+// GET /ai/models — models for the active provider (?endpoint= overrides Ollama endpoint for test-without-save)
 app.get('/ai/models', async (request, reply) => {
   const ws = request.workspaceId;
   const config = await getCredentials(ws, 'ai_config');
   const provider = config?.provider || 'ollama';
-  if (provider !== 'ollama') {
-    return { models: PROVIDER_MODELS[provider] || [], provider };
+  if (provider !== 'ollama' && !request.query.endpoint) {
+    const doc = await getCredentials(ws, `${provider}_config`);
+    const result = await listModels(provider, {
+      apiKey: doc?.apiKey ? decryptToken(doc.apiKey) : null,
+      baseUrl: doc?.baseUrl || PROVIDER_BASE_URLS[provider],
+    });
+    return { ...result, provider };
   }
   const endpoint = request.query.endpoint || config?.endpoint || DEFAULT_OLLAMA_ENDPOINT;
-  try {
-    const res = await axios.get(`${endpoint}/api/tags`, { timeout: 5000 });
-    const models = (res.data.models || []).map((m) => m.name);
-    return { models, endpoint };
-  } catch (err) {
-    return reply.code(503).send({ error: 'Could not reach Ollama — check the endpoint', detail: err.message });
-  }
+  const result = await listModels('ollama', { endpoint });
+  if (!result.live) return reply.code(503).send({ error: 'Could not reach Ollama — check the endpoint' });
+  return { ...result, endpoint };
 });
 
 // ─── Community Research ───────────────────────────────────────────────────────
@@ -1075,25 +1036,7 @@ Return ONLY the JSON object.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 60000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 60000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) }, { timeout: 60000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 60000, json: true });
 
     let brief = null;
     try {
@@ -1154,33 +1097,10 @@ app.post('/ai/generate', async (request, reply) => {
   const model = reqModel || pconf.model;
 
   try {
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
-      return { text: res.data.response, model, done: res.data.done };
-    }
-
-    if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
-      return { text: res.data.choices[0]?.message?.content || '', model, done: true };
-    }
-
-    if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 90000 },
-      );
-      return { text: res.data.candidates?.[0]?.content?.parts?.[0]?.text || '', model, done: true };
-    }
-
-    return reply.code(400).send({ error: `Unknown provider: ${pconf.provider}` });
+    const text = await generateText(pconf, { prompt, system, model, timeout: 180000 });
+    return { text, model, done: true };
   } catch (err) {
-    const status = err.response?.status || 503;
-    return reply.code(status).send({ error: 'AI generation failed', detail: err.message });
+    return reply.code(err.status || 503).send({ error: 'AI generation failed', detail: err.message });
   }
 });
 
@@ -1210,47 +1130,20 @@ app.post('/ai/caption', async (request, reply) => {
     return reply.code(400).send({ error: 'Could not load image', detail: err.message });
   }
 
-  try {
-    const model = reqModel || pconf.visionModel || pconf.model;
-
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, {
-        model, prompt: CAPTION_PROMPT, images: [imageBase64], stream: false,
-      }, { timeout: 90000 });
-      return { caption: res.data.response, model };
-    }
-
-    if (pconf.provider === 'openai') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'OpenAI API key not configured' });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model: model || 'gpt-4o',
-        messages: [{ role: 'user', content: [
-          { type: 'text', text: CAPTION_PROMPT },
-          { type: 'image_url', image_url: { url: `data:${imageMime};base64,${imageBase64}` } },
-        ]}],
-        stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
-      return { caption: res.data.choices[0]?.message?.content || '', model };
-    }
-
-    if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const geminiModel = model || 'gemini-1.5-flash';
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${pconf.apiKey}`,
-        { contents: [{ role: 'user', parts: [
-          { text: CAPTION_PROMPT },
-          { inlineData: { mimeType: imageMime, data: imageBase64 } },
-        ]}]},
-        { timeout: 90000 },
-      );
-      return { caption: res.data.candidates?.[0]?.content?.parts?.[0]?.text || '', model: geminiModel };
-    }
-
+  if (!VISION_PROVIDERS.has(pconf.provider)) {
     return reply.code(400).send({ error: `Provider ${pconf.provider} does not support vision captions` });
+  }
+
+  try {
+    // The UI sends the Ollama vision model name; cloud providers use their own multimodal model.
+    const model = pconf.provider === 'ollama' ? (reqModel || pconf.visionModel || pconf.model) : pconf.model;
+    const caption = await generateText(pconf, {
+      prompt: CAPTION_PROMPT, model, timeout: 180000,
+      images: [{ base64: imageBase64, mime: imageMime }],
+    });
+    return { caption: caption.trim(), model };
   } catch (err) {
-    const status = err.response?.status || 503;
-    return reply.code(status).send({ error: 'Caption generation failed', detail: err.message });
+    return reply.code(err.status || 503).send({ error: 'Caption generation failed', detail: err.message });
   }
 });
 
@@ -1277,70 +1170,11 @@ app.post('/ai/stream', async (request, reply) => {
   const writeToken = (token, done = false) => reply.raw.write(`data: ${JSON.stringify({ token, done })}\n\n`);
   const writeError = (msg) => { reply.raw.write(`data: ${JSON.stringify({ error: msg, done: true })}\n\n`); reply.raw.end(); };
 
-  try {
-    if (pconf.provider === 'ollama') {
-      const ollamaRes = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: true }, { responseType: 'stream', timeout: 120000 });
-      ollamaRes.data.on('data', (chunk) => {
-        try {
-          for (const line of chunk.toString().split('\n').filter(Boolean)) {
-            const data = JSON.parse(line);
-            writeToken(data.response || '', !!data.done);
-          }
-        } catch (_) {}
-      });
-      ollamaRes.data.on('end', () => reply.raw.end());
-      ollamaRes.data.on('error', (err) => writeError(err.message));
-      return;
-    }
-
-    if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return writeError(`${pconf.provider} API key not configured`);
-      const upstreamRes = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: true,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, responseType: 'stream', timeout: 120000 });
-      upstreamRes.data.on('data', (chunk) => {
-        try {
-          for (const line of chunk.toString().split('\n').filter(Boolean)) {
-            if (!line.startsWith('data: ')) continue;
-            const payload = line.slice(6).trim();
-            if (payload === '[DONE]') { writeToken('', true); return; }
-            const data = JSON.parse(payload);
-            const token = data.choices?.[0]?.delta?.content || '';
-            if (token) writeToken(token);
-          }
-        } catch (_) {}
-      });
-      upstreamRes.data.on('end', () => reply.raw.end());
-      upstreamRes.data.on('error', (err) => writeError(err.message));
-      return;
-    }
-
-    if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return writeError('Gemini API key not configured');
-      const geminiRes = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { responseType: 'stream', timeout: 120000 },
-      );
-      geminiRes.data.on('data', (chunk) => {
-        try {
-          for (const line of chunk.toString().split('\n').filter(Boolean)) {
-            if (!line.startsWith('data: ')) continue;
-            const data = JSON.parse(line.slice(6));
-            const token = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            if (token) writeToken(token);
-          }
-        } catch (_) {}
-      });
-      geminiRes.data.on('end', () => { writeToken('', true); reply.raw.end(); });
-      geminiRes.data.on('error', (err) => writeError(err.message));
-      return;
-    }
-
-    writeError(`Unknown provider: ${pconf.provider}`);
-  } catch (err) {
-    writeError(err.message);
-  }
+  await streamText(pconf, { prompt, system, model, timeout: 300000 }, {
+    onToken: (token) => writeToken(token),
+    onDone: () => { writeToken('', true); reply.raw.end(); },
+    onError: (msg) => writeError(msg),
+  });
 });
 
 // ─── AI Image Generation ──────────────────────────────────────────────────────
@@ -1487,38 +1321,102 @@ app.post('/ai/image', async (request, reply) => {
 
 // ─── Monthly Content Calendar ─────────────────────────────────────────────────
 
-// POST /ai/content-brief — generate a narrative brief only (step 1 of 2-step calendar flow)
-// Body: { accountKey?, platforms[], month? (YYYY-MM) }
-app.post('/ai/content-brief', async (request, reply) => {
-  const ws = request.workspaceId;
-  const { accountKey, platforms = [], month } = request.body || {};
-  if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
+// ─── Background AI jobs ───────────────────────────────────────────────────────
+// Long-running AI work (content calendars with local models can take several
+// minutes) runs in the background so neither the browser nor any reverse proxy
+// in front of nginx (Cloudflare, NPM, Caddy… typically 60–100 s) can cut the
+// request off. The client polls GET /ai/jobs/:id.
 
-  const db = await getDb();
-  const calMonth = month || new Date().toISOString().slice(0, 7);
-  const monthName = new Date(`${calMonth}-01`).toLocaleString('en', { month: 'long', year: 'numeric' });
+const aiJobs = new Map();
+const AI_JOB_TTL_MS = 30 * 60 * 1000;
 
-  const profileKey = accountKey || null;
-  const profile = profileKey
-    ? (await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws }))
-    || (await db.collection('account_profiles').findOne({ workspaceId: ws }))
-    : await db.collection('account_profiles').findOne({ workspaceId: ws });
+function createAiJob(ws, type, runner) {
+  const id = crypto.randomUUID();
+  const job = {
+    id, type, workspaceId: ws, status: 'running',
+    progress: { step: '', completed: 0, total: 0 },
+    result: null, error: null,
+    createdAt: new Date(), updatedAt: new Date(),
+  };
+  aiJobs.set(id, job);
 
-  const contextParts = [];
-  if (profile) {
-    if (profile.businessName)   contextParts.push(`Business: ${profile.businessName}`);
-    if (profile.description)    contextParts.push(`Description: ${profile.description}`);
-    if (profile.industry)       contextParts.push(`Industry: ${profile.industry}`);
-    if (profile.toneOfVoice)    contextParts.push(`Tone: ${profile.toneOfVoice}`);
-    if (profile.targetAudience) contextParts.push(`Audience: ${profile.targetAudience}`);
-    if (profile.keywords)       contextParts.push(`Keywords: ${profile.keywords}`);
+  const setProgress = (p) => { job.progress = { ...job.progress, ...p }; job.updatedAt = new Date(); };
+
+  runner(setProgress)
+    .then((result) => { job.status = 'done'; job.result = result; })
+    .catch((err) => {
+      job.status = 'failed';
+      job.error = err.message || String(err);
+      log.error({ action: `ai_job_${type}`, jobId: id, outcome: 'failure', err: job.error });
+    })
+    .finally(() => {
+      job.updatedAt = new Date();
+      setTimeout(() => aiJobs.delete(id), AI_JOB_TTL_MS).unref();
+    });
+
+  return job;
+}
+
+function publicAiJob(job) {
+  return {
+    jobId: job.id, type: job.type, status: job.status, progress: job.progress,
+    result: job.result, error: job.error, createdAt: job.createdAt, updatedAt: job.updatedAt,
+  };
+}
+
+app.get('/ai/jobs/:id', async (request, reply) => {
+  const job = aiJobs.get(request.params.id);
+  if (!job || job.workspaceId !== request.workspaceId) return reply.code(404).send({ error: 'Job not found' });
+  return publicAiJob(job);
+});
+
+// ─── Content calendar ─────────────────────────────────────────────────────────
+
+const CALENDAR_PLATFORM_HINTS = {
+  linkedin:  'professional hook first line, insights, 1300-char max. Peak times 08:00, 09:00, 10:00 or 17:00 on weekdays.',
+  instagram: 'visual-first, emojis ok, 2200-char max, 5-10 hashtags. Peak times 07:00, 12:00, 19:00 or 20:00.',
+  facebook:  'conversational, question or story, 500-char ideal. Peak times 09:00, 12:00 or 15:00.',
+  twitter:   'concise, punchy, under 280 chars. Peak times 08:00, 12:00 or 17:00.',
+  tiktok:    'hook in first 3 words, trending angle, keep under 150 chars. Peak times 07:00, 19:00, 20:00 or 21:00.',
+  pinterest: 'keyword-rich description, action-oriented. Peak times 14:00, 20:00 or 21:00.',
+  youtube:   'search-friendly title first, value proposition in first line. Peak times 14:00 or 15:00, prefer Thursday–Saturday.',
+  mastodon:  'authentic, community-focused, under 500 chars. Peak times 09:00 or 17:00.',
+  bluesky:   'authentic, community-focused, under 300 chars. Peak times 09:00 or 17:00.',
+  reddit:    'discussion-starting, no hard sell, title-style first line. Peak times 09:00 or 20:00.',
+};
+
+async function loadCalendarProfile(db, ws, accountKey) {
+  if (accountKey) {
+    const specific = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+    if (specific) return specific;
   }
+  return (await db.collection('account_profiles').findOne({ _id: `${ws}:workspace` }))
+    || (await db.collection('account_profiles').findOne({ workspaceId: ws }));
+}
 
-  const platformList = platforms.slice(0, 5).join(', ');
-  const platformNoteKeys = platforms.slice(0, 5).map((p) => `"${p}": "<one-sentence strategy>"`).join(', ');
+function calendarBrandContext(profile) {
+  const parts = [];
+  if (!profile) return '';
+  if (profile.businessName)   parts.push(`Business: ${profile.businessName}`);
+  if (profile.description)    parts.push(`Description: ${profile.description}`);
+  if (profile.industry)       parts.push(`Industry: ${profile.industry}`);
+  if (profile.toneOfVoice)    parts.push(`Tone of voice: ${profile.toneOfVoice}`);
+  if (profile.targetAudience) parts.push(`Target audience: ${profile.targetAudience}`);
+  if (profile.keywords)       parts.push(`Keywords: ${profile.keywords}`);
+  if (profile.hashtags)       parts.push(`Preferred hashtags: ${profile.hashtags}`);
+  if (profile.postingGuidelines) parts.push(`Posting guidelines: ${profile.postingGuidelines}`);
+  return parts.join('\n');
+}
 
-  const system = 'You are a social media content strategist. Return ONLY a valid JSON object with no markdown or explanation.';
-  const prompt = `${contextParts.length ? contextParts.join('\n') + '\n\n' : ''}Create a brief for the ${monthName} content calendar. Platforms: ${platformList}.
+function monthNameFor(calMonth) {
+  return new Date(`${calMonth}-01T00:00:00Z`).toLocaleString('en', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+const CALENDAR_SYSTEM = 'You are a social media content strategist. Return ONLY a valid JSON object — no markdown, no explanation, no code fences.';
+
+async function generateCalendarBrief(pconf, { brandContext, monthName, platforms }) {
+  const platformNoteKeys = platforms.map((p) => `"${p}": "<one-sentence strategy>"`).join(', ');
+  const prompt = `${brandContext ? brandContext + '\n\n' : ''}Create a brief for the ${monthName} content calendar. Platforms: ${platforms.join(', ')}.
 
 Return this exact JSON:
 {
@@ -1530,212 +1428,153 @@ Return this exact JSON:
 
 Return ONLY valid JSON.`;
 
+  const text = await generateText(pconf, { prompt, system: CALENDAR_SYSTEM, timeout: 300000, json: true });
+  let brief;
   try {
-    const pconf = await getActiveProviderConfig(request.workspaceId);
-    const model = pconf.model;
-    let text = '';
-
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 90000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
-
-    let brief = null;
-    try {
-      const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
-      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
-      brief = JSON.parse(jsonStr);
-      if (typeof brief.theme !== 'string' || !brief.theme) throw new Error('Missing theme');
-      if (!Array.isArray(brief.pillars)) brief.pillars = [];
-    } catch {
-      return reply.code(503).send({ error: 'AI returned invalid brief format — try again' });
-    }
-
-    log.info({ action: 'content_brief', month: calMonth, platforms: platforms.join(','), outcome: 'success' });
-    return { success: true, brief, monthName, month: calMonth };
+    brief = extractJson(text);
   } catch (err) {
-    log.error({ action: 'content_brief', outcome: 'failure', err: err.message });
-    return reply.code(503).send({ error: `Brief generation failed: ${err.message}` });
+    throw new Error(`AI returned an invalid brief (${err.message}) — try again or use a more capable model`);
   }
+  if (typeof brief.theme !== 'string' || !brief.theme) throw new Error('AI brief is missing a theme — try again');
+  if (!Array.isArray(brief.pillars)) brief.pillars = [];
+  if (typeof brief.toneGuidance !== 'string') brief.toneGuidance = '';
+  if (!brief.platformNotes || typeof brief.platformNotes !== 'object') brief.platformNotes = {};
+  return brief;
+}
+
+async function generateCalendarPostsForPlatform(pconf, { brandContext, monthName, platform, brief, postsPerWeek }) {
+  const total = postsPerWeek * 4;
+  const hint = CALENDAR_PLATFORM_HINTS[platform] || 'platform-native tone and length.';
+  const prompt = `${brandContext ? brandContext + '\n\n' : ''}Month: ${monthName}. Platform: ${platform}.
+
+Approved content brief (follow it exactly):
+Theme: "${brief.theme}"
+Pillars: ${(brief.pillars || []).join(', ')}
+Tone: ${brief.toneGuidance || ''}
+${brief.platformNotes?.[platform] ? `Platform strategy: ${brief.platformNotes[platform]}` : ''}
+
+Platform conventions for ${platform}: ${hint}
+
+Write exactly ${total} ready-to-publish ${platform} posts: ${postsPerWeek} per week for weeks 1–4.
+Mix post types across educational, promotional, engagement and storytelling.
+Spread posts across different days; use the platform's peak times for "suggestedTime".
+
+Return ONLY this JSON object:
+{
+  "posts": [
+    { "week": <1-4>, "suggestedDay": "<Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday>", "suggestedTime": "<HH:MM 24h>", "content": "<post text>", "hashtags": ["<tag>"], "postType": "<educational|promotional|engagement|storytelling>" }
+  ]
+}`;
+
+  const text = await generateText(pconf, { prompt, system: CALENDAR_SYSTEM, timeout: 600000, json: true });
+  let parsed;
+  try {
+    parsed = extractJson(text);
+  } catch (err) {
+    throw new Error(`AI returned invalid posts for ${platform} (${err.message})`);
+  }
+  const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.posts) ? parsed.posts : []);
+  const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const TYPES = ['educational', 'promotional', 'engagement', 'storytelling'];
+  const posts = list
+    .filter((p) => p && typeof p.content === 'string' && p.content.trim())
+    .slice(0, total)
+    .map((p, i) => ({
+      platform,
+      week: Math.min(4, Math.max(1, parseInt(p.week) || (Math.floor(i / postsPerWeek) + 1))),
+      suggestedDay: DAYS.includes(p.suggestedDay) ? p.suggestedDay : DAYS[i % 7],
+      suggestedTime: /^\d{2}:\d{2}$/.test(p.suggestedTime || '') ? p.suggestedTime : '09:00',
+      content: p.content.trim(),
+      hashtags: Array.isArray(p.hashtags) ? p.hashtags.filter((h) => typeof h === 'string').slice(0, 15) : [],
+      postType: TYPES.includes(p.postType) ? p.postType : 'educational',
+    }));
+  if (!posts.length) throw new Error(`AI returned no usable posts for ${platform}`);
+  return posts;
+}
+
+// POST /ai/content-brief — generate a narrative brief only (step 1 of 2-step calendar flow)
+// Body: { accountKey?, platforms[], month? (YYYY-MM) }
+// Returns 202 { jobId } — poll GET /ai/jobs/:jobId; result: { brief, monthName, month }
+app.post('/ai/content-brief', async (request, reply) => {
+  const ws = request.workspaceId;
+  const { accountKey, platforms = [], month } = request.body || {};
+  if (!Array.isArray(platforms) || !platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
+
+  const db = await getDb();
+  const calMonth = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
+  const monthName = monthNameFor(calMonth);
+  const activePlatforms = platforms.slice(0, 5);
+  const profile = await loadCalendarProfile(db, ws, accountKey);
+  const brandContext = calendarBrandContext(profile);
+  const pconf = await getActiveProviderConfig(ws);
+
+  const job = createAiJob(ws, 'content_brief', async (setProgress) => {
+    setProgress({ step: 'brief', completed: 0, total: 1 });
+    const brief = await generateCalendarBrief(pconf, { brandContext, monthName, platforms: activePlatforms });
+    setProgress({ completed: 1 });
+    log.info({ action: 'content_brief', month: calMonth, platforms: activePlatforms.join(','), outcome: 'success' });
+    return { success: true, brief, monthName, month: calMonth };
+  });
+
+  return reply.code(202).send(publicAiJob(job));
 });
 
-// POST /ai/content-calendar — generate a monthly content plan with narrative brief + sample posts
+// POST /ai/content-calendar — generate a monthly content plan with narrative brief + posts
 // Body: { accountKey?, platforms[], month? (YYYY-MM), approvedBrief?, postsPerWeek? }
+// Returns 202 { jobId } — poll GET /ai/jobs/:jobId; result is the saved calendar document.
+// Posts are generated one platform at a time so each AI call stays small enough
+// for local models and progress can be reported.
 app.post('/ai/content-calendar', async (request, reply) => {
   const ws = request.workspaceId;
   const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw } = request.body || {};
-  if (!platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
+  if (!Array.isArray(platforms) || !platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
 
   const db = await getDb();
-  const calMonth = month || new Date().toISOString().slice(0, 7);
-  const [year, mon] = calMonth.split('-');
-  const monthName = new Date(`${calMonth}-01`).toLocaleString('en', { month: 'long', year: 'numeric' });
-
-  // Validate postsPerWeek: 1–7, default 3
+  const calMonth = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
+  const monthName = monthNameFor(calMonth);
   const postsPerWeek = Math.min(7, Math.max(1, parseInt(rawPpw) || 3));
-
-  // Load account profile for context
-  const profileKey = accountKey || null;
-  const profile = profileKey
-    ? (await db.collection('account_profiles').findOne({ _id: profileKey, workspaceId: ws }))
-    || (await db.collection('account_profiles').findOne({ workspaceId: ws }))
-    : await db.collection('account_profiles').findOne({ workspaceId: ws });
-
-  const contextParts = ['You are a social media content strategist.'];
-  if (profile) {
-    if (profile.businessName)   contextParts.push(`Business: ${profile.businessName}`);
-    if (profile.description)    contextParts.push(`Description: ${profile.description}`);
-    if (profile.industry)       contextParts.push(`Industry: ${profile.industry}`);
-    if (profile.toneOfVoice)    contextParts.push(`Tone of voice: ${profile.toneOfVoice}`);
-    if (profile.targetAudience) contextParts.push(`Target audience: ${profile.targetAudience}`);
-    if (profile.keywords)       contextParts.push(`Keywords: ${profile.keywords}`);
-  }
-  const brandContext = contextParts.join('\n');
-
   const activePlatforms = platforms.slice(0, 5);
-  const platformList = activePlatforms.join(', ');
-  // Cap total posts to 60 to keep response size manageable
-  const postsPerPlatform = postsPerWeek * 4;
-  const totalPosts = Math.min(activePlatforms.length * postsPerPlatform, 60);
-  const cappedPerPlatform = Math.ceil(totalPosts / activePlatforms.length);
+  const profile = await loadCalendarProfile(db, ws, accountKey);
+  const brandContext = calendarBrandContext(profile);
+  const pconf = await getActiveProviderConfig(ws);
 
-  const system = 'You are a social media content strategist. Return ONLY a valid JSON object — no markdown, no explanation, no code fences.';
+  const job = createAiJob(ws, 'content_calendar', async (setProgress) => {
+    const totalSteps = activePlatforms.length + (approvedBrief ? 0 : 1);
+    let completed = 0;
 
-  const platformNoteKeys = activePlatforms.map((p) => `"${p}"`).join(', ');
-  const postSchema = `{ "platform": "<one of: ${platformList}>", "week": <1-4>, "suggestedDay": "<Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday>", "suggestedTime": "<HH:MM in 24h>", "content": "<ready-to-publish post>", "hashtags": ["<tag>"], "postType": "<educational|promotional|engagement|storytelling>" }`;
-
-  // If an approved brief was passed, use it directly — only generate posts
-  const briefSection = approvedBrief
-    ? `The content brief has already been approved — do NOT change it. Use this brief exactly:
-Theme: "${approvedBrief.theme}"
-Pillars: ${(approvedBrief.pillars || []).join(', ')}
-Tone: ${approvedBrief.toneGuidance || ''}
-
-Generate posts that faithfully follow this approved brief.`
-    : '';
-
-  const prompt = `${brandContext}
-
-${briefSection}
-Create a ${monthName} content calendar for: ${platformList}.
-Generate exactly ${postsPerWeek} posts per platform per week, covering all 4 weeks (${cappedPerPlatform} posts per platform, ${totalPosts} posts total).
-Distribute evenly: week 1 = days 1–7, week 2 = days 8–14, week 3 = days 15–21, week 4 = days 22–28.
-
-For "suggestedTime" use these platform-native peak times (24-hour HH:MM):
-- LinkedIn: 08:00, 09:00, 10:00, or 17:00 on weekdays
-- Instagram: 07:00, 12:00, 19:00, or 20:00
-- Facebook: 09:00, 12:00, or 15:00
-- Twitter/X: 08:00, 12:00, or 17:00
-- TikTok: 07:00, 19:00, 20:00, or 21:00
-- Pinterest: 14:00, 20:00, or 21:00
-- YouTube: 14:00 or 15:00, prefer Thursday–Saturday
-- Mastodon/Bluesky: 09:00 or 17:00
-
-Platform content conventions:
-- LinkedIn: professional hook first line, insights, 1300-char max
-- Instagram: visual-first, emojis ok, 2200-char max, 5-10 hashtags
-- Facebook: conversational, question or story, 500-char ideal
-- Twitter/X: concise, punchy, under 280 chars
-- TikTok: hook in first 3 words, trending angle, keep under 150 chars
-- Pinterest: keyword-rich description, action-oriented
-- Mastodon/Bluesky: authentic, community-focused, 300/500 chars
-
-Return a single JSON object:
-{
-  "brief": ${approvedBrief ? JSON.stringify(approvedBrief) : `{
-    "theme": "<one-sentence monthly narrative>",
-    "pillars": ["<pillar 1>", "<pillar 2>", "<pillar 3>"],
-    "toneGuidance": "<one sentence>",
-    "platformNotes": { ${platformNoteKeys.split(', ').map((k) => `${k}: "<strategy>"`).join(', ')} }
-  }`},
-  "posts": [<${totalPosts} post objects using schema: ${postSchema}>]
-}
-
-Return ONLY the JSON object.`;
-
-  try {
-    const pconf = await getActiveProviderConfig(request.workspaceId);
-    const model = pconf.model;
-    let text = '';
-
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 180000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 180000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 180000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
+    let brief = approvedBrief && typeof approvedBrief.theme === 'string' ? approvedBrief : null;
+    if (!brief) {
+      setProgress({ step: 'brief', completed, total: totalSteps });
+      brief = await generateCalendarBrief(pconf, { brandContext, monthName, platforms: activePlatforms });
+      completed++;
     }
 
-    let calendar = null;
-    try {
-      // Strip markdown code fences if present
-      const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
-      const jsonStr = (cleaned.match(/\{[\s\S]*\}/) || ['{}'])[0];
-      calendar = JSON.parse(jsonStr);
-      if (!calendar.brief || !Array.isArray(calendar.posts)) throw new Error('Missing brief or posts array');
-      if (!Array.isArray(calendar.brief.pillars)) calendar.brief.pillars = [];
-      if (typeof calendar.brief.theme !== 'string') calendar.brief.theme = '';
-      // Normalise suggestedTime: ensure HH:MM format, default 09:00
-      calendar.posts = calendar.posts
-        .filter((p) => p && typeof p.content === 'string')
-        .slice(0, totalPosts)
-        .map((p) => ({
-          ...p,
-          suggestedTime: /^\d{2}:\d{2}$/.test(p.suggestedTime || '') ? p.suggestedTime : '09:00',
-        }));
-      if (calendar.posts.length === 0) throw new Error('No valid posts in response');
-    } catch (parseErr) {
-      log.warn({ action: 'content_calendar', outcome: 'parse_failure', err: parseErr.message });
-      return reply.code(503).send({ error: 'AI returned invalid calendar format — try again or use a more capable model' });
+    const posts = [];
+    for (const platform of activePlatforms) {
+      setProgress({ step: platform, completed, total: totalSteps });
+      const platformPosts = await generateCalendarPostsForPlatform(pconf, { brandContext, monthName, platform, brief, postsPerWeek });
+      posts.push(...platformPosts);
+      completed++;
+      setProgress({ completed });
     }
 
     const doc = {
       accountKey: accountKey || null,
       month: calMonth,
       monthName,
-      platforms,
+      platforms: activePlatforms,
       postsPerWeek,
-      brief: calendar.brief,
-      posts: calendar.posts,
+      brief,
+      posts,
       workspaceId: ws,
       createdAt: new Date(),
     };
-    const result = await db.collection('content_calendars').insertOne(doc);
-    log.info({ action: 'content_calendar', month: calMonth, platforms: platforms.join(','), posts: calendar.posts.length, outcome: 'success' });
-    return { success: true, calendarId: result.insertedId.toString(), ...doc };
-  } catch (err) {
-    log.error({ action: 'content_calendar', outcome: 'failure', err: err.message });
-    return reply.code(503).send({ error: `Calendar generation failed: ${err.message}` });
-  }
+    const inserted = await db.collection('content_calendars').insertOne(doc);
+    log.info({ action: 'content_calendar', month: calMonth, platforms: activePlatforms.join(','), posts: posts.length, outcome: 'success' });
+    return { success: true, calendarId: inserted.insertedId.toString(), ...doc };
+  });
+
+  return reply.code(202).send(publicAiJob(job));
 });
 
 // GET /ai/content-calendar/:id — retrieve a saved calendar
@@ -1803,24 +1642,7 @@ app.post('/ai/bulk-draft', async (request, reply) => {
         const prompt = `Write a social media post about: ${topic}`;
         let content = '';
 
-        if (pconf.provider === 'ollama') {
-          const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
-          content = res.data.response || '';
-        } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-          if (!pconf.apiKey) throw new Error(`${pconf.provider} API key not configured`);
-          const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-            model, messages: buildOpenAIMessages(prompt, system), stream: false,
-          }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
-          content = res.data.choices[0]?.message?.content || '';
-        } else if (pconf.provider === 'gemini') {
-          if (!pconf.apiKey) throw new Error('Gemini API key not configured');
-          const res = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-            { contents: buildGeminiContents(prompt, system) },
-            { timeout: 90000 },
-          );
-          content = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        }
+        content = await generateText(pconf, { prompt, system, model, timeout: 180000 });
 
         if (content.trim()) {
           const draftNow = new Date();
@@ -3123,26 +2945,7 @@ Return ONLY the JSON object.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: true });
 
     let audit = null;
     try {
@@ -3400,26 +3203,7 @@ app.post('/hashtags/ai-suggest', async (request, reply) => {
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 60000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 60000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 60000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 60000, json: false });
 
     const tags = [...new Set((text.match(/#[a-zA-Z]\w*/g) || []).map((t) => t.toLowerCase()))].slice(0, count);
     return { success: true, hashtags: tags };
@@ -3663,26 +3447,7 @@ Rules:
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: 'array' });
 
     let suggestions = [];
     try {
@@ -3839,26 +3604,7 @@ Return ONLY the JSON object. No explanation, no markdown.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 180000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 180000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 180000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 180000, json: true });
 
     let aiAnalysis = null;
     try {
@@ -3926,26 +3672,7 @@ No explanation, no markdown.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: 'array' });
 
     const VALID_INTENTS = new Set(['informational', 'commercial', 'transactional', 'navigational']);
     let keywords = [];
@@ -4074,26 +3801,7 @@ Severity guide: high = major strategic shift, medium = notable change worth moni
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: 'array' });
 
     const VALID_TYPES = new Set(['topic_expansion', 'tone_shift', 'campaign_launch', 'pricing_change', 'market_entry', 'competitive_aggression', 'frequency_change']);
     const VALID_SEVERITIES = new Set(['low', 'medium', 'high']);
@@ -4169,26 +3877,7 @@ No explanation, no markdown.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 180000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 180000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 180000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 180000, json: 'array' });
 
     let roadmap = [];
     try {
@@ -4270,26 +3959,7 @@ If data is not available for a field, use null for numbers and [] for arrays. Re
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: true });
 
     const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
     let profile = null;
@@ -4379,26 +4049,7 @@ Include your brand as a player with isYou: true. Return ONLY valid JSON.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 90000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 90000, json: true });
 
     const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
     let result = null;
@@ -4459,26 +4110,7 @@ Write as direct, specific analysis. No fluff.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 90000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 90000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 90000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 90000, json: false });
 
     if (!text.trim()) return reply.code(503).send({ error: 'AI returned empty response — try again' });
     log.info({ action: 'competitor_matrix', count: competitors.length, outcome: 'success' });
@@ -4572,26 +4204,7 @@ Scoring: overallScore = 100 minus the average of all five force scores × 10. Re
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: true });
 
     const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
     let result = null;
@@ -4675,26 +4288,7 @@ Return ONLY valid JSON.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: true });
 
     const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
     let result = null;
@@ -4844,26 +4438,7 @@ Return ONLY valid JSON.`;
     const model = pconf.model;
     let text = '';
 
-    if (pconf.provider === 'ollama') {
-      const res = await axios.post(`${pconf.endpoint}/api/generate`, { model, prompt, system, stream: false }, { timeout: 120000 });
-      text = res.data.response;
-    } else if (pconf.provider === 'openai' || pconf.provider === 'groq') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: `${pconf.provider} API key not configured` });
-      const res = await axios.post(`${pconf.baseUrl}/chat/completions`, {
-        model, messages: buildOpenAIMessages(prompt, system), stream: false,
-      }, { headers: { Authorization: `Bearer ${pconf.apiKey}` }, timeout: 120000 });
-      text = res.data.choices[0]?.message?.content || '';
-    } else if (pconf.provider === 'gemini') {
-      if (!pconf.apiKey) return reply.code(503).send({ error: 'Gemini API key not configured' });
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${pconf.apiKey}`,
-        { contents: buildGeminiContents(prompt, system) },
-        { timeout: 120000 },
-      );
-      text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      return reply.code(400).send({ error: 'AI not configured' });
-    }
+    text = await generateText(pconf, { prompt, system, model, timeout: 120000, json: true });
 
     const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
     let result = null;

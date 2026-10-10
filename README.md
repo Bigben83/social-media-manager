@@ -16,7 +16,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 - **Content Calendar** — Month/week calendar view of scheduled posts in the Scheduler
 - **AI Content Plan** — Generate a full month of platform-native posts with a narrative brief (theme, pillars, tone) at `/calendar-plan`; save all posts as drafts or export to CSV
 - **Account Profiles** — Store business context (name, industry, audience, tone, hashtags) per account for AI context injection; built-in **Strategy Consistency Audit** checks your profile against recent posts
-- **AI Assistance** — Multi-provider: local [Ollama](https://ollama.ai) (llama3.2, llava, etc.), OpenAI (GPT-4o), Groq (Llama, Mixtral), or Google Gemini; draft generation with platform-native writing rules, hashtag suggestions, image captions; streams directly into the editor
+- **AI Assistance** — Multi-provider: local [Ollama](https://ollama.ai) (llama3, qwen3, gemma, llava…), Anthropic Claude, OpenAI (GPT-5 / GPT-4.1), Groq, Google Gemini, or any OpenAI-compatible server (LM Studio, vLLM, OpenRouter…); draft generation with platform-native writing rules, hashtag suggestions, image captions; streams directly into the editor
 - **AI Image Generation** — Generate images directly in the Compose view using OpenAI DALL-E 3 (text-to-image) or DALL-E 2 (variations from an existing image); choose aspect ratio (1:1, 16:9, 9:16), HD quality, and vivid/natural style; generated images are saved to the media library and auto-attached to the post
 - **Platform-native Writing Rules** — When platforms are selected in Compose, the AI automatically applies platform-specific length, tone, and format rules (Twitter brevity, LinkedIn professional depth, Instagram visual storytelling, etc.)
 - **Competitor Intelligence** — Track up to 5 competitors; AI-powered structured analysis (themes, tone, positioning, gaps, moves); Porter-style **market signal detection** (7 signal types, 3 severity levels); **response prediction** (next moves, vulnerabilities, retaliation triggers); **competitor profile fact-sheet** (pricing, key features, channels, target customer); keyword extraction with intent classification; content gap analysis against your own hashtag history; 5-post content roadmap; side-by-side card layout with double-danger gap highlighting
@@ -44,7 +44,7 @@ A self-hosted, local-first social media management platform. Aggregate feeds fro
 | Platform Services | Node.js / Fastify (one per platform) |
 | Database | MongoDB 6 |
 | Job Queue | Redis + BullMQ |
-| AI | [Ollama](https://ollama.ai) (local) · OpenAI · Groq · Google Gemini |
+| AI | [Ollama](https://ollama.ai) (local) · Anthropic Claude · OpenAI · Groq · Google Gemini · any OpenAI-compatible server |
 | Logging | Pino (structured JSON) |
 | Reverse Proxy | Nginx |
 | Containerization | Docker Compose |
@@ -117,30 +117,43 @@ Open **<http://localhost:8081>** in your browser.
 
 ### 4. (Optional) Connect AI
 
-SocialManager supports four AI providers. Switch between them at any time in **Settings → AI Integration**.
+SocialManager supports six AI providers. Switch between them at any time in **Global Settings → AI Integration** (`/global-settings`). Only one provider is active at a time.
 
 #### Ollama (local, free)
 
 Run Ollama on your host machine and pull a model:
 
 ```bash
-ollama pull llama3.2      # text generation
+ollama pull llama3.1      # text generation
 ollama pull llava         # image captioning (vision)
 ```
 
-In Settings, set the Ollama endpoint to `http://host.docker.internal:11434`, test the connection, and click **Save**.
+In Global Settings, set the Ollama endpoint to `http://host.docker.internal:11434` (or the LAN address of your Ollama box), click **Test Connection**, pick a model and click **Save**.
 
-#### Cloud providers (OpenAI · Groq · Gemini)
+Tips for local models:
 
-Go to **Settings → AI Integration** and open the card for the provider you want:
+- Pick a model that fits in your GPU memory. If Ollama reports `cudaMalloc failed: out of memory` in its logs, every AI feature in the app will fail — choose a smaller quantisation.
+- Thinking models (qwen3, gemma4, deepseek-r1) are run with thinking disabled so they answer in seconds rather than minutes.
+- Long tasks such as the monthly content plan run as background jobs, so they are not affected by reverse-proxy timeouts.
+
+#### Cloud providers (Anthropic Claude · OpenAI · Groq · Gemini)
+
+Open the card for the provider you want:
 
 | Provider | Where to get a key |
 | --- | --- |
-| OpenAI (GPT-4o, GPT-4o-mini) | [platform.openai.com](https://platform.openai.com) |
-| Groq (Llama 3, Mixtral) | [console.groq.com](https://console.groq.com) |
-| Google Gemini (2.0 Flash, 1.5 Pro) | [aistudio.google.com](https://aistudio.google.com) |
+| Anthropic Claude (Opus, Sonnet, Haiku) | [console.anthropic.com](https://console.anthropic.com) |
+| OpenAI (GPT-5, GPT-4.1, GPT-4o) | [platform.openai.com](https://platform.openai.com) |
+| Groq (Llama 3.3, GPT-OSS) | [console.groq.com](https://console.groq.com) |
+| Google Gemini (2.5 Flash, 2.5 Pro) | [aistudio.google.com](https://aistudio.google.com) |
 
-Paste your API key and click **Connect & Set Active**. Keys are stored AES-256-GCM encrypted in MongoDB — no `.env` editing required. Only one provider is active at a time; switch with the **Set as Active** button on any configured card.
+Paste your API key and click **Connect & Set Active**. The model list is fetched live from the provider once a key is saved. Keys are stored AES-256-GCM encrypted in MongoDB — no `.env` editing required. Switch providers with the **Set as Active** button on any configured card.
+
+#### Any OpenAI-compatible server
+
+The **OpenAI-compatible server** card accepts a base URL (ending in `/v1`), an optional API key and a model name. Use it for LM Studio, vLLM, OpenRouter, LiteLLM, or Ollama's own `/v1` endpoint.
+
+> After pulling this version, rebuild the gateway so the Anthropic SDK is installed: `docker compose build gateway && docker compose up -d gateway`.
 
 ---
 

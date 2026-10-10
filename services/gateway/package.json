@@ -8,6 +8,7 @@
         "test": "jest --forceExit"
     },
     "dependencies": {
+        "@anthropic-ai/sdk": "^0.133.0",
         "@fastify/multipart": "^8.3.0",
         "amqplib": "^0.10.3",
         "axios": "^1.6.7",

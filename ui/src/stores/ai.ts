@@ -20,12 +20,20 @@ export interface ProviderInfo {
   visionModel?: string
   // cloud-specific
   apiKeyHint?: string | null
+  // custom (OpenAI-compatible) only
+  baseUrl?: string
 }
 
+/** Cloud / API providers configured through PUT /ai/provider/:name (Ollama is separate). */
+export const CLOUD_PROVIDER_NAMES = ['anthropic', 'openai', 'groq', 'gemini', 'custom'] as const
+
+/** Static fallback lists — the Settings UI fetches live model lists from each provider when a key is saved. */
 export const PROVIDER_MODELS: Record<string, string[]> = {
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  groq:   ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
-  gemini: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+  openai:    ['gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'],
+  groq:      ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+  gemini:    ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+  custom:    [],
 }
 
 export const useAiStore = defineStore('ai', () => {
@@ -66,7 +74,7 @@ export const useAiStore = defineStore('ai', () => {
 
   async function saveProvider(
     name: string,
-    payload: { apiKey?: string; model?: string; endpoint?: string; visionModel?: string; setActive?: boolean },
+    payload: { apiKey?: string; model?: string; endpoint?: string; baseUrl?: string; visionModel?: string; setActive?: boolean },
   ): Promise<boolean> {
     saving.value = true
     error.value = null
@@ -95,7 +103,7 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  async function fetchProviderModels(name: string, payload?: { apiKey?: string; endpoint?: string }): Promise<string[]> {
+  async function fetchProviderModels(name: string, payload?: { apiKey?: string; endpoint?: string; baseUrl?: string }): Promise<string[]> {
     try {
       const res = await axios.post(`/api/ai/provider/${name}/models`, payload || {})
       return res.data.models || []

@@ -200,13 +200,13 @@
         </div>
       </div>
 
-      <!-- ═══ AI PROVIDERS — OpenAI, Groq, Gemini ═══════════════════════════════ -->
-      <template v-for="providerName in ['openai', 'groq', 'gemini']" :key="providerName">
+      <!-- ═══ AI PROVIDERS — Anthropic, OpenAI, Groq, Gemini, OpenAI-compatible ══ -->
+      <template v-for="providerName in CLOUD_PROVIDER_NAMES" :key="providerName">
         <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
           <div class="p-5 border-b border-gray-800 flex items-center gap-3">
             <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-              :class="providerName === 'openai' ? 'bg-emerald-700' : providerName === 'groq' ? 'bg-orange-700' : 'bg-blue-700'">
-              {{ providerName === 'openai' ? 'OAI' : providerName === 'groq' ? 'GRQ' : 'GEM' }}
+              :class="PROVIDER_BADGE[providerName].cls">
+              {{ PROVIDER_BADGE[providerName].abbr }}
             </div>
             <div>
               <p class="font-semibold">{{ $t(`ai.${providerName}.sectionTitle`) }}</p>
@@ -221,7 +221,8 @@
             <div v-if="getProvider(providerName)?.configured && !providerForms[providerName].editing">
               <div class="flex items-center justify-between text-sm">
                 <div class="space-y-1">
-                  <p class="text-xs text-gray-400">{{ $t('ai.apiKeyLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.apiKeyHint }}</span></p>
+                  <p v-if="providerName === 'custom'" class="text-xs text-gray-400">{{ $t('ai.baseUrlLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.baseUrl }}</span></p>
+                  <p class="text-xs text-gray-400">{{ $t('ai.apiKeyLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.apiKeyHint || '—' }}</span></p>
                   <p v-if="providerForms[providerName].saved" class="text-xs text-green-400">{{ $t('ai.providerSaved') }}</p>
                 </div>
                 <div class="flex gap-2">
@@ -235,9 +236,13 @@
               </div>
               <div class="mt-3">
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
-                <select v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
-                  <option v-for="m in (PROVIDER_MODELS[providerName] || [])" :key="m" :value="m">{{ m }}</option>
+                <select v-if="modelOptions(providerName).length" v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
+                  <option v-if="providerForms[providerName].model && !modelOptions(providerName).includes(providerForms[providerName].model)" :value="providerForms[providerName].model">{{ providerForms[providerName].model }}</option>
+                  <option v-for="m in modelOptions(providerName)" :key="m" :value="m">{{ m }}</option>
                 </select>
+                <input v-else v-model="providerForms[providerName].model" type="text" :placeholder="$t('ai.modelInputPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                <p class="text-xs text-gray-600 mt-1">{{ liveModels[providerName] ? $t('ai.modelsLive') : $t('ai.modelsStatic') }}</p>
               </div>
               <div class="flex justify-end mt-3">
                 <button @click="saveCloudProvider(providerName, aiStore.config.provider === providerName)" :disabled="providerForms[providerName].saving"
@@ -247,25 +252,34 @@
               </div>
             </div>
             <div v-else class="space-y-3">
+              <div v-if="providerName === 'custom'">
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.baseUrlLabel') }}</label>
+                <input v-model="providerForms[providerName].baseUrl" type="text" :placeholder="$t('ai.baseUrlPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+              </div>
               <div>
-                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.apiKeyLabel') }}</label>
+                <label class="block text-xs text-gray-500 mb-1">{{ providerName === 'custom' ? $t('ai.apiKeyOptional') : $t('ai.apiKeyLabel') }}</label>
                 <input v-model="providerForms[providerName].apiKey" type="password" :placeholder="$t('ai.apiKeyPlaceholder')"
                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
                 <p class="text-xs text-gray-600 mt-1">{{ $t(`ai.${providerName}.getKeyHint`) }}</p>
               </div>
               <div>
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
-                <select v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
-                  <option v-for="m in (PROVIDER_MODELS[providerName] || [])" :key="m" :value="m">{{ m }}</option>
+                <select v-if="modelOptions(providerName).length" v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
+                  <option v-if="providerForms[providerName].model && !modelOptions(providerName).includes(providerForms[providerName].model)" :value="providerForms[providerName].model">{{ providerForms[providerName].model }}</option>
+                  <option v-for="m in modelOptions(providerName)" :key="m" :value="m">{{ m }}</option>
                 </select>
+                <input v-else v-model="providerForms[providerName].model" type="text" :placeholder="$t('ai.modelInputPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                <p class="text-xs text-gray-600 mt-1">{{ liveModels[providerName] ? $t('ai.modelsLive') : $t('ai.modelsStatic') }}</p>
               </div>
               <div class="flex items-center justify-end gap-2">
                 <button v-if="providerForms[providerName].editing" @click="providerForms[providerName].editing = false" class="text-xs px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 transition-colors">Cancel</button>
-                <button @click="saveCloudProvider(providerName, false)" :disabled="providerForms[providerName].saving || !providerForms[providerName].apiKey"
+                <button @click="saveCloudProvider(providerName, false)" :disabled="providerForms[providerName].saving || !canSave(providerName)"
                   class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 border border-gray-600 rounded-lg text-xs font-medium transition-colors">
                   {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.saveProvider') }}
                 </button>
-                <button @click="saveCloudProvider(providerName, true)" :disabled="providerForms[providerName].saving || !providerForms[providerName].apiKey"
+                <button @click="saveCloudProvider(providerName, true)" :disabled="providerForms[providerName].saving || !canSave(providerName)"
                   class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
                   {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.connectAndActivate') }}
                 </button>
@@ -314,7 +328,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore } from '../stores/platforms'
-import { useAiStore, PROVIDER_MODELS } from '../stores/ai'
+import { useAiStore, PROVIDER_MODELS, CLOUD_PROVIDER_NAMES } from '../stores/ai'
 
 const { t } = useI18n()
 const platformsStore = usePlatformsStore()
@@ -420,29 +434,65 @@ async function saveAiConfig() {
 
 // ─── Cloud AI providers ───────────────────────────────────────────────────────
 interface ProviderFormState {
-  apiKey: string; model: string; editing: boolean; saving: boolean; saved: boolean
+  apiKey: string; baseUrl: string; model: string; editing: boolean; saving: boolean; saved: boolean
 }
 
-const providerForms = ref<Record<string, ProviderFormState>>({
-  openai: { apiKey: '', model: '', editing: false, saving: false, saved: false },
-  groq:   { apiKey: '', model: '', editing: false, saving: false, saved: false },
-  gemini: { apiKey: '', model: '', editing: false, saving: false, saved: false },
-})
+const PROVIDER_BADGE: Record<string, { cls: string; abbr: string }> = {
+  anthropic: { cls: 'bg-amber-700',   abbr: 'CLD' },
+  openai:    { cls: 'bg-emerald-700', abbr: 'OAI' },
+  groq:      { cls: 'bg-orange-700',  abbr: 'GRQ' },
+  gemini:    { cls: 'bg-blue-700',    abbr: 'GEM' },
+  custom:    { cls: 'bg-gray-600',    abbr: 'API' },
+}
+
+const emptyForm = (): ProviderFormState => ({ apiKey: '', baseUrl: '', model: '', editing: false, saving: false, saved: false })
+const providerForms = ref<Record<string, ProviderFormState>>(
+  Object.fromEntries(CLOUD_PROVIDER_NAMES.map((n) => [n, emptyForm()])),
+)
+
+// Live model lists fetched from each provider (falls back to PROVIDER_MODELS)
+const liveModels = ref<Record<string, string[] | null>>({})
 
 function getProvider(name: string) {
   return aiStore.providers.find((p) => p.name === name)
 }
 
+function modelOptions(name: string): string[] {
+  return liveModels.value[name] ?? PROVIDER_MODELS[name] ?? []
+}
+
+function canSave(name: string): boolean {
+  const form = providerForms.value[name]
+  if (name === 'custom') return !!form.baseUrl.trim() && !!form.model.trim()
+  return !!form.apiKey
+}
+
+async function refreshProviderModels(name: string) {
+  const form = providerForms.value[name]
+  const models = await aiStore.fetchProviderModels(name, {
+    apiKey: form?.apiKey || undefined,
+    baseUrl: name === 'custom' ? (form?.baseUrl || undefined) : undefined,
+  })
+  liveModels.value[name] = models.length ? models : null
+  if (form && !form.model && models.length) form.model = models[0]
+}
+
 async function saveCloudProvider(name: string, setActive = false) {
   const form = providerForms.value[name]
   form.saving = true
-  const ok = await aiStore.saveProvider(name, { apiKey: form.apiKey || undefined, model: form.model || undefined, setActive })
+  const ok = await aiStore.saveProvider(name, {
+    apiKey: form.apiKey || undefined,
+    baseUrl: name === 'custom' ? (form.baseUrl.trim() || undefined) : undefined,
+    model: form.model || undefined,
+    setActive,
+  })
   form.saving = false
   if (ok) {
     form.saved = true
     form.editing = false
     form.apiKey = ''
     setTimeout(() => { form.saved = false }, 2500)
+    refreshProviderModels(name)
   }
 }
 
@@ -472,7 +522,10 @@ onMounted(async () => {
   for (const p of aiStore.providers) {
     if (p.name === 'ollama') continue
     const form = providerForms.value[p.name]
-    if (form) form.model = p.model || ''
+    if (!form) continue
+    form.model = p.model || ''
+    form.baseUrl = p.baseUrl || ''
+    if (p.configured) refreshProviderModels(p.name)
   }
 })
 </script>
