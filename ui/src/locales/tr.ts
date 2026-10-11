@@ -248,7 +248,7 @@ export default {
 
     imageButton: 'Görsel oluştur',
     imageGenerateTitle: 'Yapay Zeka Görsel Üretimi',
-    imageGeneratePowered: 'DALL-E 3 tarafından desteklenmektedir',
+    imageGeneratePowered: 'OpenAI gpt-image-1 tarafından desteklenmektedir',
     imagePrompt: 'Görsel açıklaması',
     imagePromptPlaceholder: 'Oluşturmak istediğiniz görseli açıklayın…',
     imageStyleVivid: 'Canlı',

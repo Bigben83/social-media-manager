@@ -248,7 +248,7 @@ export default {
 
     imageButton: 'Generate image',
     imageGenerateTitle: 'AI Image Generation',
-    imageGeneratePowered: 'Powered by DALL-E 3',
+    imageGeneratePowered: 'Powered by OpenAI gpt-image-1',
     imagePrompt: 'Image prompt',
     imagePromptPlaceholder: 'Describe the image you want to generate…',
     imageStyleVivid: 'Vivid',

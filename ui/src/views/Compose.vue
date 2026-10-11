@@ -1007,8 +1007,8 @@ async function generateCaption() {
 
 const IMAGE_SIZES = [
   { value: '1024x1024', label: '1:1' },
-  { value: '1792x1024', label: '16:9' },
-  { value: '1024x1792', label: '9:16' },
+  { value: '1536x1024', label: '16:9' },
+  { value: '1024x1536', label: '9:16' },
 ]
 
 const imageGenAvailable = ref(false)

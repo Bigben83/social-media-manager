@@ -770,9 +770,18 @@ const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 // Add new providers here when integrating Stable Diffusion, Midjourney, Flux, etc.
 const IMAGE_GENERATION_PROVIDERS = {
   openai: {
-    name: 'OpenAI DALL-E',
-    textToImage: { model: 'dall-e-3', sizes: ['1024x1024', '1792x1024', '1024x1792'] },
-    imageVariations: { model: 'dall-e-2', sizes: ['256x256', '512x512', '1024x1024'] },
+    name: 'OpenAI gpt-image',
+    textToImage: { model: 'gpt-image-1', sizes: ['1024x1024', '1536x1024', '1024x1536'] },
+    imageVariations: { model: 'gpt-image-1', sizes: ['1024x1024', '1536x1024', '1024x1536'] },
+    qualities: ['low', 'medium', 'high', 'auto'],
+    // Legacy DALL-E 3 values still sent by older clients
+    sizeAliases: { '1792x1024': '1536x1024', '1024x1792': '1024x1536' },
+    qualityAliases: { standard: 'medium', hd: 'high' },
+    // gpt-image has no `style` parameter — the old vivid/natural toggle becomes prompt guidance
+    styleHints: {
+      vivid: 'Style: vivid, hyper-real, dramatic lighting and saturated colours.',
+      natural: 'Style: natural, realistic, understated lighting and true-to-life colours.',
+    },
   },
   // future: { stable_diffusion: { ... }, midjourney: { ... } }
 };
@@ -1203,10 +1212,14 @@ app.get('/ai/image-providers', async (request, reply) => {
 // POST /ai/image — generate or vary an image, save to media library, return local URL
 // Body: { prompt, size?, quality?, style?, referenceImageUrl? }
 //   prompt            — text description of the desired image
-//   size              — one of the provider's supported sizes (default 1024x1024)
-//   quality           — 'standard' | 'hd' (DALL-E 3 only, default 'standard')
-//   style             — 'vivid' | 'natural' (DALL-E 3 only, default 'vivid')
-//   referenceImageUrl — local /media/ path or external URL; triggers image variations (DALL-E 2)
+//   size              — one of the provider's supported sizes (default 1024x1024);
+//                       legacy DALL-E 3 sizes (1792x1024 / 1024x1792) are mapped to the nearest gpt-image size
+//   quality           — 'standard' | 'hd' (legacy) or 'low' | 'medium' | 'high' | 'auto'
+//   style             — 'vivid' | 'natural'; gpt-image has no style parameter so this is folded into the prompt
+//   referenceImageUrl — local /media/ path or external URL; triggers an image edit (variation) with the reference
+//
+// DALL-E 2 / 3 were shut down by OpenAI on 2026-05-12. Requests now go to gpt-image-1, which
+// rejects `style` and `response_format` and always returns base64 image data.
 app.post('/ai/image', async (request, reply) => {
   const { prompt, size = '1024x1024', quality = 'standard', style = 'vivid', referenceImageUrl } = request.body || {};
   if (!prompt?.trim() && !referenceImageUrl) {
@@ -1221,14 +1234,20 @@ app.post('/ai/image', async (request, reply) => {
 
   const apiKey = decryptToken(openaiDoc.apiKey);
   const OPENAI_API = PROVIDER_BASE_URLS.openai;
+  const providerConf = IMAGE_GENERATION_PROVIDERS.openai;
+
+  const imageSize = providerConf.sizeAliases[size] || (providerConf.textToImage.sizes.includes(size) ? size : '1024x1024');
+  const imageQuality = providerConf.qualityAliases[quality] || (providerConf.qualities.includes(quality) ? quality : 'medium');
+  const styleHint = providerConf.styleHints[style] || '';
+  const userPrompt = (prompt || '').trim().slice(0, 4000);
 
   try {
-    let remoteUrl;
+    let b64;
     let model;
 
     if (referenceImageUrl) {
-      // ── Image variations via DALL-E 2 ─────────────────────────────────────
-      model = IMAGE_GENERATION_PROVIDERS.openai.imageVariations.model;
+      // ── Image variation via gpt-image edits ──────────────────────────────
+      model = providerConf.imageVariations.model;
 
       // Load the reference image (support local /media/ paths and external URLs)
       let imgBuffer;
@@ -1243,53 +1262,50 @@ app.post('/ai/image', async (request, reply) => {
         imgBuffer = Buffer.from(res.data);
       }
 
-      const allowedVariationSizes = IMAGE_GENERATION_PROVIDERS.openai.imageVariations.sizes;
-      const variationSize = allowedVariationSizes.includes(size) ? size : '1024x1024';
+      const editPrompt = [
+        userPrompt || 'Create a fresh variation of this image, keeping the same subject, composition and mood.',
+        styleHint,
+      ].filter(Boolean).join(' ');
 
       const form = new FormData();
+      form.append('model', model);
       form.append('image', new Blob([imgBuffer], { type: 'image/png' }), 'reference.png');
+      form.append('prompt', editPrompt);
       form.append('n', '1');
-      form.append('size', variationSize);
-      form.append('response_format', 'url');
+      form.append('size', imageSize);
+      form.append('quality', imageQuality);
 
-      const res = await fetch(`${OPENAI_API}/images/variations`, {
+      const res = await fetch(`${OPENAI_API}/images/edits`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error?.message || `OpenAI variations API error ${res.status}`);
+        throw new Error(errBody.error?.message || `OpenAI image edit API error ${res.status}`);
       }
-      remoteUrl = (await res.json()).data?.[0]?.url;
+      b64 = (await res.json()).data?.[0]?.b64_json;
 
     } else {
-      // ── Text-to-image via DALL-E 3 ────────────────────────────────────────
-      model = IMAGE_GENERATION_PROVIDERS.openai.textToImage.model;
-
-      const allowedSizes = IMAGE_GENERATION_PROVIDERS.openai.textToImage.sizes;
-      const imageSize = allowedSizes.includes(size) ? size : '1024x1024';
+      // ── Text-to-image via gpt-image ──────────────────────────────────────
+      model = providerConf.textToImage.model;
 
       const res = await axios.post(`${OPENAI_API}/images/generations`, {
         model,
-        prompt: prompt.trim().slice(0, 4000),
+        prompt: [userPrompt, styleHint].filter(Boolean).join(' '),
         n: 1,
         size: imageSize,
-        quality: quality === 'hd' ? 'hd' : 'standard',
-        style: style === 'natural' ? 'natural' : 'vivid',
-        response_format: 'url',
+        quality: imageQuality,
       }, {
         headers: { Authorization: `Bearer ${apiKey}` },
-        timeout: 120000,
+        timeout: 180000,
       });
-      remoteUrl = res.data.data?.[0]?.url;
+      b64 = res.data.data?.[0]?.b64_json;
     }
 
-    if (!remoteUrl) throw new Error('No image URL returned from OpenAI');
+    if (!b64) throw new Error('No image data returned from OpenAI');
 
-    // Download and persist — OpenAI URLs expire after ~1 hour
-    const imgRes = await axios.get(remoteUrl, { responseType: 'arraybuffer', timeout: 30000 });
-    const imgBuffer = Buffer.from(imgRes.data);
+    const imgBuffer = Buffer.from(b64, 'base64');
     const filename = `${crypto.randomUUID()}.png`;
     fs.writeFileSync(path.join(UPLOAD_DIR, filename), imgBuffer);
 
