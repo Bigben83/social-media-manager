@@ -448,6 +448,7 @@ module.exports = {
   AiError,
   PROVIDER_MODELS,
   PROVIDER_BASE_URLS,
+  GEMINI_BASE_URL,
   CLOUD_PROVIDERS,
   VISION_PROVIDERS,
   generateText,

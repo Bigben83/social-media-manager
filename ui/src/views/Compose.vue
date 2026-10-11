@@ -340,7 +340,19 @@
           <div class="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
             <i class="fa-solid fa-image text-emerald-400 text-xs"></i>
             <span class="text-sm font-medium text-white">{{ $t('compose.imageGenerateTitle') }}</span>
-            <span class="text-xs text-gray-500 ml-auto">{{ $t('compose.imageGeneratePowered') }}</span>
+            <!-- Provider picker -->
+            <div class="ml-auto flex items-center gap-2">
+              <span class="text-xs text-gray-500 hidden sm:inline">{{ $t('compose.imageProvider') }}</span>
+              <div class="flex rounded-lg overflow-hidden border border-gray-700">
+                <button
+                  v-for="p in imageProviders" :key="p.name"
+                  @click="imageProvider = p.name"
+                  :title="p.model"
+                  class="px-2.5 py-1 text-xs transition-colors"
+                  :class="imageProvider === p.name ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-gray-300 bg-gray-800'"
+                >{{ $t(`compose.imageProviders.${p.name}`) }}</button>
+              </div>
+            </div>
           </div>
           <div class="px-4 py-3 space-y-3">
             <!-- Prompt -->
@@ -605,11 +617,12 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { useComposeStore } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
-import { useAiStore } from '../stores/ai'
+import { useAiStore, type ImageProvider, type ImageProviderName } from '../stores/ai'
 import { useHashtagStore } from '../stores/hashtags'
 import { useCompetitorStore } from '../stores/competitors'
 import PostPreview from '../components/compose/PostPreview.vue'
 import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr, utcToNaiveDatetimeString } from '../utils/timezone'
+type ImageAspect = '1:1' | '16:9' | '9:16'
 
 const { t } = useI18n()
 const composeStore = useComposeStore()
@@ -643,8 +656,12 @@ onMounted(async () => {
 
   // Check whether an image generation provider is configured
   try {
-    const imgRes = await axios.get('/api/ai/image-providers')
-    imageGenAvailable.value = (imgRes.data.providers?.length ?? 0) > 0
+    imageProviders.value = await aiStore.fetchImageProviders()
+    imageGenAvailable.value = imageProviders.value.length > 0
+    const remembered = localStorage.getItem('compose.imageProvider') as ImageProviderName | null
+    imageProvider.value = imageProviders.value.some((p) => p.name === remembered)
+      ? (remembered as ImageProviderName)
+      : (imageProviders.value[0]?.name ?? 'openai')
   } catch {
     imageGenAvailable.value = false
   }
@@ -1005,16 +1022,19 @@ async function generateCaption() {
 
 // ─── Image Generation ────────────────────────────────────────────────────────
 
-const IMAGE_SIZES = [
-  { value: '1024x1024', label: '1:1' },
-  { value: '1536x1024', label: '16:9' },
-  { value: '1024x1536', label: '9:16' },
+const IMAGE_SIZES: { value: ImageAspect; label: string }[] = [
+  { value: '1:1', label: '1:1' },
+  { value: '16:9', label: '16:9' },
+  { value: '9:16', label: '9:16' },
 ]
 
 const imageGenAvailable = ref(false)
+const imageProviders = ref<ImageProvider[]>([])
+const imageProvider = ref<ImageProviderName>('openai')
+watch(imageProvider, (v) => { try { localStorage.setItem('compose.imageProvider', v) } catch { /* ignore */ } })
 const imagePanelOpen = ref(false)
 const imagePrompt = ref('')
-const imageSize = ref('1024x1024')
+const imageSize = ref<ImageAspect>('1:1')
 const imageQuality = ref<'standard' | 'hd'>('standard')
 const imageStyle = ref<'vivid' | 'natural'>('vivid')
 const useImageVariation = ref(false)
@@ -1034,6 +1054,7 @@ async function generateImage() {
   try {
     const result = await aiStore.generateImage({
       prompt: imagePrompt.value,
+      provider: imageProvider.value,
       size: imageSize.value,
       quality: imageQuality.value,
       style: imageStyle.value,

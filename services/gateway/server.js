@@ -14,7 +14,7 @@ const { encryptToken, decryptToken, warnIfNoKey } = require('./utils/crypto');
 const RabbitMQProducer = require('./utils/RabbitMQProducer');
 const {
   generateText, streamText, listModels, extractJson,
-  PROVIDER_MODELS, PROVIDER_BASE_URLS, CLOUD_PROVIDERS, VISION_PROVIDERS,
+  PROVIDER_MODELS, PROVIDER_BASE_URLS, GEMINI_BASE_URL, CLOUD_PROVIDERS, VISION_PROVIDERS,
 } = require('./ai');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
@@ -139,7 +139,7 @@ function credId(ws, type) { return `${ws}:${type}`; }
 // Global credential types are not workspace-scoped (AI config, app credentials)
 const GLOBAL_CREDENTIAL_TYPES = new Set([
   'ai_config', 'openai_config', 'groq_config', 'gemini_config', 'anthropic_config', 'custom_config',
-  'meta_app', 'pinterest_app', 'tiktok_app', 'google_places',
+  'meta_app', 'pinterest_app', 'tiktok_app', 'google_places', 'image_config',
 ]);
 
 async function getCredentials(ws, type) {
@@ -767,24 +767,180 @@ const DEFAULT_OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://ollama:11
 const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 
 // Extensible registry of image-generation providers.
-// Add new providers here when integrating Stable Diffusion, Midjourney, Flux, etc.
+// Every provider accepts the same normalised request from POST /ai/image
+// ({ prompt, aspect: '1:1'|'16:9'|'9:16', quality: 'standard'|'hd', style, referenceImage? })
+// and returns { buffer, mime, model }. Add new providers here (Flux, Midjourney, …).
+const IMAGE_ASPECTS = ['1:1', '16:9', '9:16'];
+
+// Legacy DALL-E 3 / gpt-image pixel sizes still sent by older clients → aspect ratio
+const IMAGE_SIZE_TO_ASPECT = {
+  '1024x1024': '1:1', '1792x1024': '16:9', '1024x1792': '9:16', '1536x1024': '16:9', '1024x1536': '9:16',
+};
+
+// The vivid/natural toggle is pure prompt guidance on every current provider
+const IMAGE_STYLE_HINTS = {
+  vivid: 'Style: vivid, hyper-real, dramatic lighting and saturated colours.',
+  natural: 'Style: natural, realistic, understated lighting and true-to-life colours.',
+};
+
 const IMAGE_GENERATION_PROVIDERS = {
   openai: {
     name: 'OpenAI gpt-image',
-    textToImage: { model: 'gpt-image-1', sizes: ['1024x1024', '1536x1024', '1024x1536'] },
-    imageVariations: { model: 'gpt-image-1', sizes: ['1024x1024', '1536x1024', '1024x1536'] },
-    qualities: ['low', 'medium', 'high', 'auto'],
-    // Legacy DALL-E 3 values still sent by older clients
-    sizeAliases: { '1792x1024': '1536x1024', '1024x1792': '1024x1536' },
-    qualityAliases: { standard: 'medium', hd: 'high' },
-    // gpt-image has no `style` parameter — the old vivid/natural toggle becomes prompt guidance
-    styleHints: {
-      vivid: 'Style: vivid, hyper-real, dramatic lighting and saturated colours.',
-      natural: 'Style: natural, realistic, understated lighting and true-to-life colours.',
-    },
+    textToImage: { model: 'gpt-image-1' },
+    imageVariations: { model: 'gpt-image-1' },
+    sizes: { '1:1': '1024x1024', '16:9': '1536x1024', '9:16': '1024x1536' },
+    qualities: { standard: 'medium', hd: 'high' },
   },
-  // future: { stable_diffusion: { ... }, midjourney: { ... } }
+  gemini: {
+    name: 'Google Gemini',
+    defaultModel: 'gemini-2.5-flash-image',
+    imageVariations: true,
+  },
+  local: {
+    name: 'Local Stable Diffusion',
+    // AUTOMATIC1111 / Forge / SD.Next compatible REST API (/sdapi/v1/*)
+    sizes: { '1:1': [1024, 1024], '16:9': [1344, 768], '9:16': [768, 1344] },
+    steps: { standard: 25, hd: 40 },
+    defaultSteps: 25,
+    imageVariations: true,
+  },
 };
+
+const DEFAULT_IMAGE_CONFIG = { geminiModel: 'gemini-2.5-flash-image', localEndpoint: '', localSteps: 25 };
+
+async function getImageConfig(ws) {
+  const doc = await getCredentials(ws, 'image_config');
+  return { ...DEFAULT_IMAGE_CONFIG, ...(doc || {}) };
+}
+
+function mimeExtension(mime) {
+  if (/jpe?g/.test(mime)) return 'jpg';
+  if (/webp/.test(mime)) return 'webp';
+  return 'png';
+}
+
+// Load a reference image for variations (supports local /media/ paths and external URLs)
+async function loadReferenceImage(referenceImageUrl) {
+  if (referenceImageUrl.startsWith('/media/')) {
+    return fs.readFileSync(path.join(UPLOAD_DIR, path.basename(referenceImageUrl)));
+  }
+  const url = referenceImageUrl.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/, 'http://nginx:8081');
+  const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
+  return Buffer.from(res.data);
+}
+
+// ── OpenAI gpt-image ──────────────────────────────────────────────────────────
+// DALL-E 2 / 3 were shut down by OpenAI on 2026-05-12. gpt-image rejects `style` and
+// `response_format` and always returns base64 data.
+async function generateOpenAiImage({ apiKey, prompt, aspect, quality, styleHint, referenceImage }) {
+  const conf = IMAGE_GENERATION_PROVIDERS.openai;
+  const size = conf.sizes[aspect];
+  const q = conf.qualities[quality];
+  const OPENAI_API = PROVIDER_BASE_URLS.openai;
+
+  if (referenceImage) {
+    const model = conf.imageVariations.model;
+    const form = new FormData();
+    form.append('model', model);
+    form.append('image', new Blob([referenceImage], { type: 'image/png' }), 'reference.png');
+    form.append('prompt', [prompt || 'Create a fresh variation of this image, keeping the same subject, composition and mood.', styleHint].filter(Boolean).join(' '));
+    form.append('n', '1');
+    form.append('size', size);
+    form.append('quality', q);
+    const res = await fetch(`${OPENAI_API}/images/edits`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || `OpenAI image edit API error ${res.status}`);
+    }
+    const b64 = (await res.json()).data?.[0]?.b64_json;
+    if (!b64) throw new Error('No image data returned from OpenAI');
+    return { buffer: Buffer.from(b64, 'base64'), mime: 'image/png', model };
+  }
+
+  const model = conf.textToImage.model;
+  const res = await axios.post(`${OPENAI_API}/images/generations`, {
+    model, prompt: [prompt, styleHint].filter(Boolean).join(' '), n: 1, size, quality: q,
+  }, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 180000 });
+  const b64 = res.data.data?.[0]?.b64_json;
+  if (!b64) throw new Error('No image data returned from OpenAI');
+  return { buffer: Buffer.from(b64, 'base64'), mime: 'image/png', model };
+}
+
+// ── Google Gemini native image generation ─────────────────────────────────────
+// generateContent with responseModalities IMAGE; the image comes back as an inlineData part.
+async function generateGeminiImage({ apiKey, model, prompt, aspect, styleHint, referenceImage }) {
+  const parts = [{ text: [prompt || 'Create a fresh variation of this image, keeping the same subject, composition and mood.', styleHint].filter(Boolean).join(' ') }];
+  if (referenceImage) parts.push({ inlineData: { mimeType: 'image/png', data: referenceImage.toString('base64') } });
+
+  const call = (generationConfig) => axios.post(
+    `${GEMINI_BASE_URL}/models/${model}:generateContent?key=${apiKey}`,
+    { contents: [{ role: 'user', parts }], generationConfig },
+    { timeout: 180000 },
+  );
+
+  let res;
+  try {
+    res = await call({ responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: aspect } });
+  } catch (err) {
+    // Older image models reject imageConfig — retry without it
+    if (err.response?.status !== 400 || !/imageConfig|aspect/i.test(err.response?.data?.error?.message || '')) throw err;
+    res = await call({ responseModalities: ['TEXT', 'IMAGE'] });
+  }
+
+  const candidate = res.data.candidates?.[0];
+  const imagePart = (candidate?.content?.parts || []).find((p) => p.inlineData?.data);
+  if (!imagePart) {
+    const text = (candidate?.content?.parts || []).map((p) => p.text).filter(Boolean).join(' ').slice(0, 300);
+    throw new Error(text ? `Gemini returned no image: ${text}` : `Gemini returned no image (${candidate?.finishReason || 'unknown reason'})`);
+  }
+  return { buffer: Buffer.from(imagePart.inlineData.data, 'base64'), mime: imagePart.inlineData.mimeType || 'image/png', model };
+}
+
+// ── Local Stable Diffusion (AUTOMATIC1111-compatible API) ─────────────────────
+async function generateLocalImage({ endpoint, steps, prompt, aspect, quality, styleHint, referenceImage }) {
+  const conf = IMAGE_GENERATION_PROVIDERS.local;
+  const [width, height] = conf.sizes[aspect];
+  const base = endpoint.replace(/\/$/, '');
+  const body = {
+    prompt: [prompt, styleHint].filter(Boolean).join(' '),
+    negative_prompt: 'text, watermark, logo, blurry, low quality, deformed',
+    steps: quality === 'hd' ? Math.max(steps, conf.steps.hd) : steps,
+    width, height, batch_size: 1, n_iter: 1,
+  };
+  let route = 'txt2img';
+  if (referenceImage) {
+    route = 'img2img';
+    body.init_images = [referenceImage.toString('base64')];
+    body.denoising_strength = 0.6;
+    if (!prompt) body.prompt = ['a high quality variation of the input image', styleHint].filter(Boolean).join(' ');
+  }
+  const res = await axios.post(`${base}/sdapi/v1/${route}`, body, { timeout: 600000 });
+  const b64 = res.data.images?.[0];
+  if (!b64) throw new Error('No image data returned from the local image server');
+  let model = 'stable-diffusion';
+  try { model = JSON.parse(res.data.info || '{}').sd_model_name || model; } catch { /* ignore */ }
+  return { buffer: Buffer.from(b64, 'base64'), mime: 'image/png', model };
+}
+
+// Returns the image providers that are usable right now, in display order.
+async function listImageProviders(ws) {
+  const [openaiDoc, geminiDoc, imageConf] = await Promise.all([
+    getCredentials(ws, 'openai_config'),
+    getCredentials(ws, 'gemini_config'),
+    getImageConfig(ws),
+  ]);
+  const providers = [];
+  if (openaiDoc?.apiKey) {
+    providers.push({ name: 'openai', label: IMAGE_GENERATION_PROVIDERS.openai.name, model: IMAGE_GENERATION_PROVIDERS.openai.textToImage.model, imageVariations: true });
+  }
+  if (geminiDoc?.apiKey) {
+    providers.push({ name: 'gemini', label: IMAGE_GENERATION_PROVIDERS.gemini.name, model: imageConf.geminiModel, imageVariations: true });
+  }
+  if (imageConf.localEndpoint) {
+    providers.push({ name: 'local', label: IMAGE_GENERATION_PROVIDERS.local.name, model: imageConf.localEndpoint, imageVariations: true });
+  }
+  return providers;
+}
 
 // Returns decrypted runtime config for the currently active provider.
 // Shape: { provider, model, endpoint?, apiKey?, baseUrl?, visionModel? }
@@ -1188,125 +1344,134 @@ app.post('/ai/stream', async (request, reply) => {
 
 // ─── AI Image Generation ──────────────────────────────────────────────────────
 
-// GET /ai/image-providers — return configured providers that support image generation
-app.get('/ai/image-providers', async (request, reply) => {
-  const ws = request.workspaceId;
-  const configured = [];
+// GET /ai/image-config — image generation settings (Gemini image model, local SD endpoint)
+app.get('/ai/image-config', async (request) => {
+  const conf = await getImageConfig(request.workspaceId);
+  return { geminiModel: conf.geminiModel, localEndpoint: conf.localEndpoint, localSteps: conf.localSteps };
+});
 
-  // OpenAI — check if API key is saved
-  const openaiDoc = await getCredentials(ws, 'openai_config');
-  if (openaiDoc?.apiKey) {
-    configured.push({
-      name: 'openai',
-      label: IMAGE_GENERATION_PROVIDERS.openai.name,
-      textToImage: IMAGE_GENERATION_PROVIDERS.openai.textToImage,
-      imageVariations: IMAGE_GENERATION_PROVIDERS.openai.imageVariations,
-    });
+// PUT /ai/image-config — save image generation settings ({ geminiModel?, localEndpoint?, localSteps? })
+app.put('/ai/image-config', async (request, reply) => {
+  const { geminiModel, localEndpoint, localSteps } = request.body || {};
+  const data = {};
+  if (geminiModel !== undefined) data.geminiModel = String(geminiModel).trim() || DEFAULT_IMAGE_CONFIG.geminiModel;
+  if (localEndpoint !== undefined) {
+    const ep = String(localEndpoint).trim().replace(/\/$/, '');
+    if (ep && !/^https?:\/\//.test(ep)) return reply.code(400).send({ error: 'localEndpoint must start with http:// or https://' });
+    data.localEndpoint = ep;
   }
+  if (localSteps !== undefined) {
+    const n = Number(localSteps);
+    if (!Number.isInteger(n) || n < 1 || n > 150) return reply.code(400).send({ error: 'localSteps must be an integer between 1 and 150' });
+    data.localSteps = n;
+  }
+  await setCredentials(request.workspaceId, 'image_config', data);
+  log.info({ action: 'image_config_save', outcome: 'success', fields: Object.keys(data) });
+  return getImageConfig(request.workspaceId);
+});
 
-  // Future providers (stable_diffusion, midjourney, etc.) would be appended here
+// POST /ai/image-config/gemini-models — list Gemini models capable of image output
+app.post('/ai/image-config/gemini-models', async (request, reply) => {
+  const geminiDoc = await getCredentials(request.workspaceId, 'gemini_config');
+  if (!geminiDoc?.apiKey) return reply.code(400).send({ error: 'Gemini is not configured. Add a Gemini API key first.' });
+  const apiKey = decryptToken(geminiDoc.apiKey);
+  try {
+    const res = await axios.get(`${GEMINI_BASE_URL}/models?key=${apiKey}&pageSize=200`, { timeout: 8000 });
+    const models = (res.data.models || [])
+      .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map((m) => m.name.replace(/^models\//, ''))
+      .filter((id) => /image|banana/i.test(id) && !/embedding|tts|audio|live/.test(id))
+      .sort();
+    return { models: models.length ? models : [DEFAULT_IMAGE_CONFIG.geminiModel], live: models.length > 0 };
+  } catch (err) {
+    log.warn({ action: 'image_gemini_models', outcome: 'fallback', err: err.message });
+    return { models: [DEFAULT_IMAGE_CONFIG.geminiModel], live: false };
+  }
+});
 
-  return { providers: configured };
+// POST /ai/image-config/test-local — probe an AUTOMATIC1111-compatible server ({ endpoint? } overrides saved)
+app.post('/ai/image-config/test-local', async (request, reply) => {
+  const conf = await getImageConfig(request.workspaceId);
+  const endpoint = String(request.body?.endpoint || conf.localEndpoint || '').trim().replace(/\/$/, '');
+  if (!endpoint) return reply.code(400).send({ error: 'No local image server endpoint provided' });
+  try {
+    const [modelsRes, optionsRes] = await Promise.all([
+      axios.get(`${endpoint}/sdapi/v1/sd-models`, { timeout: 8000 }),
+      axios.get(`${endpoint}/sdapi/v1/options`, { timeout: 8000 }).catch(() => ({ data: {} })),
+    ]);
+    const models = (modelsRes.data || []).map((m) => m.model_name || m.title).filter(Boolean);
+    return { ok: true, models, activeModel: optionsRes.data?.sd_model_checkpoint || null };
+  } catch (err) {
+    const detail = err.response ? `HTTP ${err.response.status}` : err.message;
+    log.warn({ action: 'image_local_test', outcome: 'failure', endpoint, err: detail });
+    return reply.code(502).send({ ok: false, error: `Could not reach ${endpoint}/sdapi/v1 (${detail}). Start the WebUI with --api and make sure the gateway container can reach it.` });
+  }
+});
+
+// GET /ai/image-providers — return configured providers that support image generation
+app.get('/ai/image-providers', async (request) => {
+  return { providers: await listImageProviders(request.workspaceId) };
 });
 
 // POST /ai/image — generate or vary an image, save to media library, return local URL
-// Body: { prompt, size?, quality?, style?, referenceImageUrl? }
-//   prompt            — text description of the desired image
-//   size              — one of the provider's supported sizes (default 1024x1024);
-//                       legacy DALL-E 3 sizes (1792x1024 / 1024x1792) are mapped to the nearest gpt-image size
-//   quality           — 'standard' | 'hd' (legacy) or 'low' | 'medium' | 'high' | 'auto'
-//   style             — 'vivid' | 'natural'; gpt-image has no style parameter so this is folded into the prompt
-//   referenceImageUrl — local /media/ path or external URL; triggers an image edit (variation) with the reference
-//
-// DALL-E 2 / 3 were shut down by OpenAI on 2026-05-12. Requests now go to gpt-image-1, which
-// rejects `style` and `response_format` and always returns base64 image data.
+// Body: { prompt, provider?, size?, quality?, style?, referenceImageUrl? }
+//   provider          — 'openai' | 'gemini' | 'local' (default: first configured provider)
+//   size              — '1:1' | '16:9' | '9:16' (legacy pixel sizes such as 1024x1536 are mapped)
+//   quality           — 'standard' | 'hd'
+//   style             — 'vivid' | 'natural' (folded into the prompt on every provider)
+//   referenceImageUrl — local /media/ path or external URL; triggers an image variation
 app.post('/ai/image', async (request, reply) => {
-  const { prompt, size = '1024x1024', quality = 'standard', style = 'vivid', referenceImageUrl } = request.body || {};
+  const { prompt, provider: requestedProvider, size = '1:1', quality = 'standard', style = 'vivid', referenceImageUrl } = request.body || {};
   if (!prompt?.trim() && !referenceImageUrl) {
     return reply.code(400).send({ error: 'prompt is required' });
   }
 
   const ws = request.workspaceId;
-  const openaiDoc = await getCredentials(ws, 'openai_config');
-  if (!openaiDoc?.apiKey) {
-    return reply.code(503).send({ error: 'Image generation requires an OpenAI API key. Add it in Global Settings → OpenAI.' });
+  const available = await listImageProviders(ws);
+  if (!available.length) {
+    return reply.code(503).send({ error: 'No image generation provider is configured. Add an OpenAI or Gemini API key, or a local Stable Diffusion endpoint, in Global Settings.' });
+  }
+  const provider = requestedProvider || available[0].name;
+  if (!available.some((p) => p.name === provider)) {
+    return reply.code(400).send({ error: `Image provider "${provider}" is not configured.` });
   }
 
-  const apiKey = decryptToken(openaiDoc.apiKey);
-  const OPENAI_API = PROVIDER_BASE_URLS.openai;
-  const providerConf = IMAGE_GENERATION_PROVIDERS.openai;
+  const aspect = IMAGE_ASPECTS.includes(size) ? size : (IMAGE_SIZE_TO_ASPECT[size] || '1:1');
+  const normalisedQuality = quality === 'hd' || quality === 'high' ? 'hd' : 'standard';
 
-  const imageSize = providerConf.sizeAliases[size] || (providerConf.textToImage.sizes.includes(size) ? size : '1024x1024');
-  const imageQuality = providerConf.qualityAliases[quality] || (providerConf.qualities.includes(quality) ? quality : 'medium');
-  const styleHint = providerConf.styleHints[style] || '';
-  const userPrompt = (prompt || '').trim().slice(0, 4000);
+  let referenceImage = null;
+  if (referenceImageUrl) {
+    try {
+      referenceImage = await loadReferenceImage(referenceImageUrl);
+    } catch (err) {
+      return reply.code(400).send({ error: 'Image generation failed', detail: `Could not load reference image: ${err.message}` });
+    }
+  }
+
+  const req = {
+    prompt: (prompt || '').trim().slice(0, 4000),
+    aspect,
+    quality: normalisedQuality,
+    styleHint: IMAGE_STYLE_HINTS[style] || '',
+    referenceImage,
+  };
 
   try {
-    let b64;
-    let model;
-
-    if (referenceImageUrl) {
-      // ── Image variation via gpt-image edits ──────────────────────────────
-      model = providerConf.imageVariations.model;
-
-      // Load the reference image (support local /media/ paths and external URLs)
-      let imgBuffer;
-      if (referenceImageUrl.startsWith('/media/')) {
-        imgBuffer = fs.readFileSync(path.join(UPLOAD_DIR, path.basename(referenceImageUrl)));
-      } else if (referenceImageUrl.match(/https?:\/\/(localhost|127\.0\.0\.1)/)) {
-        const internalUrl = referenceImageUrl.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/, 'http://nginx:8081');
-        const res = await axios.get(internalUrl, { responseType: 'arraybuffer', timeout: 15000 });
-        imgBuffer = Buffer.from(res.data);
-      } else {
-        const res = await axios.get(referenceImageUrl, { responseType: 'arraybuffer', timeout: 15000 });
-        imgBuffer = Buffer.from(res.data);
-      }
-
-      const editPrompt = [
-        userPrompt || 'Create a fresh variation of this image, keeping the same subject, composition and mood.',
-        styleHint,
-      ].filter(Boolean).join(' ');
-
-      const form = new FormData();
-      form.append('model', model);
-      form.append('image', new Blob([imgBuffer], { type: 'image/png' }), 'reference.png');
-      form.append('prompt', editPrompt);
-      form.append('n', '1');
-      form.append('size', imageSize);
-      form.append('quality', imageQuality);
-
-      const res = await fetch(`${OPENAI_API}/images/edits`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error?.message || `OpenAI image edit API error ${res.status}`);
-      }
-      b64 = (await res.json()).data?.[0]?.b64_json;
-
+    let result;
+    if (provider === 'openai') {
+      const openaiDoc = await getCredentials(ws, 'openai_config');
+      result = await generateOpenAiImage({ ...req, apiKey: decryptToken(openaiDoc.apiKey) });
+    } else if (provider === 'gemini') {
+      const [geminiDoc, conf] = await Promise.all([getCredentials(ws, 'gemini_config'), getImageConfig(ws)]);
+      result = await generateGeminiImage({ ...req, apiKey: decryptToken(geminiDoc.apiKey), model: conf.geminiModel });
     } else {
-      // ── Text-to-image via gpt-image ──────────────────────────────────────
-      model = providerConf.textToImage.model;
-
-      const res = await axios.post(`${OPENAI_API}/images/generations`, {
-        model,
-        prompt: [userPrompt, styleHint].filter(Boolean).join(' '),
-        n: 1,
-        size: imageSize,
-        quality: imageQuality,
-      }, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        timeout: 180000,
-      });
-      b64 = res.data.data?.[0]?.b64_json;
+      const conf = await getImageConfig(ws);
+      result = await generateLocalImage({ ...req, endpoint: conf.localEndpoint, steps: conf.localSteps || IMAGE_GENERATION_PROVIDERS.local.defaultSteps });
     }
 
-    if (!b64) throw new Error('No image data returned from OpenAI');
-
-    const imgBuffer = Buffer.from(b64, 'base64');
-    const filename = `${crypto.randomUUID()}.png`;
+    const { buffer: imgBuffer, mime, model } = result;
+    const ext = mimeExtension(mime);
+    const filename = `${crypto.randomUUID()}.${ext}`;
     fs.writeFileSync(path.join(UPLOAD_DIR, filename), imgBuffer);
 
     const appBase = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
@@ -1315,22 +1480,22 @@ app.post('/ai/image', async (request, reply) => {
     const db = await getDb();
     await db.collection('media_files').insertOne({
       filename,
-      originalName: `ai-image-${model}-${Date.now()}.png`,
+      originalName: `ai-image-${provider}-${Date.now()}.${ext}`,
       url: mediaUrl,
-      mimetype: 'image/png',
+      mimetype: mime,
       size: imgBuffer.length,
       folder: null,
-      tags: ['ai-generated'],
+      tags: ['ai-generated', provider],
       workspaceId: ws,
       uploadedAt: new Date(),
     });
 
-    log.info({ action: 'image_generate', provider: 'openai', model, size, outcome: 'success' });
-    return { mediaUrl, provider: 'openai', model };
+    log.info({ action: 'image_generate', provider, model, aspect, quality: normalisedQuality, variation: !!referenceImageUrl, outcome: 'success' });
+    return { mediaUrl, provider, model };
 
   } catch (err) {
-    const detail = err.response?.data?.error?.message || err.message;
-    log.error({ action: 'image_generate', provider: 'openai', outcome: 'failure', err: detail });
+    const detail = err.response?.data?.error?.message || err.response?.data?.detail || err.message;
+    log.error({ action: 'image_generate', provider, outcome: 'failure', err: detail });
     return reply.code(502).send({ error: 'Image generation failed', detail });
   }
 });

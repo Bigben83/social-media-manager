@@ -319,6 +319,95 @@
         </div>
       </div>
 
+      <!-- ═══ IMAGE GENERATION ══════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-emerald-700 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-image text-white text-sm"></i>
+          </div>
+          <div>
+            <p class="font-semibold">{{ $t('settings.imageGen.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.sectionSubtitle') }}</p>
+          </div>
+        </div>
+        <div class="p-5 space-y-6">
+
+          <!-- OpenAI -->
+          <div class="flex items-start gap-3">
+            <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageOpenAiReady ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+            <div class="text-sm">
+              <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.openaiTitle') }}</p>
+              <p class="text-xs text-gray-500 mt-0.5">{{ imageOpenAiReady ? $t('settings.imageGen.openaiReady') : $t('settings.imageGen.openaiMissing') }}</p>
+            </div>
+          </div>
+
+          <!-- Gemini -->
+          <div class="space-y-2">
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageGeminiReady ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+              <div class="text-sm flex-1">
+                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.geminiTitle') }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ imageGeminiReady ? $t('settings.imageGen.geminiReady') : $t('settings.imageGen.geminiMissing') }}</p>
+              </div>
+            </div>
+            <div v-if="imageGeminiReady" class="pl-5 flex flex-wrap gap-2 items-center">
+              <label class="text-xs text-gray-400 w-full sm:w-auto">{{ $t('settings.imageGen.geminiModelLabel') }}</label>
+              <input v-model="imageGeminiModel" list="gemini-image-models" :placeholder="$t('settings.imageGen.geminiModelPlaceholder')"
+                class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+              <datalist id="gemini-image-models">
+                <option v-for="m in imageGeminiModels" :key="m" :value="m" />
+              </datalist>
+              <button @click="loadGeminiImageModels" :disabled="imageGeminiModelsLoading"
+                class="text-xs px-3 py-2 border border-gray-700 hover:border-gray-500 text-gray-300 rounded-lg transition-colors disabled:opacity-40">
+                {{ imageGeminiModelsLoading ? $t('settings.imageGen.loadingModels') : $t('settings.imageGen.loadModels') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Local Stable Diffusion -->
+          <div class="space-y-2">
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageLocalEndpoint.trim() ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+              <div class="text-sm flex-1">
+                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.localTitle') }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.localHint') }}</p>
+              </div>
+            </div>
+            <div class="pl-5 space-y-2">
+              <div class="flex flex-wrap gap-2">
+                <input v-model="imageLocalEndpoint" type="url" :placeholder="$t('settings.imageGen.localEndpointPlaceholder')"
+                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+                <button @click="testLocalImageServer" :disabled="!imageLocalEndpoint.trim() || imageLocalTesting"
+                  class="text-xs px-3 py-2 border border-gray-700 hover:border-gray-500 text-gray-300 rounded-lg transition-colors disabled:opacity-40">
+                  {{ imageLocalTesting ? $t('settings.imageGen.testing') : $t('settings.imageGen.test') }}
+                </button>
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-gray-400">{{ $t('settings.imageGen.localStepsLabel') }}</label>
+                <input v-model.number="imageLocalSteps" type="number" min="1" max="150"
+                  class="w-20 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-emerald-500" />
+              </div>
+              <p v-if="imageLocalTestResult" class="text-xs" :class="imageLocalTestResult.ok ? 'text-emerald-400' : 'text-red-400'">
+                <template v-if="imageLocalTestResult.ok">
+                  {{ $t('settings.imageGen.testOk', { count: imageLocalTestResult.models.length, active: imageLocalTestResult.activeModel || '—' }) }}
+                </template>
+                <template v-else>{{ imageLocalTestResult.error }}</template>
+              </p>
+            </div>
+          </div>
+
+          <!-- Save -->
+          <div class="flex items-center gap-3">
+            <button @click="saveImageConfig" :disabled="imageConfigSaving"
+              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors">
+              {{ imageConfigSaving ? $t('settings.imageGen.saving') : $t('settings.imageGen.save') }}
+            </button>
+            <span v-if="imageConfigSaved" class="text-xs text-emerald-400">{{ $t('settings.imageGen.saved') }}</span>
+            <span v-if="imageConfigError" class="text-xs text-red-400">{{ imageConfigError }}</span>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
@@ -408,6 +497,78 @@ async function removePlacesKey() {
   await axios.delete('/api/credentials/google-places')
   placesConfigured.value = false
   placesKeyHint.value = null
+}
+
+// ─── Image Generation ─────────────────────────────────────────────────────────
+const imageGeminiModel = ref('')
+const imageGeminiModels = ref<string[]>([])
+const imageGeminiModelsLoading = ref(false)
+const imageLocalEndpoint = ref('')
+const imageLocalSteps = ref(25)
+const imageLocalTesting = ref(false)
+const imageLocalTestResult = ref<{ ok: boolean; models: string[]; activeModel: string | null; error?: string } | null>(null)
+const imageConfigSaving = ref(false)
+const imageConfigSaved = ref(false)
+const imageConfigError = ref('')
+
+const imageOpenAiReady = computed(() => aiStore.providers.some((p) => p.name === 'openai' && p.configured))
+const imageGeminiReady = computed(() => aiStore.providers.some((p) => p.name === 'gemini' && p.configured))
+
+async function loadImageConfig() {
+  try {
+    const res = await axios.get('/api/ai/image-config')
+    imageGeminiModel.value = res.data.geminiModel || ''
+    imageLocalEndpoint.value = res.data.localEndpoint || ''
+    imageLocalSteps.value = res.data.localSteps || 25
+  } catch { /* defaults */ }
+}
+
+async function loadGeminiImageModels() {
+  imageGeminiModelsLoading.value = true
+  try {
+    const res = await axios.post('/api/ai/image-config/gemini-models')
+    imageGeminiModels.value = res.data.models || []
+    if (!imageGeminiModel.value && imageGeminiModels.value.length) imageGeminiModel.value = imageGeminiModels.value[0]
+  } catch (err: any) {
+    imageConfigError.value = err.response?.data?.error || t('settings.imageGen.loadModelsFailed')
+  } finally {
+    imageGeminiModelsLoading.value = false
+  }
+}
+
+async function testLocalImageServer() {
+  imageLocalTesting.value = true
+  imageLocalTestResult.value = null
+  try {
+    const res = await axios.post('/api/ai/image-config/test-local', { endpoint: imageLocalEndpoint.value.trim() })
+    imageLocalTestResult.value = res.data
+  } catch (err: any) {
+    imageLocalTestResult.value = { ok: false, models: [], activeModel: null, error: err.response?.data?.error || err.message }
+  } finally {
+    imageLocalTesting.value = false
+  }
+}
+
+async function saveImageConfig() {
+  imageConfigSaving.value = true
+  imageConfigSaved.value = false
+  imageConfigError.value = ''
+  try {
+    const res = await axios.put('/api/ai/image-config', {
+      geminiModel: imageGeminiModel.value.trim(),
+      localEndpoint: imageLocalEndpoint.value.trim(),
+      localSteps: imageLocalSteps.value,
+    })
+    imageGeminiModel.value = res.data.geminiModel
+    imageLocalEndpoint.value = res.data.localEndpoint
+    imageLocalSteps.value = res.data.localSteps
+    imageConfigSaved.value = true
+    setTimeout(() => { imageConfigSaved.value = false }, 3000)
+  } catch (err: any) {
+    imageConfigError.value = err.response?.data?.error || t('settings.imageGen.saveFailed')
+  } finally {
+    imageConfigSaving.value = false
+  }
 }
 
 // ─── AI Configuration — Ollama ────────────────────────────────────────────────
@@ -515,6 +676,7 @@ onMounted(async () => {
     aiStore.fetchConfig(),
     aiStore.fetchProviders(),
     loadPlacesConfig(),
+    loadImageConfig(),
   ])
   aiEndpoint.value = aiStore.config.endpoint
   aiModel.value = aiStore.config.model

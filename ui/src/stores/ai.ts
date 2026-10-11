@@ -10,6 +10,15 @@ export interface AiConfig {
   enabled: boolean
 }
 
+export type ImageProviderName = 'openai' | 'gemini' | 'local'
+
+export interface ImageProvider {
+  name: ImageProviderName
+  label: string
+  model: string
+  imageVariations: boolean
+}
+
 export interface ProviderInfo {
   name: string
   configured: boolean
@@ -159,9 +168,15 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
+  async function fetchImageProviders(): Promise<ImageProvider[]> {
+    const res = await axios.get('/api/ai/image-providers')
+    return (res.data.providers || []) as ImageProvider[]
+  }
+
   async function generateImage(options: {
     prompt: string
-    size?: string
+    provider?: ImageProviderName
+    size?: '1:1' | '16:9' | '9:16'
     quality?: 'standard' | 'hd'
     style?: 'vivid' | 'natural'
     referenceImageUrl?: string
@@ -237,6 +252,6 @@ export const useAiStore = defineStore('ai', () => {
   return {
     config, providers, models, loading, saving, modelsLoading, error,
     fetchConfig, fetchProviders, saveProvider, deleteProvider, fetchProviderModels,
-    saveConfig, fetchModels, generate, generateImage, generateCaption, streamGenerate,
+    saveConfig, fetchModels, generate, fetchImageProviders, generateImage, generateCaption, streamGenerate,
   }
 })
