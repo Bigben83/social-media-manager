@@ -404,7 +404,7 @@
 
             <!-- Variation option (when an image is already attached) -->
             <label
-              v-if="composeStore.mediaUrl && isImage(composeStore.mediaUrl)"
+              v-if="composeStore.mediaUrl && isImage(composeStore.mediaUrl) && activeImageProvider?.imageVariations !== false"
               class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer"
             >
               <input type="checkbox" v-model="useImageVariation" class="w-3.5 h-3.5 accent-emerald-500" />
@@ -1031,7 +1031,11 @@ const IMAGE_SIZES: { value: ImageAspect; label: string }[] = [
 const imageGenAvailable = ref(false)
 const imageProviders = ref<ImageProvider[]>([])
 const imageProvider = ref<ImageProviderName>('openai')
-watch(imageProvider, (v) => { try { localStorage.setItem('compose.imageProvider', v) } catch { /* ignore */ } })
+const activeImageProvider = computed(() => imageProviders.value.find((p) => p.name === imageProvider.value))
+watch(imageProvider, (v) => {
+  try { localStorage.setItem('compose.imageProvider', v) } catch { /* ignore */ }
+  if (activeImageProvider.value?.imageVariations === false) useImageVariation.value = false
+})
 const imagePanelOpen = ref(false)
 const imagePrompt = ref('')
 const imageSize = ref<ImageAspect>('1:1')

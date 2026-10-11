@@ -364,6 +364,32 @@
             </div>
           </div>
 
+          <!-- xAI Grok Imagine -->
+          <div class="space-y-2">
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageXaiConfigured ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+              <div class="text-sm flex-1">
+                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.grokTitle') }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.grokHint') }}</p>
+              </div>
+            </div>
+            <div class="pl-5 space-y-2">
+              <div v-if="imageXaiConfigured" class="flex flex-wrap items-center gap-2">
+                <span class="text-xs text-gray-300">{{ $t('settings.imageGen.grokKeyConfigured', { hint: imageXaiKeyHint }) }}</span>
+                <button @click="removeXaiKey" class="text-xs px-3 py-1.5 border border-red-800/60 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors">{{ $t('settings.imageGen.grokRemoveKey') }}</button>
+              </div>
+              <div v-else class="flex flex-wrap gap-2">
+                <input v-model="imageXaiApiKey" type="password" :placeholder="$t('settings.imageGen.grokKeyPlaceholder')"
+                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+              </div>
+              <div class="flex flex-wrap gap-2 items-center">
+                <label class="text-xs text-gray-400">{{ $t('settings.imageGen.grokModelLabel') }}</label>
+                <input v-model="imageGrokModel" :placeholder="$t('settings.imageGen.grokModelPlaceholder')"
+                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+              </div>
+            </div>
+          </div>
+
           <!-- Local Stable Diffusion -->
           <div class="space-y-2">
             <div class="flex items-start gap-3">
@@ -503,6 +529,10 @@ async function removePlacesKey() {
 const imageGeminiModel = ref('')
 const imageGeminiModels = ref<string[]>([])
 const imageGeminiModelsLoading = ref(false)
+const imageGrokModel = ref('')
+const imageXaiApiKey = ref('')
+const imageXaiConfigured = ref(false)
+const imageXaiKeyHint = ref<string | null>(null)
 const imageLocalEndpoint = ref('')
 const imageLocalSteps = ref(25)
 const imageLocalTesting = ref(false)
@@ -517,10 +547,24 @@ const imageGeminiReady = computed(() => aiStore.providers.some((p) => p.name ===
 async function loadImageConfig() {
   try {
     const res = await axios.get('/api/ai/image-config')
-    imageGeminiModel.value = res.data.geminiModel || ''
-    imageLocalEndpoint.value = res.data.localEndpoint || ''
-    imageLocalSteps.value = res.data.localSteps || 25
+    applyImageConfig(res.data)
   } catch { /* defaults */ }
+}
+
+function applyImageConfig(data: any) {
+  imageGeminiModel.value = data.geminiModel || ''
+  imageLocalEndpoint.value = data.localEndpoint || ''
+  imageLocalSteps.value = data.localSteps || 25
+  imageGrokModel.value = data.grokModel || ''
+  imageXaiConfigured.value = !!data.xaiConfigured
+  imageXaiKeyHint.value = data.xaiKeyHint || null
+}
+
+async function removeXaiKey() {
+  if (!confirm(t('settings.imageGen.grokRemoveConfirm'))) return
+  await axios.delete('/api/ai/image-config/xai-key')
+  imageXaiConfigured.value = false
+  imageXaiKeyHint.value = null
 }
 
 async function loadGeminiImageModels() {
@@ -558,10 +602,11 @@ async function saveImageConfig() {
       geminiModel: imageGeminiModel.value.trim(),
       localEndpoint: imageLocalEndpoint.value.trim(),
       localSteps: imageLocalSteps.value,
+      grokModel: imageGrokModel.value.trim(),
+      xaiApiKey: imageXaiApiKey.value.trim() || undefined,
     })
-    imageGeminiModel.value = res.data.geminiModel
-    imageLocalEndpoint.value = res.data.localEndpoint
-    imageLocalSteps.value = res.data.localSteps
+    applyImageConfig(res.data)
+    imageXaiApiKey.value = ''
     imageConfigSaved.value = true
     setTimeout(() => { imageConfigSaved.value = false }, 3000)
   } catch (err: any) {

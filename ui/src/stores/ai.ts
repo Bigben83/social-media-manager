@@ -10,7 +10,7 @@ export interface AiConfig {
   enabled: boolean
 }
 
-export type ImageProviderName = 'openai' | 'gemini' | 'local'
+export type ImageProviderName = 'openai' | 'gemini' | 'grok' | 'local'
 
 export interface ImageProvider {
   name: ImageProviderName

@@ -139,7 +139,7 @@ function credId(ws, type) { return `${ws}:${type}`; }
 // Global credential types are not workspace-scoped (AI config, app credentials)
 const GLOBAL_CREDENTIAL_TYPES = new Set([
   'ai_config', 'openai_config', 'groq_config', 'gemini_config', 'anthropic_config', 'custom_config',
-  'meta_app', 'pinterest_app', 'tiktok_app', 'google_places', 'image_config',
+  'meta_app', 'pinterest_app', 'tiktok_app', 'google_places', 'image_config', 'xai_config',
 ]);
 
 async function getCredentials(ws, type) {
@@ -804,9 +804,20 @@ const IMAGE_GENERATION_PROVIDERS = {
     defaultSteps: 25,
     imageVariations: true,
   },
+  grok: {
+    name: 'xAI Grok Imagine',
+    baseUrl: 'https://api.x.ai/v1',
+    defaultModel: 'grok-imagine-image-2.0',
+    imageVariations: false,
+  },
 };
 
-const DEFAULT_IMAGE_CONFIG = { geminiModel: 'gemini-2.5-flash-image', localEndpoint: '', localSteps: 25 };
+const DEFAULT_IMAGE_CONFIG = {
+  geminiModel: 'gemini-2.5-flash-image',
+  localEndpoint: '',
+  localSteps: 25,
+  grokModel: 'grok-imagine-image-2.0',
+};
 
 async function getImageConfig(ws) {
   const doc = await getCredentials(ws, 'image_config');
@@ -922,11 +933,32 @@ async function generateLocalImage({ endpoint, steps, prompt, aspect, quality, st
   return { buffer: Buffer.from(b64, 'base64'), mime: 'image/png', model };
 }
 
+// ── xAI Grok Imagine (OpenAI-style /images/generations) ───────────────────────
+async function generateGrokImage({ apiKey, model, prompt, aspect, quality, styleHint }) {
+  const conf = IMAGE_GENERATION_PROVIDERS.grok;
+  const res = await axios.post(`${conf.baseUrl}/images/generations`, {
+    model,
+    prompt: [prompt, styleHint].filter(Boolean).join(' '),
+    n: 1,
+    aspect_ratio: aspect,
+    resolution: quality === 'hd' ? '2k' : '1k',
+    response_format: 'b64_json',
+  }, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 180000 });
+  const item = res.data.data?.[0];
+  if (item?.b64_json) return { buffer: Buffer.from(item.b64_json, 'base64'), mime: 'image/png', model };
+  if (item?.url) {
+    const img = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 30000 });
+    return { buffer: Buffer.from(img.data), mime: img.headers['content-type'] || 'image/png', model };
+  }
+  throw new Error('No image data returned from xAI');
+}
+
 // Returns the image providers that are usable right now, in display order.
 async function listImageProviders(ws) {
-  const [openaiDoc, geminiDoc, imageConf] = await Promise.all([
+  const [openaiDoc, geminiDoc, xaiDoc, imageConf] = await Promise.all([
     getCredentials(ws, 'openai_config'),
     getCredentials(ws, 'gemini_config'),
+    getCredentials(ws, 'xai_config'),
     getImageConfig(ws),
   ]);
   const providers = [];
@@ -935,6 +967,9 @@ async function listImageProviders(ws) {
   }
   if (geminiDoc?.apiKey) {
     providers.push({ name: 'gemini', label: IMAGE_GENERATION_PROVIDERS.gemini.name, model: imageConf.geminiModel, imageVariations: true });
+  }
+  if (xaiDoc?.apiKey) {
+    providers.push({ name: 'grok', label: IMAGE_GENERATION_PROVIDERS.grok.name, model: imageConf.grokModel, imageVariations: false });
   }
   if (imageConf.localEndpoint) {
     providers.push({ name: 'local', label: IMAGE_GENERATION_PROVIDERS.local.name, model: imageConf.localEndpoint, imageVariations: true });
@@ -1345,16 +1380,30 @@ app.post('/ai/stream', async (request, reply) => {
 // ─── AI Image Generation ──────────────────────────────────────────────────────
 
 // GET /ai/image-config — image generation settings (Gemini image model, local SD endpoint)
-app.get('/ai/image-config', async (request) => {
-  const conf = await getImageConfig(request.workspaceId);
-  return { geminiModel: conf.geminiModel, localEndpoint: conf.localEndpoint, localSteps: conf.localSteps };
-});
+async function buildImageConfigResponse(ws) {
+  const [conf, xaiDoc] = await Promise.all([getImageConfig(ws), getCredentials(ws, 'xai_config')]);
+  return {
+    geminiModel: conf.geminiModel,
+    localEndpoint: conf.localEndpoint,
+    localSteps: conf.localSteps,
+    grokModel: conf.grokModel,
+    xaiConfigured: !!xaiDoc?.apiKey,
+    xaiKeyHint: xaiDoc?.apiKey ? `****${decryptToken(xaiDoc.apiKey).slice(-4)}` : null,
+  };
+}
 
-// PUT /ai/image-config — save image generation settings ({ geminiModel?, localEndpoint?, localSteps? })
+app.get('/ai/image-config', async (request) => buildImageConfigResponse(request.workspaceId));
+
+// PUT /ai/image-config — save image generation settings
+// ({ geminiModel?, localEndpoint?, localSteps?, grokModel?, xaiApiKey? }) — xaiApiKey is encrypted into xai_config
 app.put('/ai/image-config', async (request, reply) => {
-  const { geminiModel, localEndpoint, localSteps } = request.body || {};
+  const { geminiModel, localEndpoint, localSteps, grokModel, xaiApiKey } = request.body || {};
   const data = {};
   if (geminiModel !== undefined) data.geminiModel = String(geminiModel).trim() || DEFAULT_IMAGE_CONFIG.geminiModel;
+  if (grokModel !== undefined) data.grokModel = String(grokModel).trim() || DEFAULT_IMAGE_CONFIG.grokModel;
+  if (typeof xaiApiKey === 'string' && xaiApiKey.trim()) {
+    await setCredentials(request.workspaceId, 'xai_config', { apiKey: encryptToken(xaiApiKey.trim()) });
+  }
   if (localEndpoint !== undefined) {
     const ep = String(localEndpoint).trim().replace(/\/$/, '');
     if (ep && !/^https?:\/\//.test(ep)) return reply.code(400).send({ error: 'localEndpoint must start with http:// or https://' });
@@ -1365,9 +1414,17 @@ app.put('/ai/image-config', async (request, reply) => {
     if (!Number.isInteger(n) || n < 1 || n > 150) return reply.code(400).send({ error: 'localSteps must be an integer between 1 and 150' });
     data.localSteps = n;
   }
-  await setCredentials(request.workspaceId, 'image_config', data);
-  log.info({ action: 'image_config_save', outcome: 'success', fields: Object.keys(data) });
-  return getImageConfig(request.workspaceId);
+  if (Object.keys(data).length) await setCredentials(request.workspaceId, 'image_config', data);
+  log.info({ action: 'image_config_save', outcome: 'success', fields: Object.keys(data), xaiKey: !!xaiApiKey });
+  return buildImageConfigResponse(request.workspaceId);
+});
+
+// DELETE /ai/image-config/xai-key — remove the xAI API key (disables the Grok image provider)
+app.delete('/ai/image-config/xai-key', async (request) => {
+  const db = await getDb();
+  await db.collection('platform_credentials').deleteOne({ _id: 'xai_config' });
+  log.info({ action: 'image_config_xai_remove', outcome: 'success' });
+  return { success: true };
 });
 
 // POST /ai/image-config/gemini-models — list Gemini models capable of image output
@@ -1432,8 +1489,12 @@ app.post('/ai/image', async (request, reply) => {
     return reply.code(503).send({ error: 'No image generation provider is configured. Add an OpenAI or Gemini API key, or a local Stable Diffusion endpoint, in Global Settings.' });
   }
   const provider = requestedProvider || available[0].name;
-  if (!available.some((p) => p.name === provider)) {
+  const providerInfo = available.find((p) => p.name === provider);
+  if (!providerInfo) {
     return reply.code(400).send({ error: `Image provider "${provider}" is not configured.` });
+  }
+  if (referenceImageUrl && !providerInfo.imageVariations) {
+    return reply.code(400).send({ error: 'Image generation failed', detail: `${providerInfo.label} does not support variations from a reference image.` });
   }
 
   const aspect = IMAGE_ASPECTS.includes(size) ? size : (IMAGE_SIZE_TO_ASPECT[size] || '1:1');
@@ -1464,6 +1525,9 @@ app.post('/ai/image', async (request, reply) => {
     } else if (provider === 'gemini') {
       const [geminiDoc, conf] = await Promise.all([getCredentials(ws, 'gemini_config'), getImageConfig(ws)]);
       result = await generateGeminiImage({ ...req, apiKey: decryptToken(geminiDoc.apiKey), model: conf.geminiModel });
+    } else if (provider === 'grok') {
+      const [xaiDoc, conf] = await Promise.all([getCredentials(ws, 'xai_config'), getImageConfig(ws)]);
+      result = await generateGrokImage({ ...req, apiKey: decryptToken(xaiDoc.apiKey), model: conf.grokModel });
     } else {
       const conf = await getImageConfig(ws);
       result = await generateLocalImage({ ...req, endpoint: conf.localEndpoint, steps: conf.localSteps || IMAGE_GENERATION_PROVIDERS.local.defaultSteps });
