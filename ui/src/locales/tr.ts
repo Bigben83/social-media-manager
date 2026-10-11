@@ -533,7 +533,7 @@ export default {
       loadingModels: 'Yükleniyor…',
       loadModelsFailed: 'Gemini görsel modelleri yüklenemedi',
       localTitle: 'Yerel Stable Diffusion',
-      localHint: '--api ile başlatılmış AUTOMATIC1111 / Forge / SD.Next WebUI. Ücretsiz ve özel, kendi GPU'nuzda çalışır.',
+      localHint: '--api ile başlatılmış AUTOMATIC1111 / Forge / SD.Next WebUI. Ücretsiz ve özel, kendi GPU’nuzda çalışır.',
       localEndpointPlaceholder: 'http://192.168.1.50:7860',
       localStepsLabel: 'Örnekleme adımı',
       test: 'Bağlantıyı test et',
