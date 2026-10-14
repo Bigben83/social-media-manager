@@ -235,6 +235,10 @@
                   <button @click="disconnectCloudProvider(providerName)" class="text-xs px-2.5 py-1 bg-red-900/40 hover:bg-red-900/60 border border-red-800 rounded-md text-red-400 hover:text-red-300 transition-colors">{{ $t('ai.disconnect') }}</button>
                 </div>
               </div>
+              <div class="flex items-center gap-3 mt-3">
+                <button @click="testCloudProvider(providerName)" :disabled="providerTests[providerName]?.loading" class="text-xs px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg disabled:opacity-40">{{ providerTests[providerName]?.loading ? $t('ai.testing') : $t('ai.testConnection') }}</button>
+                <span v-if="providerTests[providerName]?.message" class="text-xs" :class="providerTests[providerName]?.ok ? 'text-green-400' : 'text-red-400'">{{ providerTests[providerName]?.message }}</span>
+              </div>
               <div class="mt-3">
                 <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
                 <select v-if="modelOptions(providerName).length" v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
@@ -672,6 +676,19 @@ function canSave(name: string): boolean {
   const form = providerForms.value[name]
   if (name === 'custom') return !!form.baseUrl.trim() && !!form.model.trim()
   return !!form.apiKey
+}
+
+const providerTests = ref<Record<string, { loading: boolean; ok: boolean; message: string }>>({})
+async function testCloudProvider(name: string) {
+  providerTests.value[name] = { loading: true, ok: false, message: '' }
+  try {
+    const form = providerForms.value[name]
+    const res = await axios.post('/api/ai/provider/' + name + '/test', { apiKey: form.apiKey || undefined, baseUrl: form.baseUrl || undefined })
+    liveModels.value[name] = res.data.models
+    providerTests.value[name] = { loading: false, ok: true, message: t('ai.connected') }
+  } catch (err: any) {
+    providerTests.value[name] = { loading: false, ok: false, message: err.response?.data?.error || err.message }
+  }
 }
 
 async function refreshProviderModels(name: string) {

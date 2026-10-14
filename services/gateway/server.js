@@ -19,6 +19,8 @@ const {
 
 const { externalGet } = require('./utils/externalFetch');
 const { registerAnalytics, destinationMatch } = require('./analytics');
+const { registerBackgroundJobs } = require('./jobs');
+const { detectUploadType } = require('./media');
 const { repairScopedData } = require('./migrations');
 const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery } = require('./meta');
 
@@ -26,9 +28,6 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi']);
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
-// In-memory job state for async competitor scrapes.
-// Max 2 competitors, scrapes complete in seconds — no persistence needed.
-const activeScrapeJobs = new Map();
 
 // ─── Platform-native writing rules ────────────────────────────────────────────
 // Injected into the AI system prompt when destinations are known.
@@ -233,7 +232,7 @@ app.delete('/workspaces/:id', async (request, reply) => {
     if (!file.filename || /[\\/]/.test(file.filename) || file.filename.includes('..')) continue;
     try { await fs.promises.unlink(path.join(UPLOAD_DIR, file.filename)); } catch (err) { if (err.code !== 'ENOENT') log.warn({ action: 'workspace_media_cleanup', workspaceId: id, outcome: 'failure' }); }
   }
-  const collections = ['platform_credentials','competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','media_folders','feeds','scheduled_jobs','post_requests','publish_requests','oauth_states'];
+  const collections = ['platform_credentials','competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','media_folders','feeds','scheduled_jobs','post_requests','publish_requests','oauth_states','ai_jobs'];
   await Promise.all(collections.map(name => db.collection(name).deleteMany({ workspaceId: id })));
   await db.collection('workspaces').deleteOne({ _id: id });
   tokenExpiryCache.delete(id);
@@ -325,16 +324,19 @@ app.post('/upload', async (request, reply) => {
   try {
     await pipeline(data.file, fs.createWriteStream(filepath));
   } catch (err) {
+    await fs.promises.unlink(filepath).catch(() => {});
     app.log.error({ action: 'media_upload', outcome: 'failure', err: err.message });
-    return reply.code(500).send({ error: 'Failed to save file' });
+    return reply.code(err.statusCode === 413 ? 413 : 500).send({ error: err.statusCode === 413 ? 'File is too large' : 'Failed to save file' });
   }
 
+  const mimetype = await detectUploadType(filepath, ext);
+  if (data.file.truncated || !mimetype) { await fs.promises.unlink(filepath).catch(() => {}); return reply.code(data.file.truncated ? 413 : 400).send({ error: data.file.truncated ? 'File is too large' : 'File contents do not match the selected media type' }); }
   const stat = fs.statSync(filepath);
   const record = {
     filename,
     originalName: data.filename,
     url: process.env.APP_BASE_URL ? `${process.env.APP_BASE_URL.replace(/\/$/, '')}/media/${filename}` : `/media/${filename}`,
-    mimetype: data.mimetype,
+    mimetype,
     size: stat.size,
     folder: folder || null,
     workspaceId: request.workspaceId,
@@ -345,10 +347,12 @@ app.post('/upload', async (request, reply) => {
     const db = await getDb();
     await db.collection('media_files').insertOne(record);
   } catch (err) {
+    await fs.promises.unlink(filepath).catch(() => {});
     app.log.error({ action: 'media_metadata_save', outcome: 'failure', err: err.message });
+    return reply.code(503).send({ error: 'Media could not be registered; upload again when the database is available' });
   }
 
-  return { url: record.url, filename, originalName: data.filename, mimetype: data.mimetype, size: stat.size, folder: record.folder };
+  return { url: record.url, filename, originalName: data.filename, mimetype, size: stat.size, folder: record.folder };
 });
 
 // List uploaded media files, newest first; optionally filter by folder
@@ -1106,7 +1110,8 @@ app.put('/ai/provider/:name', async (request, reply) => {
   } else if (CLOUD_PROVIDERS.includes(name)) {
     const existing = await getCredentials(ws, `${name}_config`) || {};
     const update = { model: model || existing.model || PROVIDER_MODELS[name]?.[0] || '' };
-    if (apiKey) update.apiKey = encryptToken(apiKey);
+    if (apiKey !== undefined && typeof apiKey !== 'string') return reply.code(400).send({ error: 'apiKey must be text' });
+    if (apiKey?.trim()) update.apiKey = encryptToken(apiKey.trim());
     if (name === 'custom') {
       const url = (baseUrl || existing.baseUrl || '').trim().replace(/\/$/, '');
       if (!url) return reply.code(400).send({ error: 'baseUrl is required for a custom OpenAI-compatible provider' });
@@ -1165,6 +1170,19 @@ app.post('/ai/provider/:name/models', async (request, reply) => {
   const apiKey = bodyApiKey || (doc?.apiKey ? decryptToken(doc.apiKey) : null);
   const baseUrl = bodyBaseUrl || doc?.baseUrl || PROVIDER_BASE_URLS[name];
   return listModels(name, { apiKey, baseUrl });
+});
+
+// Explicit live check; static model lists are never reported as a successful test.
+app.post('/ai/provider/:name/test', async (request, reply) => {
+  const { name } = request.params;
+  if (!CLOUD_PROVIDERS.includes(name)) return reply.code(404).send({ error: 'Unknown provider' });
+  const doc = await getCredentials(request.workspaceId, name + '_config');
+  const body = request.body || {};
+  if (body.apiKey !== undefined && typeof body.apiKey !== 'string') return reply.code(400).send({ error: 'apiKey must be text' });
+  const apiKey = body.apiKey?.trim() || (doc?.apiKey ? decryptToken(doc.apiKey) : null);
+  const result = await listModels(name, { apiKey, baseUrl: body.baseUrl || doc?.baseUrl || PROVIDER_BASE_URLS[name] });
+  if (!result.live) return reply.code(result.status === 401 || result.status === 403 ? result.status : 503).send({ ok: false, error: result.error || 'Provider connection could not be verified' });
+  return { ok: true, models: result.models, live: true };
 });
 
 // GET /ai/models — models for the active provider (?endpoint= overrides Ollama endpoint for test-without-save)
@@ -1592,46 +1610,15 @@ app.post('/ai/image', async (request, reply) => {
 // in front of nginx (Cloudflare, NPM, Caddy… typically 60–100 s) can cut the
 // request off. The client polls GET /ai/jobs/:id.
 
-const aiJobs = new Map();
-const AI_JOB_TTL_MS = 30 * 60 * 1000;
-
-function createAiJob(ws, type, runner) {
-  const id = crypto.randomUUID();
-  const job = {
-    id, type, workspaceId: ws, status: 'running',
-    progress: { step: '', completed: 0, total: 0 },
-    result: null, error: null,
-    createdAt: new Date(), updatedAt: new Date(),
-  };
-  aiJobs.set(id, job);
-
-  const setProgress = (p) => { job.progress = { ...job.progress, ...p }; job.updatedAt = new Date(); };
-
-  runner(setProgress)
-    .then((result) => { job.status = 'done'; job.result = result; })
-    .catch((err) => {
-      job.status = 'failed';
-      job.error = err.message || String(err);
-      log.error({ action: `ai_job_${type}`, jobId: id, outcome: 'failure', err: job.error });
-    })
-    .finally(() => {
-      job.updatedAt = new Date();
-      setTimeout(() => aiJobs.delete(id), AI_JOB_TTL_MS).unref();
-    });
-
-  return job;
-}
-
+const backgroundHandlers = {};
+const aiJobs = registerBackgroundJobs(app, getDb, backgroundHandlers, log);
 function publicAiJob(job) {
-  return {
-    jobId: job.id, type: job.type, status: job.status, progress: job.progress,
-    result: job.result, error: job.error, createdAt: job.createdAt, updatedAt: job.updatedAt,
-  };
+  return { jobId: job._id, type: job.type, status: job.status, progress: job.progress,
+    result: job.result, error: job.error, createdAt: job.createdAt, updatedAt: job.updatedAt };
 }
-
 app.get('/ai/jobs/:id', async (request, reply) => {
-  const job = aiJobs.get(request.params.id);
-  if (!job || job.workspaceId !== request.workspaceId) return reply.code(404).send({ error: 'Job not found' });
+  const job = await aiJobs.get(request.params.id, request.workspaceId);
+  if (!job) return reply.code(404).send({ error: 'Job not found' });
   return publicAiJob(job);
 });
 
@@ -1757,90 +1744,46 @@ Return ONLY this JSON object:
   return posts;
 }
 
-// POST /ai/content-brief — generate a narrative brief only (step 1 of 2-step calendar flow)
-// Body: { accountKey?, platforms[], month? (YYYY-MM) }
-// Returns 202 { jobId } — poll GET /ai/jobs/:jobId; result: { brief, monthName, month }
-app.post('/ai/content-brief', async (request, reply) => {
-  const ws = request.workspaceId;
-  const { accountKey, platforms = [], month } = request.body || {};
-  if (!Array.isArray(platforms) || !platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
-
-  const db = await getDb();
-  const calMonth = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
-  const monthName = monthNameFor(calMonth);
-  const activePlatforms = platforms.slice(0, 5);
-  const profile = await loadCalendarProfile(db, ws, accountKey);
-  const brandContext = calendarBrandContext(profile);
-  const pconf = await getActiveProviderConfig(ws);
-
-  const job = createAiJob(ws, 'content_brief', async (setProgress) => {
-    setProgress({ step: 'brief', completed: 0, total: 1 });
-    const brief = await generateCalendarBrief(pconf, { brandContext, monthName, platforms: activePlatforms });
-    setProgress({ completed: 1 });
-    log.info({ action: 'content_brief', month: calMonth, platforms: activePlatforms.join(','), outcome: 'success' });
-    return { success: true, brief, monthName, month: calMonth };
+backgroundHandlers.content_brief = async (job, { checkpoint, setProgress, saveCheckpoint }) => {
+  const { brandContext, monthName, activePlatforms, calMonth } = job.payload;
+  await setProgress({ step: 'brief', completed: 0, total: 1 });
+  const brief = checkpoint.brief || await generateCalendarBrief(await getActiveProviderConfig(job.workspaceId), { brandContext, monthName, platforms: activePlatforms });
+  await saveCheckpoint({ brief });
+  await setProgress({ completed: 1 });
+  return { success: true, brief, monthName, month: calMonth };
+};
+backgroundHandlers.content_calendar = async (job, { checkpoint, setProgress, saveCheckpoint, assertWorkspace }) => {
+  const { brandContext, monthName, activePlatforms, calMonth, accountKey, postsPerWeek, approvedBrief } = job.payload;
+  const pconf = await getActiveProviderConfig(job.workspaceId);
+  const total = activePlatforms.length + 1;
+  let brief = checkpoint.brief || approvedBrief;
+  if (!brief) { await setProgress({ step: 'brief', completed: 0, total }); brief = await generateCalendarBrief(pconf, { brandContext, monthName, platforms: activePlatforms }); }
+  await saveCheckpoint({ brief });
+  const byPlatform = { ...checkpoint.byPlatform };
+  for (const platform of activePlatforms) {
+    await setProgress({ step: platform, completed: Object.keys(byPlatform).length + 1, total });
+    if (!byPlatform[platform]) { byPlatform[platform] = await generateCalendarPostsForPlatform(pconf, { brandContext, monthName, platform, brief, postsPerWeek }); await saveCheckpoint({ byPlatform }); }
+  }
+  const calendarId = checkpoint.calendarId || new ObjectId().toString();
+  await saveCheckpoint({ calendarId });
+  const doc = { accountKey: accountKey || null, month: calMonth, monthName, platforms: activePlatforms, postsPerWeek, brief, posts: activePlatforms.flatMap(p => byPlatform[p]), workspaceId: job.workspaceId, createdAt: job.createdAt };
+  await assertWorkspace();
+  await (await getDb()).collection('content_calendars').updateOne({ _id: new ObjectId(calendarId), workspaceId: job.workspaceId }, { $setOnInsert: doc }, { upsert: true });
+  await setProgress({ step: 'done', completed: total, total });
+  return { success: true, calendarId, ...doc };
+};
+for (const [route, type] of [['/ai/content-brief', 'content_brief'], ['/ai/content-calendar', 'content_calendar']]) {
+  app.post(route, async (request, reply) => {
+    const ws = request.workspaceId;
+    const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw } = request.body || {};
+    if (!Array.isArray(platforms) || !platforms.length || platforms.length > 7 || platforms.some(p => typeof p !== 'string' || !PLATFORM_SERVICES[p])) return reply.code(400).send({ error: 'Select supported platforms' });
+    if (month !== undefined && (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month))) return reply.code(400).send({ error: 'Invalid month' });
+    if (approvedBrief && (typeof approvedBrief.theme !== 'string' || !Array.isArray(approvedBrief.pillars))) return reply.code(400).send({ error: 'Invalid approved brief' });
+    const calMonth = month || new Date().toISOString().slice(0, 7);
+    const job = await aiJobs.submit(ws, type, { accountKey, activePlatforms: [...new Set(platforms)], calMonth, monthName: monthNameFor(calMonth), postsPerWeek: Math.min(7, Math.max(1, parseInt(rawPpw) || 3)), approvedBrief: approvedBrief || null, brandContext: calendarBrandContext(await loadCalendarProfile(await getDb(), ws, accountKey)) });
+    return reply.code(202).send(publicAiJob(job));
   });
-
-  return reply.code(202).send(publicAiJob(job));
-});
-
-// POST /ai/content-calendar — generate a monthly content plan with narrative brief + posts
-// Body: { accountKey?, platforms[], month? (YYYY-MM), approvedBrief?, postsPerWeek? }
-// Returns 202 { jobId } — poll GET /ai/jobs/:jobId; result is the saved calendar document.
-// Posts are generated one platform at a time so each AI call stays small enough
-// for local models and progress can be reported.
-app.post('/ai/content-calendar', async (request, reply) => {
-  const ws = request.workspaceId;
-  const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw } = request.body || {};
-  if (!Array.isArray(platforms) || !platforms.length) return reply.code(400).send({ error: 'Select at least one platform' });
-
-  const db = await getDb();
-  const calMonth = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
-  const monthName = monthNameFor(calMonth);
-  const postsPerWeek = Math.min(7, Math.max(1, parseInt(rawPpw) || 3));
-  const activePlatforms = platforms.slice(0, 5);
-  const profile = await loadCalendarProfile(db, ws, accountKey);
-  const brandContext = calendarBrandContext(profile);
-  const pconf = await getActiveProviderConfig(ws);
-
-  const job = createAiJob(ws, 'content_calendar', async (setProgress) => {
-    const totalSteps = activePlatforms.length + (approvedBrief ? 0 : 1);
-    let completed = 0;
-
-    let brief = approvedBrief && typeof approvedBrief.theme === 'string' ? approvedBrief : null;
-    if (!brief) {
-      setProgress({ step: 'brief', completed, total: totalSteps });
-      brief = await generateCalendarBrief(pconf, { brandContext, monthName, platforms: activePlatforms });
-      completed++;
-    }
-
-    const posts = [];
-    for (const platform of activePlatforms) {
-      setProgress({ step: platform, completed, total: totalSteps });
-      const platformPosts = await generateCalendarPostsForPlatform(pconf, { brandContext, monthName, platform, brief, postsPerWeek });
-      posts.push(...platformPosts);
-      completed++;
-      setProgress({ completed });
-    }
-
-    const doc = {
-      accountKey: accountKey || null,
-      month: calMonth,
-      monthName,
-      platforms: activePlatforms,
-      postsPerWeek,
-      brief,
-      posts,
-      workspaceId: ws,
-      createdAt: new Date(),
-    };
-    const inserted = await db.collection('content_calendars').insertOne(doc);
-    log.info({ action: 'content_calendar', month: calMonth, platforms: activePlatforms.join(','), posts: posts.length, outcome: 'success' });
-    return { success: true, calendarId: inserted.insertedId.toString(), ...doc };
-  });
-
-  return reply.code(202).send(publicAiJob(job));
-});
+}
 
 // GET /ai/content-calendar/:id — retrieve a saved calendar
 app.get('/ai/content-calendar/:id', async (request, reply) => {
@@ -1867,89 +1810,51 @@ app.get('/ai/content-calendars', async (request) => {
 
 // ─── Bulk AI Draft Generation ─────────────────────────────────────────────────
 
-// POST /ai/bulk-draft — kick off a batch; returns batchId immediately (non-blocking)
-// Body: { topics: string[], destinations: Destination[], tone?: string, model?: string }
+backgroundHandlers.bulk_draft = async (job, { checkpoint, saveCheckpoint, setProgress, assertWorkspace }) => {
+  const { batchId, topics, selectedDests, system, reqModel } = job.payload;
+  const db = await getDb();
+  const pconf = await getActiveProviderConfig(job.workspaceId);
+  const results = { ...checkpoint.results };
+  const updateBatch = async (status) => {
+    await assertWorkspace();
+    const values = Object.values(results);
+    await db.collection('bulk_draft_batches').updateOne({ _id: new ObjectId(batchId), workspaceId: job.workspaceId }, { $set: { status, completed: values.filter(v => v === 'done').length, failed: values.filter(v => v === 'failed').length, updatedAt: new Date() } });
+  };
+  for (let i = 0; i < topics.length; i++) {
+    if (results[i]) continue;
+    await assertWorkspace();
+    const draftId = new ObjectId(crypto.createHash('sha256').update(batchId + ':' + i).digest('hex').slice(0, 24));
+    // A restart after inserting a draft but before saving progress must not
+    // repeat the provider request or insert a second draft.
+    if (await db.collection('drafts').findOne({ _id: draftId, workspaceId: job.workspaceId })) results[i] = 'done';
+    else {
+      try {
+        const content = await generateText(pconf, { prompt: 'Write a social media post about: ' + topics[i], system, model: reqModel || pconf.model, timeout: 180000 });
+        if (!content.trim()) throw new Error('AI returned empty draft content');
+        await assertWorkspace();
+        await db.collection('drafts').updateOne({ _id: draftId, workspaceId: job.workspaceId }, { $setOnInsert: { content: content.trim(), mediaUrl: '', scheduledAt: '', destinations: selectedDests, batchId, topic: topics[i], createdAt: new Date(), updatedAt: new Date() } }, { upsert: true });
+        results[i] = 'done';
+      } catch (err) { results[i] = 'failed'; log.error({ action: 'bulk_draft_topic', batchId, index: i, err: err.message }); }
+    }
+    await saveCheckpoint({ results });
+    await updateBatch('processing');
+    await setProgress({ step: 'drafts', completed: Object.keys(results).length, total: topics.length });
+  }
+  await updateBatch('done');
+  return { batchId };
+};
 app.post('/ai/bulk-draft', async (request, reply) => {
   const ws = request.workspaceId;
   const { topics, destinations = [], tone = '', model: reqModel } = request.body || {};
-  if (!Array.isArray(topics) || !topics.length) return reply.code(400).send({ error: 'topics array is required' });
-
-  const filteredTopics = topics.map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean);
+  if (!Array.isArray(topics) || !topics.length || topics.length > 100 || topics.some(t => typeof t !== 'string' || t.length > 2000) || !Array.isArray(destinations) || typeof tone !== 'string') return reply.code(400).send({ error: 'Provide at most 100 text topics and valid destinations' });
+  const filteredTopics = topics.map(t => t.trim()).filter(Boolean);
   if (!filteredTopics.length) return reply.code(400).send({ error: 'No valid topics provided' });
-
-  const db = await getDb();
   const batchId = new ObjectId();
-  const now = new Date();
-
-  await db.collection('bulk_draft_batches').insertOne({
-    _id: batchId,
-    total: filteredTopics.length,
-    completed: 0,
-    failed: 0,
-    status: 'processing',
-    workspaceId: ws,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const selectedDests = destinations.filter((d) => d.selected);
-  const toneClause = tone ? `Write in a ${tone} tone.` : '';
-  const platformRules = buildPlatformRulesBlock(selectedDests);
-  const system = `You are a social media content writer. Create engaging, concise posts that perform well. ${toneClause} Write only the post text with relevant hashtags. No explanations or preamble.${platformRules}`;
-
-  // Fire-and-forget — process topics sequentially in the background
-  (async () => {
-    const pconf = await getActiveProviderConfig(request.workspaceId);
-    const model = reqModel || pconf.model;
-
-    for (const topic of filteredTopics) {
-      try {
-        const prompt = `Write a social media post about: ${topic}`;
-        let content = '';
-
-        content = await generateText(pconf, { prompt, system, model, timeout: 180000 });
-
-        if (content.trim()) {
-          const draftNow = new Date();
-          await db.collection('drafts').insertOne({
-            content: content.trim(),
-            mediaUrl: '',
-            scheduledAt: '',
-            destinations: selectedDests,
-            batchId: batchId.toString(),
-            topic,
-            workspaceId: request.workspaceId,
-            createdAt: draftNow,
-            updatedAt: draftNow,
-          });
-        }
-
-        await db.collection('bulk_draft_batches').updateOne(
-          { _id: batchId },
-          { $inc: { completed: 1 }, $set: { updatedAt: new Date() } },
-        );
-      } catch (err) {
-        log.error({ action: 'bulk_draft_topic', topic, outcome: 'failure', err: err.message });
-        await db.collection('bulk_draft_batches').updateOne(
-          { _id: batchId },
-          { $inc: { failed: 1 }, $set: { updatedAt: new Date() } },
-        );
-      }
-    }
-
-    await db.collection('bulk_draft_batches').updateOne(
-      { _id: batchId },
-      { $set: { status: 'done', updatedAt: new Date() } },
-    );
-    log.info({ action: 'bulk_draft_batch', batchId: batchId.toString(), total: filteredTopics.length, outcome: 'success' });
-  })().catch((err) => {
-    log.error({ action: 'bulk_draft_batch', batchId: batchId.toString(), outcome: 'failure', err: err.message });
-    getDb().then((d) => d.collection('bulk_draft_batches').updateOne(
-      { _id: batchId },
-      { $set: { status: 'failed', updatedAt: new Date() } },
-    )).catch(() => {});
-  });
-
+  const db = await getDb();
+  await db.collection('bulk_draft_batches').insertOne({ _id: batchId, total: filteredTopics.length, completed: 0, failed: 0, status: 'processing', workspaceId: ws, createdAt: new Date(), updatedAt: new Date() });
+  const selectedDests = destinations.filter(d => d && d.selected);
+  const system = 'You are a social media content writer. Create engaging, concise posts. ' + (tone ? 'Write in a ' + tone + ' tone. ' : '') + 'Write only the post text with relevant hashtags. No explanations or preamble.' + buildPlatformRulesBlock(selectedDests);
+  await aiJobs.submit(ws, 'bulk_draft', { batchId: batchId.toString(), topics: filteredTopics, selectedDests, system, reqModel });
   return reply.code(202).send({ batchId: batchId.toString() });
 });
 
@@ -2052,7 +1957,7 @@ app.post('/post', async (request, reply) => {
 
 // ─── Legacy post route ────────────────────────────────────────────────────────
 
-app.post('/', async (_request, reply) => reply.code(410).send({ error: 'Use /posts/immediate to publish to selected accounts' }));
+app.post('/', async (_request, reply) => reply.code(410).send({ error: 'Use /post to publish to selected accounts' }));
 
 // ─── Meta App Credentials ────────────────────────────────────────────────────
 
@@ -3346,10 +3251,11 @@ async function runCompetitorScrape(competitorId, ws) {
   const existing = competitor.scrapedContent || [];
 
   // Detect whether any newly scraped content differs from what was previously stored
-  const existingFingerprints = new Set(existing.map((s) => s.url + '||' + s.text.slice(0, 200)));
-  const contentChanged = newItems.some((item) => !existingFingerprints.has(item.url + '||' + item.text.slice(0, 200)));
+  const existingFingerprints = new Set(existing.map((s) => s.url + '||' + s.text));
+  const contentChanged = newItems.some((item) => !existingFingerprints.has(item.url + '||' + item.text));
 
-  const combined = [...newItems, ...existing].slice(0, 20);
+  const seen = new Set();
+  const combined = [...newItems, ...existing].filter(item => { const key = item.url + '||' + item.text; if (seen.has(key)) return false; seen.add(key); return true; }).slice(0, 20);
 
   await db.collection('competitors').updateOne(
     { _id: new ObjectId(competitorId), workspaceId: ws },
@@ -3585,49 +3491,32 @@ app.delete('/competitors/:id', async (request, reply) => {
   return { success: true };
 });
 
-// Scrape one competitor — returns jobId immediately, runs in background
+backgroundHandlers.competitor_scrape = async (job, { assertWorkspace }) => {
+  await assertWorkspace();
+  const result = await runCompetitorScrape(job.payload.competitorId, job.workspaceId);
+  if (!result.ok) throw new Error(result.message);
+  return result;
+};
 app.post('/competitors/:id/scrape', async (request, reply) => {
-  const jobId = new ObjectId().toString();
   const ws = request.workspaceId;
-  const db = await getDb();
   let oid; try { oid = new ObjectId(request.params.id); } catch { return reply.code(400).send({ error: 'Invalid competitor ID' }); }
-  if (!await db.collection('competitors').findOne({ _id: oid, workspaceId: ws })) return reply.code(404).send({ error: 'Competitor not found' });
-  activeScrapeJobs.set(jobId, { workspaceId: ws, competitorId: request.params.id, status: 'running', sources: 0, message: '' });
-
-  (async () => {
-    try {
-      const result = await runCompetitorScrape(request.params.id, ws);
-      activeScrapeJobs.set(jobId, {
-        workspaceId: ws, competitorId: request.params.id, status: result.ok ? 'done' : 'failed',
-        sources: result.sources,
-        message: result.message,
-      });
-    } catch (err) {
-      activeScrapeJobs.set(jobId, { workspaceId: ws, competitorId: request.params.id, status: 'failed', sources: 0, message: err.message });
-    }
-  })();
-
-  return reply.code(202).send({ jobId });
+  if (!await (await getDb()).collection('competitors').findOne({ _id: oid, workspaceId: ws })) return reply.code(404).send({ error: 'Competitor not found' });
+  const job = await aiJobs.submit(ws, 'competitor_scrape', { competitorId: request.params.id });
+  return reply.code(202).send({ jobId: job._id });
 });
-
-// Poll scrape job status
 app.get('/competitors/:id/scrape-status/:jobId', async (request, reply) => {
-  const job = activeScrapeJobs.get(request.params.jobId);
-  if (!job || job.workspaceId !== request.workspaceId || job.competitorId !== request.params.id) return reply.code(404).send({ error: 'Job not found or expired' });
-  return job;
+  const job = await aiJobs.get(request.params.jobId, request.workspaceId);
+  if (!job || job.type !== 'competitor_scrape' || job.payload.competitorId !== request.params.id) return reply.code(404).send({ error: 'Job not found or expired' });
+  return { status: job.status, sources: job.result?.sources || 0, message: job.error || job.result?.message || '' };
 });
 
-// Scrape all competitors (called by scheduler — always operates on default workspace)
+// Daily refresh uses the same durable queue as manual scrapes.
 app.post('/competitors/scrape-all', async (request, reply) => {
   const ws = request.workspaceId;
-  const db = await getDb();
-  const all = await db.collection('competitors').find({ workspaceId: ws }).toArray();
+  const all = await (await getDb()).collection('competitors').find({ workspaceId: ws }).toArray();
   const results = [];
-  for (const c of all) {
-    const r = await runCompetitorScrape(c._id.toString(), ws);
-    results.push({ id: c._id.toString(), name: c.name, ...r });
-  }
-  return { success: true, results };
+  for (const competitor of all) { const job = await aiJobs.submit(ws, 'competitor_scrape', { competitorId: competitor._id.toString() }); results.push({ id: competitor._id.toString(), jobId: job._id }); }
+  return reply.code(202).send({ success: true, results });
 });
 
 // Summarize competitor content with AI — returns structured analysis

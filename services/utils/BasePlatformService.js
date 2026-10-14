@@ -73,7 +73,7 @@ class BasePlatformService {
           ? (graphCode ? `[#${graphCode}] ${graphMsg}` : graphMsg)
           : (typeof err.response?.data?.error === 'string' ? err.response.data.error : err.message);
         this.log.error({ action: 'publish_post', platform: this.platformName, outcome: 'failure', err: String(apiError) });
-        const uncertain = ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET'].includes(err.code) || (!err.response && !err.code);
+        const uncertain = err.uncertain === true || ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET'].includes(err.code) || (!err.response && !err.code);
         const status = err.response?.status || (err.code === 'VALIDATION' ? 400 : uncertain ? 409 : err.code ? 503 : 400);
         const retryable = !uncertain && (status === 429 || status >= 500);
         if (receipts && !uncertain) await receipts.deleteOne({ _id: receiptId, workspaceId });

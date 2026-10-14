@@ -84,7 +84,8 @@ function normaliseError(provider, err) {
     else detail = body.error?.message || body.error || body.message || JSON.stringify(body).slice(0, 300);
   }
   if (err.code === 'ECONNABORTED') detail = `timed out after ${err.config?.timeout || '?'} ms`;
-  if (err.code === 'ECONNREFUSED') detail = `connection refused (${err.config?.url || ''})`;
+  if (err.code === 'ECONNREFUSED') detail = `connection refused (${(err.config?.url || '').split('?')[0]})`;
+  detail = String(detail || 'Provider request failed').replace(/([?&](?:key|api_key|access_token)=)[^&\s]+/gi, '$1[REDACTED]').replace(/sk-(?:ant-)?[A-Za-z0-9_-]{12,}/g, '[REDACTED]');
   return new AiError(provider, detail, status);
 }
 
@@ -422,7 +423,9 @@ async function listModels(name, creds = {}) {
       return ids.length ? { models: ids, live: true } : fallback;
     }
   } catch (err) {
-    log.warn({ action: 'ai_list_models', provider: name, outcome: 'fallback', err: err.message });
+    const error = normaliseError(name, err);
+    log.warn({ action: 'ai_list_models', provider: name, outcome: 'fallback', err: error.message });
+    return { ...fallback, error: error.message, status: error.status };
   }
   return fallback;
 }

@@ -1,3 +1,4 @@
+const { apiFailure, confirmTikTokPublish } = require('./utils/tiktokPublishing');
 require('dotenv').config();
 const axios = require('axios');
 const BasePlatformService = require('./utils/BasePlatformService');
@@ -177,13 +178,14 @@ class TikTokService extends BasePlatformService {
         },
         timeout: 30000,
       });
+      apiFailure(res);
       const publishId = res.data?.data?.publish_id;
-      this.app.log.info({ action: 'publish_post', platform: 'tiktok', publishId, outcome: 'success' });
-      return { publishId };
+      if (!publishId) throw Object.assign(new Error('TikTok did not return a publishing reference'), { uncertain: true });
+      return await confirmTikTokPublish(TIKTOK_API, account.accessToken, publishId);
     } catch (err) {
       const msg = err.response?.data?.error?.message || err.message;
       this.app.log.error({ action: 'publish_post', platform: 'tiktok', outcome: 'failure', err: msg });
-      throw new Error(msg);
+      throw err;
     }
   }
 }

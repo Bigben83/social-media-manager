@@ -129,3 +129,19 @@ test('workspace deletion retains data when publishing is active', async () => {
   expect((await request('DELETE', '/workspaces/busy')).statusCode).toBe(409);
   expect((await db.collection('workspaces').findOne({ _id: 'busy' })).deleting).toBe(false);
 });
+test('provider tests report real authentication failures instead of static-model success', async () => {
+  await db.collection('platform_credentials').insertOne({ _id: 'openai_config', apiKey: 'fake-key' });
+  axios.get.mockRejectedValueOnce({ response: { status: 401, data: { error: { message: 'Invalid API key' } } } });
+  const result = await request('POST', '/ai/provider/openai/test', 'test', {});
+  expect(result.statusCode).toBe(401); expect(result.json().ok).toBe(false); expect(result.json().error).toContain('Invalid API key');
+});
+test('calendar generation rejects unavailable platforms and invalid months', async () => {
+  expect((await request('POST','/ai/content-brief','test',{ platforms: ['linkedin'] })).statusCode).toBe(400);
+  expect((await request('POST','/ai/content-calendar','test',{ platforms: ['facebook'], month: '2026-13' })).statusCode).toBe(400);
+});
+test('uploads reject disguised media and leave no file behind', async () => {
+  const before = fs.readdirSync(process.env.UPLOAD_DIR);
+  const payload = Buffer.from('--media-boundary\r\nContent-Disposition: form-data; name="file"; filename="fake.png"\r\nContent-Type: image/png\r\n\r\n<html>not media</html>\r\n--media-boundary--\r\n');
+  const result = await app.inject({ method: 'POST', url: '/upload', headers: { 'x-workspace-id': 'test', 'content-type': 'multipart/form-data; boundary=media-boundary' }, payload });
+  expect(result.statusCode).toBe(400); expect(fs.readdirSync(process.env.UPLOAD_DIR)).toEqual(before);
+});

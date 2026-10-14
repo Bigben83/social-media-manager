@@ -116,7 +116,7 @@ export const useAiStore = defineStore('ai', () => {
   async function fetchProviderModels(name: string, payload?: { apiKey?: string; endpoint?: string; baseUrl?: string }): Promise<string[]> {
     try {
       const res = await axios.post(`/api/ai/provider/${name}/models`, payload || {})
-      return res.data.models || []
+      return res.data.live ? (res.data.models || []) : []
     } catch {
       return []
     }
