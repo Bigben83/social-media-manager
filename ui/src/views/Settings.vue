@@ -114,7 +114,7 @@
                 :key="account.id"
                 class="text-xs text-yellow-300"
               >
-                {{ $t('settings.meta.expiryWarningBody', { username: '@' + account.username, days: account.daysLeft }, account.daysLeft ?? 0) }}
+                {{ account.isValid ? $t('settings.meta.expiryWarningBody', { username: '@' + account.username, days: account.daysLeft }, account.daysLeft ?? 0) : $t('settings.meta.invalidTokenBody', { username: '@' + account.username }) }}
               </p>
               <p class="text-xs text-gray-500">{{ $t('settings.meta.expiryAutoNote') }}</p>
               <div class="flex gap-2 pt-1">

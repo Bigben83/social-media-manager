@@ -20,7 +20,8 @@ class MastodonService extends BasePlatformService {
     });
   }
 
-  async getStatus() {
+  async getStatus(workspaceId = 'default') {
+    if (workspaceId !== 'default') return { connected: false, platform: 'mastodon', error: 'Environment credentials belong to the default workspace' };
     if (!MASTODON_ACCESS_TOKEN) {
       return { connected: false, platform: 'mastodon', error: 'Access token not configured' };
     }
@@ -40,7 +41,8 @@ class MastodonService extends BasePlatformService {
     }
   }
 
-  async fetchFeed({ limit = 40 } = {}) {
+  async fetchFeed({ limit = 40, workspaceId = 'default' } = {}) {
+    if (workspaceId !== 'default') throw Object.assign(new Error('No account configured for this workspace'), { code: 'VALIDATION' });
     const client = this._initClient();
     if (!client) throw new Error('Mastodon access token not configured');
 
@@ -80,8 +82,8 @@ class MastodonService extends BasePlatformService {
       const col = db.collection('feeds');
       for (const item of items) {
         await col.updateOne(
-          { platform: 'mastodon', originalId: item.originalId },
-          { $set: item },
+          { platform: 'mastodon', originalId: item.originalId, workspaceId },
+          { $set: { ...item, workspaceId } },
           { upsert: true }
         );
       }
@@ -92,7 +94,8 @@ class MastodonService extends BasePlatformService {
     return items;
   }
 
-  async publishPost({ content, media = [], sensitive = false, spoilerText = '', firstComment } = {}) {
+  async publishPost({ content, media = [], sensitive = false, spoilerText = '', firstComment, workspaceId = 'default' } = {}) {
+    if (workspaceId !== 'default') throw Object.assign(new Error('No account configured for this workspace'), { code: 'VALIDATION' });
     const client = this._initClient();
     if (!client) throw new Error('Mastodon access token not configured');
 

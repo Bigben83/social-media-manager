@@ -517,6 +517,7 @@ export default {
       devPortal: 'developers.facebook.com',
 
       expiryWarningTitle: 'Instagram token expiring soon',
+      invalidTokenBody: '{username} needs to be reconnected; its token is invalid.',
       expiryWarningBody: '{username} expires in {days} day | {username} expires in {days} days',
       expiryRefreshToken: 'Refresh Token',
       expiryRefreshing: 'Refreshing…',

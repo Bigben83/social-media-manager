@@ -7,16 +7,16 @@ const log = createLogger('crypto');
 
 function _getKey() {
   const keyHex = process.env.ENCRYPTION_KEY;
-  if (!keyHex || keyHex.length !== 64) return null;
+  if (!keyHex || !/^[0-9a-fA-F]{64}$/.test(keyHex)) return null;
   return Buffer.from(keyHex, 'hex');
 }
 
-// Returns the ciphertext string, or plaintext if key not configured.
+// Fail closed: never persist new plaintext credentials.
 function encryptToken(plaintext) {
   if (!plaintext) return plaintext;
   if (String(plaintext).startsWith(ENC_PREFIX)) return plaintext; // already encrypted
   const key = _getKey();
-  if (!key) return plaintext;
+  if (!key) throw new Error('ENCRYPTION_KEY must contain exactly 64 hexadecimal characters');
 
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGORITHM, key, iv);
@@ -56,7 +56,7 @@ function decryptToken(value) {
 // Log a startup warning when no key is configured so operators notice.
 function warnIfNoKey(serviceName) {
   if (!_getKey()) {
-    log.warn({ action: 'startup_check', service: serviceName, outcome: 'warning', err: 'ENCRYPTION_KEY is not set — tokens will be stored in plaintext. Generate a key with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"' });
+    throw new Error(`${serviceName}: ENCRYPTION_KEY must contain exactly 64 hexadecimal characters`);
   }
 }
 

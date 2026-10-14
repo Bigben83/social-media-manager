@@ -103,7 +103,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
   const tokenExpiryDismissed = ref(false)
 
   const expiringAccounts = computed(() =>
-    tokenExpiry.value.filter((a: TokenExpiryAccount) => a.daysLeft !== null && a.daysLeft < 7)
+    tokenExpiry.value.filter((a: TokenExpiryAccount) => !a.isValid || (a.daysLeft !== null && a.daysLeft < 7))
   )
 
   const hasExpiryWarning = computed(() =>

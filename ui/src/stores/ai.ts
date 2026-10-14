@@ -215,7 +215,7 @@ export const useAiStore = defineStore('ai', () => {
   ): AsyncGenerator<string> {
     const response = await fetch('/api/ai/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Workspace-Id': String(axios.defaults.headers.common['X-Workspace-Id'] || 'default') },
       body: JSON.stringify({ prompt, system, model, useCompetitorContext, destinations, useResearchBrief, accountKey }),
       signal,
     })

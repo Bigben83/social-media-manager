@@ -8,15 +8,22 @@ const DB_NAME = process.env.MONGODB_DB || 'socialmedia';
 
 let client = null;
 let db = null;
+let connecting = null;
 
 async function connect() {
   if (db) return db;
-
-  client = new MongoClient(MONGODB_URL);
-  await client.connect();
-  db = client.db(DB_NAME);
-  log.info({ action: 'connect', outcome: 'success', database: DB_NAME });
-  return db;
+  if (!connecting) {
+    connecting = (async () => {
+      const candidate = new MongoClient(MONGODB_URL, { serverSelectionTimeoutMS: 10000 });
+      try {
+        await candidate.connect(); client = candidate; db = client.db(DB_NAME);
+        log.info({ action: 'connect', outcome: 'success', database: DB_NAME });
+        return db;
+      } catch (err) { await candidate.close(); throw err; }
+      finally { connecting = null; }
+    })();
+  }
+  return connecting;
 }
 
 async function getDb() {

@@ -58,11 +58,13 @@ class InstagramService extends BasePlatformService {
       const db = await getDb();
       const cred = await getWorkspaceCredential(db, 'instagram', workspaceId);
       const dbAccounts = (cred?.accounts || []).filter((a) => a.selected);
+      if (cred && dbAccounts.length === 0) return [];
       if (dbAccounts.length > 0) {
         return dbAccounts.map((a) => ({ ...a, accessToken: decryptToken(a.accessToken) })).filter((a) => a.accessToken);
       }
     } catch (_) { /* fall through */ }
 
+    if (workspaceId !== 'default') return [];
     // Env var fallback (legacy single-account mode)
     const { INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_BUSINESS_ACCOUNT_ID } = process.env;
     if (INSTAGRAM_ACCESS_TOKEN && INSTAGRAM_BUSINESS_ACCOUNT_ID) {

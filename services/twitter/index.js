@@ -37,7 +37,8 @@ class TwitterService extends BasePlatformService {
     }
   }
 
-  async getStatus() {
+  async getStatus(workspaceId = 'default') {
+    if (workspaceId !== 'default') return { connected: false, platform: 'twitter', error: 'Environment credentials belong to the default workspace' };
     this._initClients();
     if (!this.client) {
       return { connected: false, platform: 'twitter', error: 'Twitter credentials not configured' };
@@ -56,7 +57,8 @@ class TwitterService extends BasePlatformService {
     }
   }
 
-  async fetchFeed({ limit = 20 } = {}) {
+  async fetchFeed({ limit = 20, workspaceId = 'default' } = {}) {
+    if (workspaceId !== 'default') throw Object.assign(new Error('No account configured for this workspace'), { code: 'VALIDATION' });
     this._initClients();
     const client = this.client || this.roClient;
     if (!client) throw new Error('Twitter credentials not configured');
@@ -111,8 +113,8 @@ class TwitterService extends BasePlatformService {
       const col = db.collection('feeds');
       for (const item of items) {
         await col.updateOne(
-          { platform: 'twitter', originalId: item.originalId },
-          { $set: item },
+          { platform: 'twitter', originalId: item.originalId, workspaceId },
+          { $set: { ...item, workspaceId } },
           { upsert: true }
         );
       }
@@ -123,7 +125,8 @@ class TwitterService extends BasePlatformService {
     return items;
   }
 
-  async publishPost({ content } = {}) {
+  async publishPost({ content, workspaceId = 'default' } = {}) {
+    if (workspaceId !== 'default') throw Object.assign(new Error('No account configured for this workspace'), { code: 'VALIDATION' });
     this._initClients();
     if (!this.client) throw new Error('Twitter write credentials not configured');
 

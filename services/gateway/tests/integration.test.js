@@ -14,7 +14,10 @@ const db = fakeDb();
 getDb.mockResolvedValue(db);
 const app = require('../server');
 const request = (method, url, workspace = 'test', payload) => app.inject({ method, url, headers: { 'x-workspace-id': workspace }, payload });
-beforeAll(async () => { await app.ready(); await new Promise(resolve => setImmediate(resolve)); });
+beforeAll(async () => {
+  await app.ready();
+  for (const _id of ['test','other','lookup','oauth','drafts','posting','repeat','receipts','ws-a','ws-b']) await db.collection('workspaces').insertOne({ _id });
+});
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { axios.get.mockReset(); axios.post.mockReset(); });
 
@@ -91,4 +94,39 @@ test('an immediate HTTP retry returns the original publishing result', async () 
   const first = await app.inject(req); const repeated = await app.inject(req);
   expect(repeated.json()).toEqual(first.json());
   expect(axios.post).toHaveBeenCalledTimes(1);
+});
+
+test('the same account has independent profiles in different workspaces', async () => {
+  await request('PUT', '/profiles/facebook:shared', 'ws-a', { businessName: 'Brand A' });
+  await request('PUT', '/profiles/facebook:shared', 'ws-b', { businessName: 'Brand B' });
+  expect((await request('GET', '/profiles/facebook:shared', 'ws-a')).json().businessName).toBe('Brand A');
+  expect((await request('GET', '/profiles/facebook:shared', 'ws-b')).json().businessName).toBe('Brand B');
+});
+test('another workspace cannot delete an owned media file', async () => {
+  fs.writeFileSync(path.join(process.env.UPLOAD_DIR, 'owned.jpg'), 'image');
+  await db.collection('media_files').insertOne({ filename: 'owned.jpg', workspaceId: 'ws-a' });
+  expect((await request('DELETE', '/media/owned.jpg', 'ws-b')).statusCode).toBe(404);
+  expect(fs.existsSync(path.join(process.env.UPLOAD_DIR, 'owned.jpg'))).toBe(true);
+});
+test('expiry cache entries are isolated by workspace', async () => {
+  for (const ws of ['ws-a','ws-b']) await db.collection('platform_credentials').insertOne({ _id: `${ws}:instagram`, accounts: [{ id: ws, username: ws, accessToken: 'fake', selected: true }] });
+  axios.get.mockResolvedValue({ data: { data: { is_valid: true, expires_at: 0 } } });
+  expect((await request('GET', '/meta/token-expiry', 'ws-a')).json().accounts[0].id).toBe('ws-a');
+  expect((await request('GET', '/meta/token-expiry', 'ws-b')).json().accounts[0].id).toBe('ws-b');
+});
+test('workspace deletion first cancels its queue and removes scoped data', async () => {
+  await db.collection('workspaces').insertOne({ _id: 'delete-me' });
+  await db.collection('scheduled_jobs').insertOne({ workspaceId: 'delete-me', bullJobId: 'pending' });
+  await db.collection('feeds').insertOne({ workspaceId: 'delete-me' });
+  axios.delete = jest.fn().mockResolvedValue({ data: { success: true } });
+  expect((await request('DELETE', '/workspaces/delete-me')).statusCode).toBe(200);
+  expect(axios.delete.mock.calls[0][0]).toContain('/workspaces/delete-me/jobs');
+  expect(await db.collection('scheduled_jobs').findOne({ workspaceId: 'delete-me' })).toBeNull();
+  expect(await db.collection('feeds').findOne({ workspaceId: 'delete-me' })).toBeNull();
+});
+test('workspace deletion retains data when publishing is active', async () => {
+  await db.collection('workspaces').insertOne({ _id: 'busy' });
+  axios.delete = jest.fn().mockRejectedValue({ response: { status: 409, data: { error: 'Publishing active' } } });
+  expect((await request('DELETE', '/workspaces/busy')).statusCode).toBe(409);
+  expect((await db.collection('workspaces').findOne({ _id: 'busy' })).deleting).toBe(false);
 });

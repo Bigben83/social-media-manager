@@ -6,7 +6,7 @@
 async function getWorkspaceCredential(db, type, workspaceId = 'default') {
   const scoped = await db.collection('platform_credentials').findOne({ _id: `${workspaceId}:${type}` });
   if (scoped) return scoped;
-  return db.collection('platform_credentials').findOne({ _id: type });
+  return workspaceId === 'default' ? db.collection('platform_credentials').findOne({ _id: type }) : null;
 }
 
 module.exports = { getWorkspaceCredential };

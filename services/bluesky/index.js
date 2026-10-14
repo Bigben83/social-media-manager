@@ -26,7 +26,8 @@ class BlueskyService extends BasePlatformService {
     this.loggedIn = true;
   }
 
-  async getStatus() {
+  async getStatus(workspaceId = 'default') {
+    if (workspaceId !== 'default') return { connected: false, platform: 'bluesky', error: 'Environment credentials belong to the default workspace' };
     if (!BLUESKY_IDENTIFIER || !BLUESKY_APP_PASSWORD) {
       return { connected: false, platform: 'bluesky', error: 'Credentials not configured' };
     }
@@ -46,7 +47,8 @@ class BlueskyService extends BasePlatformService {
     }
   }
 
-  async fetchFeed({ limit = 50 } = {}) {
+  async fetchFeed({ limit = 50, workspaceId = 'default' } = {}) {
+    if (workspaceId !== 'default') throw Object.assign(new Error('No account configured for this workspace'), { code: 'VALIDATION' });
     await this._ensureLoggedIn();
 
     const response = await this.agent.getTimeline({ limit: Number(limit) });
@@ -84,8 +86,8 @@ class BlueskyService extends BasePlatformService {
       const col = db.collection('feeds');
       for (const item of items) {
         await col.updateOne(
-          { platform: 'bluesky', originalId: item.originalId },
-          { $set: item },
+          { platform: 'bluesky', originalId: item.originalId, workspaceId },
+          { $set: { ...item, workspaceId } },
           { upsert: true }
         );
       }
@@ -96,7 +98,8 @@ class BlueskyService extends BasePlatformService {
     return items;
   }
 
-  async publishPost({ content, media = [], firstComment } = {}) {
+  async publishPost({ content, media = [], firstComment, workspaceId = 'default' } = {}) {
+    if (workspaceId !== 'default') throw Object.assign(new Error('No account configured for this workspace'), { code: 'VALIDATION' });
     await this._ensureLoggedIn();
 
     const rt = new RichText({ text: content });

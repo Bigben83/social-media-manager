@@ -30,11 +30,13 @@ class FacebookService extends BasePlatformService {
       const db = await getDb();
       const cred = await getWorkspaceCredential(db, 'facebook', workspaceId);
       const dbPages = (cred?.pages || []).filter((p) => p.selected);
+      if (cred && dbPages.length === 0) return [];
       if (dbPages.length > 0) {
         return dbPages.map((p) => ({ ...p, accessToken: decryptToken(p.accessToken) })).filter((p) => p.accessToken);
       }
     } catch (_) { /* fall through */ }
 
+    if (workspaceId !== 'default') return [];
     // Env var fallback (legacy single-page mode)
     const { FACEBOOK_PAGE_ACCESS_TOKEN, FACEBOOK_PAGE_ID } = process.env;
     if (FACEBOOK_PAGE_ACCESS_TOKEN && FACEBOOK_PAGE_ID) {

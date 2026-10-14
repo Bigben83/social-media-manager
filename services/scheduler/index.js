@@ -28,24 +28,18 @@ const processPostJob = createPostProcessor({ getDb, axios, log });
 // ─── System Job Worker ────────────────────────────────────────────────────────
 
 async function processSystemJob(job) {
-  if (job.name === 'meta-token-refresh') {
-    log.info({ action: 'token_refresh', trigger: 'scheduled', outcome: 'start' });
-    const res = await axios.post(`${GATEWAY_URL}/meta/token-refresh`, {}, { timeout: 60000 });
-    log.info({ action: 'token_refresh', trigger: 'scheduled', outcome: 'success', refreshed: res.data.refreshed, skipped: res.data.skipped, errors: res.data.errors });
-    return res.data;
+  const routes = { 'meta-token-refresh': '/meta/token-refresh', 'metrics-crawl': '/analytics/crawl', 'competitor-scrape': '/competitors/scrape-all' };
+  if (!routes[job.name]) return;
+  const db = await getDb(); const workspaces = await db.collection('workspaces').find({}).toArray();
+  const results = [];
+  for (const workspace of workspaces) {
+    if (workspace.deleting) continue;
+    try {
+      const response = await axios.post(GATEWAY_URL + routes[job.name], {}, { timeout: 300000, headers: { 'X-Workspace-Id': workspace._id } });
+      results.push({ workspaceId: workspace._id, success: true, ...response.data });
+    } catch (err) { results.push({ workspaceId: workspace._id, success: false }); log.warn({ action: job.name, workspaceId: workspace._id, outcome: 'failure', err: err.message }); }
   }
-  if (job.name === 'metrics-crawl') {
-    log.info({ action: 'metrics_crawl', trigger: 'scheduled', outcome: 'start' });
-    const res = await axios.post(`${GATEWAY_URL}/analytics/crawl`, {}, { timeout: 120000 });
-    log.info({ action: 'metrics_crawl', trigger: 'scheduled', outcome: 'success', total: res.data.total });
-    return res.data;
-  }
-  if (job.name === 'competitor-scrape') {
-    log.info({ action: 'competitor_scrape', trigger: 'scheduled', outcome: 'start' });
-    const res = await axios.post(`${GATEWAY_URL}/competitors/scrape-all`, {}, { timeout: 120000 });
-    log.info({ action: 'competitor_scrape', trigger: 'scheduled', outcome: 'success', results: res.data.results?.length });
-    return res.data;
-  }
+  return results;
 }
 
 // ─── HTTP Endpoints ──────────────────────────────────────────────────────────
@@ -62,6 +56,9 @@ app.post('/schedule', async (request, reply) => {
 
   const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
 
+  const db = await getDb();
+  const workspace = await db.collection('workspaces').findOne({ _id: workspaceId });
+  if (!workspace || workspace.deleting) return reply.code(409).send({ error: 'Workspace is unavailable' });
   const error = validatePost(content, destList);
   if (error) return reply.code(400).send({ error });
 
@@ -69,7 +66,6 @@ app.post('/schedule', async (request, reply) => {
   try { delay = scheduleDelay(scheduledAt); }
   catch (err) { return reply.code(400).send({ error: err.message }); }
 
-  const db = await getDb();
   await db.collection('scheduled_jobs').insertOne({
     _id: postId, postId, type: 'one-time', content, firstComment,
     scheduledAt: new Date(scheduledAt), destinations: destList,
@@ -123,6 +119,21 @@ app.delete('/jobs/:jobId', async (request, reply) => {
   );
 
   return { success: true, jobId };
+});
+
+app.delete('/workspaces/:id/jobs', async (request, reply) => {
+  const ws = request.headers['x-workspace-id'] || 'default';
+  if (ws !== request.params.id) return reply.code(403).send({ error: 'Workspace mismatch' });
+  const wasPaused = await postQueue.isPaused(); await postQueue.pause();
+  try {
+    const active = await postQueue.getJobs(['active']);
+    if (active.some(job => (job.data.workspaceId || 'default') === ws)) return reply.code(409).send({ error: 'Wait for active publishing to finish before deleting the workspace' });
+    const db = await getDb();
+    for (const row of await db.collection('scheduled_jobs').find({ workspaceId: ws }).toArray()) {
+      const job = await postQueue.getJob(row.bullJobId); if (job) await job.remove();
+    }
+    return { success: true };
+  } finally { if (!wasPaused) await postQueue.resume(); }
 });
 
 // ─── Başlatma ────────────────────────────────────────────────────────────────

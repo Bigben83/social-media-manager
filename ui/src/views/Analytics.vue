@@ -720,6 +720,7 @@ function exportCsv() {
   if (selectedAccount.value) params.set('account', selectedAccount.value)
   // Export current month by default
   params.set('month', new Date().toISOString().slice(0, 7))
+  params.set('workspace', String(axios.defaults.headers.common['X-Workspace-Id'] || 'default'))
   const url = `/api/analytics/export?${params.toString()}`
   const a = document.createElement('a')
   a.href = url

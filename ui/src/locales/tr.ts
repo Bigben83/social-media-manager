@@ -517,6 +517,7 @@ export default {
       devPortal: 'developers.facebook.com',
 
       expiryWarningTitle: 'Instagram token\'ı yakında sona eriyor',
+      invalidTokenBody: '{username} yeniden baglanmalidir; erisim belirteci gecersiz.',
       expiryWarningBody: '{username} {days} gün içinde sona eriyor | {username} {days} gün içinde sona eriyor',
       expiryRefreshToken: 'Token\'ı Yenile',
       expiryRefreshing: 'Yenileniyor…',

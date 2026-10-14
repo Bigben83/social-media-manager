@@ -17,6 +17,8 @@ const {
   PROVIDER_MODELS, PROVIDER_BASE_URLS, GEMINI_BASE_URL, CLOUD_PROVIDERS, VISION_PROVIDERS, anthropicSdkAvailable,
 } = require('./ai');
 
+const { externalGet } = require('./utils/externalFetch');
+const { repairScopedData } = require('./migrations');
 const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery } = require('./meta');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
@@ -125,8 +127,15 @@ app.addHook('onSend', async (request, reply) => {
 });
 
 // Inject workspace context into every request
-app.addHook('preHandler', async (request) => {
-  request.workspaceId = request.headers['x-workspace-id'] || 'default';
+app.addHook('preHandler', async (request, reply) => {
+  const downloadWorkspace = request.url.split('?')[0] === '/analytics/export' ? request.query.workspace : null;
+  const ws = request.headers['x-workspace-id'] || downloadWorkspace || 'default';
+  if (typeof ws !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(ws)) return reply.code(400).send({ error: 'Invalid workspace ID' });
+  request.workspaceId = ws;
+  if (request.url.split('?')[0] !== '/workspaces') {
+    const workspace = await (await getDb()).collection('workspaces').findOne({ _id: ws });
+    if (!workspace || workspace.deleting) return reply.code(404).send({ error: 'Workspace is unavailable' });
+  }
 });
 
 app.options('*', async (request, reply) => {
@@ -209,25 +218,24 @@ app.put('/workspaces/:id', async (request, reply) => {
 app.delete('/workspaces/:id', async (request, reply) => {
   const { id } = request.params;
   if (id === 'default') return reply.code(400).send({ error: 'Cannot delete the default workspace' });
-  const db = await getDb();
-  const result = await db.collection('workspaces').deleteOne({ _id: id });
-  if (!result.deletedCount) return reply.code(404).send({ error: 'Workspace not found' });
-  // Cascade-delete all workspace-scoped data
-  const deleteAll = (col, filter) => db.collection(col).deleteMany(filter);
-  await Promise.all([
-    db.collection('platform_credentials').deleteMany({ workspaceId: id }),
-    deleteAll('competitors', { workspaceId: id }),
-    deleteAll('hashtag_groups', { workspaceId: id }),
-    deleteAll('hashtag_stats', { workspaceId: id }),
-    deleteAll('account_profiles', { workspaceId: id }),
-    deleteAll('content_calendars', { workspaceId: id }),
-    deleteAll('bulk_draft_batches', { workspaceId: id }),
-    deleteAll('drafts', { workspaceId: id }),
-    deleteAll('posts', { workspaceId: id }),
-    deleteAll('post_metrics', { workspaceId: id }),
-    deleteAll('media_files', { workspaceId: id }),
-  ]);
-  log.info({ action: 'workspace_delete', workspaceId: id, outcome: 'success' });
+  const db = await getDb(); const workspace = await db.collection('workspaces').findOne({ _id: id });
+  if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
+  await db.collection('workspaces').updateOne({ _id: id }, { $set: { deleting: true } });
+  try {
+    await axios.delete(`${process.env.SCHEDULER_SERVICE_URL || 'http://scheduler:3011'}/workspaces/${encodeURIComponent(id)}/jobs`, { headers: { 'X-Workspace-Id': id }, timeout: 30000 });
+  } catch (err) {
+    await db.collection('workspaces').updateOne({ _id: id }, { $set: { deleting: false } });
+    return reply.code(err.response?.status === 409 ? 409 : 503).send({ error: err.response?.data?.error || 'Could not cancel scheduled jobs; workspace was retained' });
+  }
+  const media = await db.collection('media_files').find({ workspaceId: id }).toArray();
+  for (const file of media) {
+    if (!file.filename || /[\\/]/.test(file.filename) || file.filename.includes('..')) continue;
+    try { await fs.promises.unlink(path.join(UPLOAD_DIR, file.filename)); } catch (err) { if (err.code !== 'ENOENT') log.warn({ action: 'workspace_media_cleanup', workspaceId: id, outcome: 'failure' }); }
+  }
+  const collections = ['platform_credentials','competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','media_folders','feeds','scheduled_jobs','post_requests','publish_requests','oauth_states'];
+  await Promise.all(collections.map(name => db.collection(name).deleteMany({ workspaceId: id })));
+  await db.collection('workspaces').deleteOne({ _id: id });
+  tokenExpiryCache.delete(id);
   return { success: true };
 });
 
@@ -287,13 +295,15 @@ async function runWorkspaceMigration() {
     for (const col of cols) {
       await db.collection(col).updateMany({ workspaceId: { $exists: false } }, { $set: { workspaceId: 'default' } });
     }
+    await repairScopedData(db);
     if (migrated > 0) log.info({ action: 'workspace_migration', migrated, outcome: 'success' });
   } catch (err) {
     log.error({ action: 'workspace_migration', outcome: 'failure', err: err.message });
+    throw err;
   }
 }
 
-getDb().then(() => runWorkspaceMigration());
+app.addHook('onReady', runWorkspaceMigration);
 
 // ─── Media Upload & Library ───────────────────────────────────────────────────
 
@@ -357,11 +367,13 @@ app.get('/media-library', async (request) => {
 });
 
 // List custom folders with per-folder file counts
-app.get('/media-folders', async () => {
+app.get('/media-folders', async (request) => {
+  const ws = request.workspaceId;
   const db = await getDb();
   const [folders, counts] = await Promise.all([
-    db.collection('media_folders').find({}).sort({ createdAt: 1 }).toArray(),
+    db.collection('media_folders').find({ workspaceId: ws }).sort({ createdAt: 1 }).toArray(),
     db.collection('media_files').aggregate([
+      { $match: { workspaceId: ws } },
       { $group: { _id: { $ifNull: ['$folder', '__none__'] }, count: { $sum: 1 } } },
     ]).toArray(),
   ]);
@@ -380,20 +392,22 @@ app.post('/media-folders', async (request, reply) => {
   const { name } = request.body || {};
   if (!name?.trim()) return reply.code(400).send({ error: 'Folder name is required' });
   const trimmed = name.trim();
+  const ws = request.workspaceId;
   const db = await getDb();
-  if (await db.collection('media_folders').findOne({ name: trimmed })) {
+  if (await db.collection('media_folders').findOne({ name: trimmed, workspaceId: ws })) {
     return reply.code(409).send({ error: 'Folder already exists' });
   }
-  await db.collection('media_folders').insertOne({ name: trimmed, createdAt: new Date() });
+  await db.collection('media_folders').insertOne({ name: trimmed, workspaceId: ws, createdAt: new Date() });
   return { name: trimmed };
 });
 
 // Delete a custom folder; files in it become unorganized
 app.delete('/media-folders/:name', async (request, reply) => {
-  const name = decodeURIComponent(request.params.name);
+  const name = request.params.name;
+  const ws = request.workspaceId;
   const db = await getDb();
-  await db.collection('media_folders').deleteOne({ name });
-  await db.collection('media_files').updateMany({ folder: name }, { $set: { folder: null } });
+  await db.collection('media_folders').deleteOne({ name, workspaceId: ws });
+  await db.collection('media_files').updateMany({ folder: name, workspaceId: ws }, { $set: { folder: null } });
   return { success: true };
 });
 
@@ -401,7 +415,7 @@ app.delete('/media-folders/:name', async (request, reply) => {
 app.patch('/media/:filename', async (request, reply) => {
   const ws = request.workspaceId;
   const { filename } = request.params;
-  if (!filename || filename.includes('/') || filename.includes('..') || filename.includes('\0')) {
+  if (!filename || filename.includes('/') || filename.includes('\\') || filename.includes('..') || filename.includes('\0')) {
     return reply.code(400).send({ error: 'Invalid filename' });
   }
   const { folder } = request.body || {};
@@ -420,10 +434,13 @@ app.delete('/media/:filename', async (request, reply) => {
   const { filename } = request.params;
 
   // Prevent path traversal
-  if (!filename || filename.includes('/') || filename.includes('..') || filename.includes('\0')) {
+  if (!filename || filename.includes('/') || filename.includes('\\') || filename.includes('..') || filename.includes('\0')) {
     return reply.code(400).send({ error: 'Invalid filename' });
   }
 
+  const db = await getDb();
+  const ownedFile = await db.collection('media_files').findOne({ filename, workspaceId: ws });
+  if (!ownedFile) return reply.code(404).send({ error: 'File not found in this workspace' });
   const filepath = path.join(UPLOAD_DIR, filename);
   try {
     fs.unlinkSync(filepath);
@@ -435,7 +452,6 @@ app.delete('/media/:filename', async (request, reply) => {
     // Already gone from disk — still clean up DB record
   }
 
-  const db = await getDb();
   await db.collection('media_files').deleteOne({ filename, workspaceId: ws });
 
   return { success: true };
@@ -500,16 +516,14 @@ app.delete('/drafts/:id', async (request, reply) => {
 
 // ─── Meta Token Expiry & Auto-Refresh ────────────────────────────────────────
 
-let _tokenExpiryCache = null;
-let _tokenExpiryCacheAt = 0;
+const tokenExpiryCache = new Map();
 const TOKEN_EXPIRY_TTL = 60 * 60 * 1000; // 1 hour
 const TOKEN_REFRESH_THRESHOLD_DAYS = 7;  // refresh when ≤ this many days remain
 
 app.get('/meta/token-expiry', async (request, reply) => {
-  if (_tokenExpiryCache && Date.now() - _tokenExpiryCacheAt < TOKEN_EXPIRY_TTL) {
-    return _tokenExpiryCache;
-  }
   const ws = request.workspaceId;
+  const cached = tokenExpiryCache.get(ws);
+  if (cached && Date.now() - cached.at < TOKEN_EXPIRY_TTL) return cached.value;
   const appCred = await getCredentials(ws, 'meta_app');
   if (!appCred?.appId || !appCred?.appSecret) return { accounts: [] };
   const plainAppSecret = decryptToken(appCred.appSecret);
@@ -541,9 +555,9 @@ app.get('/meta/token-expiry', async (request, reply) => {
     }
   }
 
-  _tokenExpiryCache = { accounts, checkedAt: new Date().toISOString() };
-  _tokenExpiryCacheAt = Date.now();
-  return _tokenExpiryCache;
+  const value = { accounts, checkedAt: new Date().toISOString() };
+  tokenExpiryCache.set(ws, { value, at: Date.now() });
+  return value;
 });
 
 // Refresh Instagram long-lived tokens that are within TOKEN_REFRESH_THRESHOLD_DAYS of expiry.
@@ -602,7 +616,7 @@ app.post('/meta/token-refresh', async (request, reply) => {
     }
 
     // Token never expires or has plenty of time — skip
-    if (daysLeft !== null && daysLeft > TOKEN_REFRESH_THRESHOLD_DAYS) {
+    if (daysLeft === null || daysLeft > TOKEN_REFRESH_THRESHOLD_DAYS) {
       skipped.push({ username: account.username, daysLeft });
       continue;
     }
@@ -630,7 +644,7 @@ app.post('/meta/token-refresh', async (request, reply) => {
 
   if (refreshed.length > 0) {
     await setCredentials(ws, 'instagram', { accounts: allAccounts });
-    _tokenExpiryCache = null; // force fresh expiry check on next poll
+    tokenExpiryCache.delete(ws); // force fresh expiry check on next poll
   }
 
   app.log.info({ action: 'token_refresh', platform: 'meta', outcome: 'complete', refreshed: refreshed.length, skipped: skipped.length, errors: errors.length });
@@ -650,10 +664,10 @@ app.get('/profiles/:accountKey', async (request, reply) => {
   const ws = request.workspaceId;
   const { accountKey } = request.params;
   const db = await getDb();
-  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
-  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
+  const profileId = `${ws}:${accountKey}`;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId, workspaceId: ws })
     // Backward compat: old documents stored without workspace prefix
-    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws })
+    || await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws })
     // Workspace profile fallback: use business context from workspace profile when no platform-specific one exists
     || (accountKey !== 'workspace' ? await db.collection('account_profiles').findOne({ _id: `${ws}:workspace` }) : null);
   return profile ?? { _id: accountKey };
@@ -670,9 +684,9 @@ app.put('/profiles/:accountKey', async (request, reply) => {
   const db = await getDb();
   // Use a workspace-scoped document ID for the 'workspace' key so that
   // multiple workspaces don't overwrite each other's profile.
-  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
+  const profileId = `${ws}:${accountKey}`;
   await db.collection('account_profiles').updateOne(
-    { _id: profileId },
+    { _id: profileId, workspaceId: ws },
     { $set: { businessName, description, websiteUrl, industry, targetAudience, toneOfVoice, keywords, hashtags, postingGuidelines, timezone, workspaceId: ws, updatedAt: new Date() } },
     { upsert: true }
   );
@@ -684,9 +698,9 @@ app.post('/profiles/:accountKey/audit', async (request, reply) => {
   const ws = request.workspaceId;
   const { accountKey } = request.params;
   const db = await getDb();
-  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
-  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
-    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+  const profileId = `${ws}:${accountKey}`;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId, workspaceId: ws })
+    || await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
   if (!profile) return reply.code(404).send({ error: 'Profile not found — save your workspace profile first.' });
 
   const filled = [
@@ -833,13 +847,16 @@ function mimeExtension(mime) {
 }
 
 // Load a reference image for variations (supports local /media/ paths and external URLs)
-async function loadReferenceImage(referenceImageUrl) {
-  if (referenceImageUrl.startsWith('/media/')) {
-    return fs.readFileSync(path.join(UPLOAD_DIR, path.basename(referenceImageUrl)));
+async function loadReferenceImage(referenceImageUrl, ws) {
+  let localPath = referenceImageUrl.startsWith('/media/') ? referenceImageUrl : null;
+  try { const url = new URL(referenceImageUrl); if (url.origin === new URL(APP_BASE_URL).origin) localPath = url.pathname; } catch {}
+  if (localPath) {
+    const filename = path.basename(localPath);
+    const db = await getDb();
+    if (!await db.collection('media_files').findOne({ filename, workspaceId: ws })) throw new Error('Image not found in this workspace');
+    return fs.readFileSync(path.join(UPLOAD_DIR, filename));
   }
-  const url = referenceImageUrl.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/, 'http://nginx:8081');
-  const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
-  return Buffer.from(res.data);
+  return Buffer.from((await externalGet(referenceImageUrl, { responseType: 'arraybuffer', maxBytes: 20 * 1024 * 1024 })).data);
 }
 
 // ── OpenAI gpt-image ──────────────────────────────────────────────────────────
@@ -1274,7 +1291,7 @@ async function buildResearchBriefSuffix(accountKey, ws = 'default') {
   if (!accountKey) return '';
   try {
     const db = await getDb();
-    const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+    const profile = await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
     const b = profile?.researchBrief;
     if (!b) return '';
     const parts = [];
@@ -1319,15 +1336,9 @@ app.post('/ai/caption', async (request, reply) => {
 
   let imageBase64, imageMime;
   try {
-    let imageBuffer;
-    if (imageUrl.startsWith('/media/')) {
-      const filename = path.basename(imageUrl);
-      imageBuffer = fs.readFileSync(path.join(UPLOAD_DIR, filename));
-    } else {
-      const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 15000 });
-      imageBuffer = Buffer.from(imgRes.data);
-      imageMime = imgRes.headers['content-type'] || 'image/jpeg';
-    }
+    const imageBuffer = await loadReferenceImage(imageUrl, request.workspaceId);
+    const extension = path.extname(new URL(imageUrl, APP_BASE_URL).pathname).toLowerCase();
+    imageMime = extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : 'image/jpeg';
     imageBase64 = imageBuffer.toString('base64');
     if (!imageMime) imageMime = 'image/jpeg';
   } catch (err) {
@@ -1507,7 +1518,7 @@ app.post('/ai/image', async (request, reply) => {
   let referenceImage = null;
   if (referenceImageUrl) {
     try {
-      referenceImage = await loadReferenceImage(referenceImageUrl);
+      referenceImage = await loadReferenceImage(referenceImageUrl, request.workspaceId);
     } catch (err) {
       return reply.code(400).send({ error: 'Image generation failed', detail: `Could not load reference image: ${err.message}` });
     }
@@ -1636,7 +1647,7 @@ const CALENDAR_PLATFORM_HINTS = {
 
 async function loadCalendarProfile(db, ws, accountKey) {
   if (accountKey) {
-    const specific = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+    const specific = await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
     if (specific) return specific;
   }
   return (await db.collection('account_profiles').findOne({ _id: `${ws}:workspace` }))
@@ -2058,6 +2069,7 @@ app.post('/credentials/meta-app', async (request, reply) => {
     return reply.code(400).send({ error: 'appId and appSecret are required' });
   }
   await setCredentials(ws, 'meta_app', { appId, appSecret: encryptToken(appSecret) });
+  tokenExpiryCache.clear();
   return { success: true };
 });
 
@@ -2239,7 +2251,7 @@ app.post('/auth/meta/save', async (request, reply) => {
   await setCredentials(ws, 'facebook', { pages: fbPages });
   await setCredentials(ws, 'instagram', { accounts: igAccounts });
   await deleteCredentials(ws, 'meta_discovery');
-  _tokenExpiryCache = null; // invalidate cache after reconnect
+  tokenExpiryCache.delete(ws); // invalidate cache after reconnect
 
   return { success: true, facebookPages: fbPages.filter((p) => p.selected).length, instagramAccounts: igAccounts.filter((a) => a.selected).length };
 });
@@ -2251,7 +2263,7 @@ app.delete('/credentials/meta', async (request) => {
   await deleteCredentials(ws, 'instagram');
   await deleteCredentials(ws, 'meta_discovery');
   await deleteCredentials(ws, 'meta_user');
-  _tokenExpiryCache = null;
+  tokenExpiryCache.delete(ws);
   return { success: true };
 });
 
@@ -2288,13 +2300,17 @@ app.get('/auth/pinterest/init', async (request, reply) => {
   }
   const redirectUri = `${APP_BASE_URL}/api/auth/pinterest/callback`;
   const scopes = 'pins:read,pins:write,boards:read,user_accounts:read';
-  const url = `${PINTEREST_AUTH_URL}?client_id=${cred.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scopes}&state=${encodeURIComponent(ws)}`;
+  const state = crypto.randomBytes(32).toString('hex');
+  await (await getDb()).collection('oauth_states').insertOne({ _id: state, provider: 'pinterest', workspaceId: ws, expiresAt: new Date(Date.now() + 15 * 60 * 1000) });
+  const url = `${PINTEREST_AUTH_URL}?client_id=${cred.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scopes}&state=${encodeURIComponent(state)}`;
   return { url };
 });
 
 app.get('/auth/pinterest/callback', async (request, reply) => {
   const { code, state, error: oauthError } = request.query;
-  const ws = (state && String(state).trim()) ? String(state) : request.workspaceId;
+  const flow = typeof state === 'string' ? await (await getDb()).collection('oauth_states').findOneAndDelete({ _id: state, provider: 'pinterest', expiresAt: { $gt: new Date() } }) : null;
+  if (!flow) return reply.redirect(`${APP_BASE_URL}/settings?pinterest_error=Invalid_or_expired_OAuth_state`);
+  const ws = flow.workspaceId;
 
   if (oauthError) {
     return reply.redirect(`${APP_BASE_URL}/settings?pinterest_error=${encodeURIComponent(oauthError)}`);
@@ -2358,7 +2374,7 @@ app.get('/auth/pinterest/callback', async (request, reply) => {
     });
 
     log.info({ action: 'pinterest_oauth_callback', username: userRes.data.username, boards: boards.length, outcome: 'success' });
-    reply.redirect(`${APP_BASE_URL}/settings?pinterest_connected=1`);
+    reply.redirect(`${APP_BASE_URL}/settings?pinterest_connected=1&workspace=${encodeURIComponent(ws)}`);
   } catch (err) {
     const msg = err.response?.data?.message || err.message;
     log.error({ action: 'pinterest_oauth_callback', outcome: 'failure', err: msg });
@@ -2420,7 +2436,7 @@ app.get('/auth/tiktok/init', async (request, reply) => {
   const db = await getDb();
   await db.collection('platform_credentials').updateOne(
     { _id: pkceId },
-    { $set: { _id: pkceId, workspaceId: ws, codeVerifier, state, createdAt: new Date() } },
+    { $set: { _id: pkceId, workspaceId: ws, codeVerifier: encryptToken(codeVerifier), state, createdAt: new Date(), expiresAt: new Date(Date.now() + 15 * 60 * 1000) } },
     { upsert: true }
   );
 
@@ -2452,7 +2468,7 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
   try {
     const db = await getDb();
     // Look up PKCE by state value — recovers the workspace ID that initiated the OAuth
-    const pkce = await db.collection('platform_credentials').findOne({ state });
+    const pkce = await db.collection('platform_credentials').findOneAndDelete({ state, type: { $exists: false }, expiresAt: { $gt: new Date() } });
     if (!pkce?.codeVerifier) throw new Error('PKCE state not found — try connecting again');
     const ws = pkce.workspaceId || request.workspaceId;
 
@@ -2469,7 +2485,7 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
         code,
         grant_type: 'authorization_code',
         redirect_uri: redirectUri,
-        code_verifier: pkce.codeVerifier,
+        code_verifier: decryptToken(pkce.codeVerifier),
       }).toString(),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
     );
@@ -2496,11 +2512,9 @@ app.get('/auth/tiktok/callback', async (request, reply) => {
       refreshExpiry,
     });
 
-    // Clean up PKCE temp state
-    await db.collection('platform_credentials').deleteOne({ _id: credId(ws, 'tiktok_pkce') });
 
     log.info({ action: 'tiktok_oauth_callback', username: user.username || user.display_name, outcome: 'success' });
-    reply.redirect(`${APP_BASE_URL}/settings?tiktok_connected=1`);
+    reply.redirect(`${APP_BASE_URL}/settings?tiktok_connected=1&workspace=${encodeURIComponent(ws)}`);
   } catch (err) {
     const msg = err.response?.data?.error?.message || err.response?.data?.message || err.message;
     log.error({ action: 'tiktok_oauth_callback', outcome: 'failure', err: msg });
@@ -3367,7 +3381,7 @@ app.post('/hashtags/scrape', async (request) => {
   for (const [compoundKey, data] of Object.entries(tagMap)) {
     const avgEngagement = data.count > 0 ? data.totalEngagement / data.count : 0;
     await db.collection('hashtag_stats').updateOne(
-      { _id: compoundKey, workspaceId: ws },
+      { _id: `${ws}:${compoundKey}`, workspaceId: ws },
       {
         $set: {
           workspaceId: ws,
@@ -3449,7 +3463,7 @@ app.post('/hashtags/ai-suggest', async (request, reply) => {
   if (accountKey) {
     try {
       const db = await getDb();
-      const profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+      const profile = await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
       if (profile) {
         const parts = [];
         if (profile.businessName)   parts.push(`Business: ${profile.businessName}`);
@@ -3491,7 +3505,7 @@ app.post('/hashtags/ai-suggest', async (request, reply) => {
 
 async function extractTextFromUrl(url) {
   try {
-    const res = await axios.get(url, { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SocialManager/1.0)' } });
+    const res = await externalGet(url, { headers: { 'User-Agent': 'SocialManager/1.0' } });
     const html = res.data || '';
     const title = (html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1] || '';
     const desc = (html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || [])[1] || '';
@@ -3520,10 +3534,10 @@ async function scrapeMastodon(profileUrl) {
     const m = profileUrl.match(/^https?:\/\/([^/]+)\/@(.+)$/);
     if (!m) return '';
     const [, instance, username] = m;
-    const lookupRes = await axios.get(`https://${instance}/api/v1/accounts/lookup?acct=${encodeURIComponent(username)}`, { timeout: 10000 });
+    const lookupRes = await externalGet(`https://${instance}/api/v1/accounts/lookup?acct=${encodeURIComponent(username)}`, { responseType: 'json', timeout: 10000 });
     const accountId = lookupRes.data?.id;
     if (!accountId) return '';
-    const statusRes = await axios.get(`https://${instance}/api/v1/accounts/${accountId}/statuses?limit=10&exclude_replies=true`, { timeout: 10000 });
+    const statusRes = await externalGet(`https://${instance}/api/v1/accounts/${accountId}/statuses?limit=10&exclude_replies=true`, { responseType: 'json', timeout: 10000 });
     const posts = (statusRes.data || []).map((s) => s.content?.replace(/<[^>]+>/g, '').trim() || '').filter(Boolean);
     return posts.join('\n').slice(0, 3000);
   } catch {
@@ -3531,9 +3545,9 @@ async function scrapeMastodon(profileUrl) {
   }
 }
 
-async function runCompetitorScrape(competitorId) {
+async function runCompetitorScrape(competitorId, ws) {
   const db = await getDb();
-  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(competitorId) });
+  const competitor = await db.collection('competitors').findOne({ _id: new ObjectId(competitorId), workspaceId: ws });
   if (!competitor) return { ok: false, message: 'Not found', sources: 0 };
 
   const newItems = [];
@@ -3562,7 +3576,7 @@ async function runCompetitorScrape(competitorId) {
   const combined = [...newItems, ...existing].slice(0, 20);
 
   await db.collection('competitors').updateOne(
-    { _id: new ObjectId(competitorId) },
+    { _id: new ObjectId(competitorId), workspaceId: ws },
     { $set: { scrapedContent: combined, contentChanged, lastScraped: new Date(), updatedAt: new Date() } },
   );
 
@@ -3599,14 +3613,14 @@ app.post('/credentials/google-places', async (request, reply) => {
   const ws = request.workspaceId;
   const { apiKey } = request.body || {};
   if (!apiKey?.trim()) return reply.code(400).send({ error: 'apiKey is required' });
-  await setCredentials(ws, 'google_places', { apiKey: apiKey.trim() });
+  await setCredentials(ws, 'google_places', { apiKey: encryptToken(apiKey.trim()) });
   return { success: true };
 });
 
 app.get('/credentials/google-places', async (request) => {
   const ws = request.workspaceId;
   const cred = await getCredentials(ws, 'google_places');
-  return { configured: !!cred?.apiKey, keyHint: cred?.apiKey ? `****${cred.apiKey.slice(-4)}` : null };
+  return { configured: !!cred?.apiKey, keyHint: cred?.apiKey ? `****${(decryptToken(cred.apiKey) || '').slice(-4)}` : null };
 });
 
 app.delete('/credentials/google-places', async (request) => {
@@ -3628,7 +3642,7 @@ app.post('/competitors/discover-local', async (request, reply) => {
   let lat, lng;
   try {
     const geoRes = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
-      params: { address: location, key: cred.apiKey },
+      params: { address: location, key: decryptToken(cred.apiKey) },
       timeout: 10000,
     });
     const loc = geoRes.data.results?.[0]?.geometry?.location;
@@ -3647,7 +3661,7 @@ app.post('/competitors/discover-local', async (request, reply) => {
         query,
         location: `${lat},${lng}`,
         radius: Math.min(radiusMeters, 50000),
-        key: cred.apiKey,
+        key: decryptToken(cred.apiKey),
       },
       timeout: 10000,
     });
@@ -3798,18 +3812,22 @@ app.delete('/competitors/:id', async (request, reply) => {
 // Scrape one competitor — returns jobId immediately, runs in background
 app.post('/competitors/:id/scrape', async (request, reply) => {
   const jobId = new ObjectId().toString();
-  activeScrapeJobs.set(jobId, { status: 'running', sources: 0, message: '' });
+  const ws = request.workspaceId;
+  const db = await getDb();
+  let oid; try { oid = new ObjectId(request.params.id); } catch { return reply.code(400).send({ error: 'Invalid competitor ID' }); }
+  if (!await db.collection('competitors').findOne({ _id: oid, workspaceId: ws })) return reply.code(404).send({ error: 'Competitor not found' });
+  activeScrapeJobs.set(jobId, { workspaceId: ws, competitorId: request.params.id, status: 'running', sources: 0, message: '' });
 
   (async () => {
     try {
-      const result = await runCompetitorScrape(request.params.id);
+      const result = await runCompetitorScrape(request.params.id, ws);
       activeScrapeJobs.set(jobId, {
-        status: result.ok ? 'done' : 'failed',
+        workspaceId: ws, competitorId: request.params.id, status: result.ok ? 'done' : 'failed',
         sources: result.sources,
         message: result.message,
       });
     } catch (err) {
-      activeScrapeJobs.set(jobId, { status: 'failed', sources: 0, message: err.message });
+      activeScrapeJobs.set(jobId, { workspaceId: ws, competitorId: request.params.id, status: 'failed', sources: 0, message: err.message });
     }
   })();
 
@@ -3819,7 +3837,7 @@ app.post('/competitors/:id/scrape', async (request, reply) => {
 // Poll scrape job status
 app.get('/competitors/:id/scrape-status/:jobId', async (request, reply) => {
   const job = activeScrapeJobs.get(request.params.jobId);
-  if (!job) return reply.code(404).send({ error: 'Job not found or expired' });
+  if (!job || job.workspaceId !== request.workspaceId || job.competitorId !== request.params.id) return reply.code(404).send({ error: 'Job not found or expired' });
   return job;
 });
 
@@ -3830,7 +3848,7 @@ app.post('/competitors/scrape-all', async (request, reply) => {
   const all = await db.collection('competitors').find({ workspaceId: ws }).toArray();
   const results = [];
   for (const c of all) {
-    const r = await runCompetitorScrape(c._id.toString());
+    const r = await runCompetitorScrape(c._id.toString(), ws);
     results.push({ id: c._id.toString(), name: c.name, ...r });
   }
   return { success: true, results };
@@ -4287,7 +4305,7 @@ app.post('/competitors/strategic-map', async (request, reply) => {
   }
 
   const profile = accountKey
-    ? await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws })
+    ? await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws })
     : await db.collection('account_profiles').findOne({ workspaceId: ws });
 
   const competitorBlocks = competitors.map((c) => {
@@ -4403,9 +4421,9 @@ app.post('/ai/five-forces', async (request, reply) => {
   if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
 
   const db = await getDb();
-  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
-  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
-    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+  const profileId = `${ws}:${accountKey}`;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId, workspaceId: ws })
+    || await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
   if (!profile) return reply.code(404).send({ error: 'Save your workspace profile first, then run Five Forces.' });
 
   if (!profile.industry && !profile.businessName) {
@@ -4492,7 +4510,7 @@ Scoring: overallScore = 100 minus the average of all five force scores × 10. Re
     }
 
     await db.collection('account_profiles').updateOne(
-      { _id: profileId },
+      { _id: profileId, workspaceId: ws },
       { $set: { industryAnalysis: result, industryAnalyzedAt: new Date(), updatedAt: new Date() } },
     );
 
@@ -4513,9 +4531,9 @@ app.post('/ai/industry-diagnosis', async (request, reply) => {
   if (!accountKey) return reply.code(400).send({ error: 'accountKey is required' });
 
   const db = await getDb();
-  const profileId = accountKey === 'workspace' ? `${ws}:workspace` : accountKey;
-  const profile = await db.collection('account_profiles').findOne({ _id: profileId })
-    || await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+  const profileId = `${ws}:${accountKey}`;
+  const profile = await db.collection('account_profiles').findOne({ _id: profileId, workspaceId: ws })
+    || await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
   if (!profile) return reply.code(404).send({ error: 'Save your workspace profile first, then run Industry Diagnosis.' });
 
   const fields = [profile.businessName, profile.description, profile.industry, profile.toneOfVoice].filter(Boolean);
@@ -4577,7 +4595,7 @@ Return ONLY valid JSON.`;
 
     // Persist the diagnosis on the account profile for future use
     await db.collection('account_profiles').updateOne(
-      { _id: profileId },
+      { _id: profileId, workspaceId: ws },
       { $set: { industryDiagnosis: result, industryDiagnosedAt: new Date(), updatedAt: new Date() } },
     );
 
@@ -4602,7 +4620,7 @@ app.post('/ai/channel-audit', async (request, reply) => {
   // Load profile (optional — enriches completeness & bio quality sections)
   let profile = null;
   if (accountKey) {
-    profile = await db.collection('account_profiles').findOne({ _id: accountKey, workspaceId: ws });
+    profile = await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
   }
 
   // Load recent posts, optionally filtered by account

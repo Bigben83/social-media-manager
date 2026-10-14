@@ -8,7 +8,7 @@ function createPostProcessor({ getDb, axios, log }) {
     const db = await getDb();
     const workspace = await db.collection('workspaces').findOne({ _id: workspaceId });
     const scheduled = await db.collection('scheduled_jobs').findOne({ bullJobId: String(job.id), workspaceId });
-    if (!workspace || scheduled?.status === 'cancelled') return { cancelled: true };
+    if (!workspace || workspace.deleting || scheduled?.status === 'cancelled') return { cancelled: true };
     const existing = await db.collection('posts').findOne({ _id: postId, workspaceId });
     const results = { ...(existing?.platformResults || {}) };
     await db.collection('scheduled_jobs').updateOne({ bullJobId: String(job.id), workspaceId }, { $set: { status: 'processing', attempts: job.attemptsMade + 1 } });
