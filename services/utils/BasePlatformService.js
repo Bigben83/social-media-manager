@@ -1,6 +1,8 @@
 const Fastify = require('fastify');
 const RabbitMQConnector = require('./RabbitMQConnector');
 const { createLogger } = require('./logger');
+const { getDb } = require('./MongoDBConnector');
+const { createHash } = require('crypto');
 
 /**
  * BasePlatformService — tüm platform servisleri bu sınıftan extend eder.
@@ -42,9 +44,27 @@ class BasePlatformService extends RabbitMQConnector {
 
     this.app.post('/post', async (request, reply) => {
       const workspaceId = request.headers['x-workspace-id'] || 'default';
+      const key = request.headers['idempotency-key'];
+      if (key && (typeof key !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(key))) return reply.code(400).send({ success: false, error: 'Invalid idempotency key', retryable: false });
+      let receipts;
+      const receiptId = key ? `${workspaceId}:${this.platformName}:${key}` : null;
+      if (receiptId) {
+        receipts = (await getDb()).collection('publish_requests');
+        const fingerprint = createHash('sha256').update(JSON.stringify(request.body)).digest('hex');
+        try { await receipts.insertOne({ _id: receiptId, workspaceId, fingerprint, status: 'processing', createdAt: new Date() }); }
+        catch (err) {
+          if (err.code !== 11000) throw err;
+          const existing = await receipts.findOne({ _id: receiptId, workspaceId });
+          if (existing?.fingerprint !== fingerprint) return reply.code(409).send({ success: false, error: 'Publishing request changed', retryable: false });
+          if (existing.status === 'published') return existing.response;
+          return reply.code(409).send({ success: false, error: 'Publishing outcome is not yet confirmed; check the account', uncertain: true, retryable: false });
+        }
+      }
       try {
         const result = await this.publishPost({ ...request.body, workspaceId });
-        return { success: true, platform: this.platformName, result };
+        const response = { success: true, platform: this.platformName, result };
+        if (receipts) await receipts.updateOne({ _id: receiptId, workspaceId }, { $set: { status: 'published', response, updatedAt: new Date() } });
+        return response;
       } catch (err) {
         // Extract the actual third-party API error (e.g. Facebook Graph API error body)
         // rather than the generic axios "Request failed with status code 4xx" message.
@@ -54,7 +74,11 @@ class BasePlatformService extends RabbitMQConnector {
           ? (graphCode ? `[#${graphCode}] ${graphMsg}` : graphMsg)
           : (typeof err.response?.data?.error === 'string' ? err.response.data.error : err.message);
         this.log.error({ action: 'publish_post', platform: this.platformName, outcome: 'failure', err: String(apiError) });
-        reply.code(500).send({ success: false, error: String(apiError) });
+        const uncertain = ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET'].includes(err.code) || (!err.response && !err.code);
+        const status = err.response?.status || (uncertain ? 409 : err.code ? 503 : 400);
+        const retryable = !uncertain && (status === 429 || status >= 500);
+        if (receipts && !uncertain) await receipts.deleteOne({ _id: receiptId, workspaceId });
+        reply.code(status).send({ success: false, error: String(apiError), retryable, uncertain });
       }
     });
 

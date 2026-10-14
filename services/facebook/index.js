@@ -7,7 +7,7 @@ const { getWorkspaceCredential } = require('./utils/credentials');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 // Internal Docker URL for downloading local media files (nginx serves /media/*)
-const MEDIA_INTERNAL_URL = (process.env.MEDIA_INTERNAL_URL || 'http://nginx:8081').replace(/\/$/, '');
+const MEDIA_INTERNAL_URL = (process.env.MEDIA_INTERNAL_URL || 'http://nginx').replace(/\/$/, '');
 
 function isLocalUrl(url) {
   return !url || url.startsWith('/') || /https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(url);
@@ -157,7 +157,7 @@ class FacebookService extends BasePlatformService {
     }
   }
 
-  async publishPost({ content, link, imageUrl, accountId, firstComment, workspaceId = 'default' } = {}) {
+  async publishPost({ content, link, imageUrl, videoUrl, accountId, firstComment, workspaceId = 'default' } = {}) {
     const allPages = await this._getPages(workspaceId);
     if (allPages.length === 0) throw new Error('No Facebook Pages connected');
     if (!content) throw new Error('content is required');
@@ -170,7 +170,15 @@ class FacebookService extends BasePlatformService {
     for (const page of pages) {
       let postId;
 
-      if (imageUrl) {
+      if (videoUrl) {
+        if (isLocalUrl(videoUrl)) {
+          const video = await axios.get(resolveInternalUrl(videoUrl), { responseType: 'arraybuffer', timeout: 30000 });
+          const form = new FormData(); form.append('description', content); form.append('access_token', page.accessToken);
+          form.append('source', new Blob([video.data], { type: video.headers['content-type'] || 'video/mp4' }), 'video.mp4');
+          const response = await fetch(`${GRAPH_API}/${page.id}/videos`, { method: 'POST', body: form, signal: AbortSignal.timeout(90000) });
+          const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || 'Facebook video upload failed'); postId = body.id;
+        } else { const response = await axios.post(`${GRAPH_API}/${page.id}/videos`, null, { params: { description: content, file_url: videoUrl, access_token: page.accessToken }, timeout: 90000 }); postId = response.data.id; }
+      } else if (imageUrl) {
         // Photo post — use /photos endpoint (binary for local URLs, url param for external)
         postId = await this._uploadPhoto(page.id, page.accessToken, content, imageUrl);
       } else {

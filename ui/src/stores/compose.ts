@@ -22,7 +22,7 @@ const CHAR_LIMITS: Record<string, number> = {
   reddit: 40000,
 }
 
-const STANDARD_PLATFORMS = ['twitter', 'mastodon', 'bluesky', 'linkedin', 'reddit', 'youtube']
+const STANDARD_PLATFORMS = ['twitter', 'mastodon', 'bluesky']
 
 export interface Draft {
   _id: string
@@ -44,7 +44,9 @@ export const useComposeStore = defineStore('compose', () => {
   const sending = ref(false)
   const savingDraft = ref(false)
   const draftId = ref<string | null>(null)
-  const lastResult = ref<Record<string, unknown> | null>(null)
+  let submissionFingerprint = ''
+  let submissionId = ''
+  const lastResult = ref<{ ok: boolean; error?: string; scheduled?: boolean; results?: { platform: string; accountId?: string; success: boolean; error?: string; uncertain?: boolean }[] } | null>(null)
 
   function charLimit(platform: string): number {
     return CHAR_LIMITS[platform] ?? 9999
@@ -70,7 +72,7 @@ export const useComposeStore = defineStore('compose', () => {
 
     for (const p of STANDARD_PLATFORMS) {
       const meta = PLATFORM_META[p]
-      if (!meta) continue
+      if (!meta || !platformsStore.publishingPlatforms.includes(p)) continue
       next.push({ key: p, platform: p, label: meta.label, color: meta.color, selected: false })
     }
 
@@ -109,6 +111,7 @@ export const useComposeStore = defineStore('compose', () => {
       })
     }
 
+    if (platformsStore.tiktokConnected) next.push({ key: 'tiktok', platform: 'tiktok', label: platformsStore.tiktokUsername || 'TikTok', color: PLATFORM_META.tiktok.color, selected: false })
     destinations.value = next
   }
 
@@ -117,14 +120,14 @@ export const useComposeStore = defineStore('compose', () => {
     if (dest) dest.selected = !dest.selected
   }
 
-  function reset() {
+  function reset(keepResult = false) {
     content.value = ''
     mediaUrl.value = ''
     scheduledAt.value = ''
     firstComment.value = ''
     draftId.value = null
     destinations.value.forEach((d) => { d.selected = false })
-    lastResult.value = null
+    if (!keepResult) lastResult.value = null
   }
 
   function loadDraft(draft: Draft) {
@@ -170,15 +173,16 @@ export const useComposeStore = defineStore('compose', () => {
 
   async function post(timezone?: string) {
     const selected = selectedDestinations.value
-    if (!content.value.trim() || !selected.length) return
+    if (!content.value.trim() || !selected.length || sending.value) return false
     sending.value = true
     lastResult.value = null
 
     try {
-      const destPayload = selected.map(({ platform, accountId }) => ({
-        platform,
+      const isVideo = /\.(mp4|mov|avi|webm)(?:[?#]|$)/i.test(mediaUrl.value.trim())
+      const destPayload = selected.map(({ key, platform, accountId }) => ({
+        key, platform,
         ...(accountId && { accountId }),
-        ...(mediaUrl.value.trim() && { imageUrl: mediaUrl.value.trim() }),
+        ...(mediaUrl.value.trim() && { [isVideo ? 'videoUrl' : 'imageUrl']: mediaUrl.value.trim() }),
       }))
 
       const firstCommentValue = firstComment.value.trim() || undefined
@@ -187,24 +191,40 @@ export const useComposeStore = defineStore('compose', () => {
         const utcScheduledAt = timezone
           ? naiveDatetimeToUtc(scheduledAt.value, timezone)
           : new Date(scheduledAt.value).toISOString()
-        await axios.post('/scheduler/schedule', {
+        const response = await axios.post('/scheduler/schedule', {
           content: content.value,
           scheduledAt: utcScheduledAt,
           destinations: destPayload,
           ...(firstCommentValue && { firstComment: firstCommentValue }),
         })
+        if (response.data.success !== true) throw new Error(response.data.error || 'Scheduling failed')
+        lastResult.value = { ok: true, scheduled: true }
       } else {
-        await axios.post('/api/post', {
-          content: content.value,
-          destinations: destPayload,
-          ...(firstCommentValue && { firstComment: firstCommentValue }),
-        })
+        const payload = { content: content.value, destinations: destPayload, ...(firstCommentValue && { firstComment: firstCommentValue }) }
+        const fingerprint = JSON.stringify(payload)
+        if (submissionFingerprint !== fingerprint) {
+          submissionId = Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join('')
+          submissionFingerprint = fingerprint
+        }
+        const response = await axios.post('/api/post', payload, { headers: { 'Idempotency-Key': submissionId } })
+        const results = response.data.results || []
+        const ok = results.length > 0 && results.every((result: { success: boolean }) => result.success)
+        lastResult.value = { ok, results }
+        if (!ok) {
+          // Retain content; deselect confirmed and uncertain deliveries to avoid duplicates.
+          destinations.value.forEach(dest => {
+            const result = results.find((r: { platform: string; accountId?: string }) => r.platform === dest.platform && r.accountId === dest.accountId)
+            if (result?.success || result?.uncertain) dest.selected = false
+          })
+          return false
+        }
       }
-
-      lastResult.value = { ok: true }
-      reset()
-    } catch (err) {
-      console.error('Compose post error:', err)
+      reset(true)
+      return true
+    } catch (err: any) {
+      if (err.response?.data?.uncertain) destinations.value.forEach(dest => { dest.selected = false })
+      lastResult.value = { ok: false, error: err.response?.data?.error || err.message || 'Publishing failed' }
+      return false
     } finally {
       sending.value = false
     }

@@ -445,11 +445,11 @@ app.delete('/media/:filename', async (request, reply) => {
 
 app.post('/drafts', async (request, reply) => {
   const ws = request.workspaceId;
-  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [] } = request.body || {};
+  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [], firstComment = '' } = request.body || {};
   const db = await getDb();
   const now = new Date();
   const result = await db.collection('drafts').insertOne({
-    content, mediaUrl, scheduledAt, destinations, workspaceId: ws, createdAt: now, updatedAt: now,
+    content, mediaUrl, scheduledAt, destinations, firstComment, workspaceId: ws, createdAt: now, updatedAt: now,
   });
   const draft = await db.collection('drafts').findOne({ _id: result.insertedId });
   return reply.code(201).send(draft);
@@ -478,11 +478,11 @@ app.put('/drafts/:id', async (request, reply) => {
   const { id } = request.params;
   let oid;
   try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
-  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [] } = request.body || {};
+  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [], firstComment = '' } = request.body || {};
   const db = await getDb();
   const result = await db.collection('drafts').updateOne(
     { _id: oid, workspaceId: ws },
-    { $set: { content, mediaUrl, scheduledAt, destinations, updatedAt: new Date() } }
+    { $set: { content, mediaUrl, scheduledAt, destinations, firstComment, updatedAt: new Date() } }
   );
   if (!result.matchedCount) return reply.code(404).send({ error: 'Draft not found' });
   return { success: true };
@@ -1958,23 +1958,29 @@ app.get('/ai/bulk-draft/:batchId', async (request, reply) => {
 
 // ─── Platform service URLs ────────────────────────────────────────────────────
 
-const PLATFORM_SERVICES = {
-  twitter:   process.env.TWITTER_SERVICE_URL   || 'http://twitter:3001',
-  linkedin:  process.env.LINKEDIN_SERVICE_URL  || 'http://linkedin:3002',
-  mastodon:  process.env.MASTODON_SERVICE_URL  || 'http://mastodon:3003',
-  bluesky:   process.env.BLUESKY_SERVICE_URL   || 'http://bluesky:3004',
-  instagram: process.env.INSTAGRAM_SERVICE_URL || 'http://instagram:3005',
-  facebook:  process.env.FACEBOOK_SERVICE_URL  || 'http://facebook:3006',
-};
+const { PLATFORM_SERVICES, destinationKey, deliveryKey, validatePost, failureResult } = require('./utils/publishing');
+app.get('/platforms/capabilities', async () => ({ publishing: Object.keys(PLATFORM_SERVICES) }));
 
 // Direct multi-platform post endpoint.
 // Body: { content: string, destinations: Array<{ platform, accountId?, imageUrl?, videoUrl?, link? }> }
 app.post('/post', async (request, reply) => {
   const { content, destinations = [], firstComment } = request.body || {};
-  if (!content?.trim()) return reply.code(400).send({ error: 'content is required' });
-  if (!destinations.length) return reply.code(400).send({ error: 'destinations must not be empty' });
-
+  const validationError = validatePost(content, destinations);
+  if (validationError) return reply.code(400).send({ error: validationError });
+  const requestKey = request.headers['idempotency-key'] || crypto.randomUUID();
+  if (typeof requestKey !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(requestKey)) return reply.code(400).send({ error: 'Invalid idempotency key' });
   const workspaceId = request.workspaceId;
+  const postId = `immediate:${workspaceId}:${requestKey}`;
+  const receipts = (await getDb()).collection('post_requests');
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ content, destinations, firstComment })).digest('hex');
+  try { await receipts.insertOne({ _id: postId, workspaceId, fingerprint, status: 'processing', createdAt: new Date() }); }
+  catch (err) {
+    if (err.code !== 11000) throw err;
+    const existing = await receipts.findOne({ _id: postId, workspaceId });
+    if (existing?.fingerprint !== fingerprint) return reply.code(409).send({ error: 'Publishing request changed; start a new submission' });
+    if (existing?.response) return reply.code(existing.statusCode).send(existing.response);
+    return reply.code(409).send({ error: 'Publishing outcome is not confirmed. Check your accounts before retrying.', uncertain: true });
+  }
   const results = await Promise.allSettled(
     destinations.map(async ({ platform, accountId, imageUrl, videoUrl, link }) => {
       const serviceUrl = PLATFORM_SERVICES[platform];
@@ -1982,7 +1988,7 @@ app.post('/post', async (request, reply) => {
       const res = await axios.post(
         `${serviceUrl}/post`,
         { content, accountId, imageUrl, videoUrl, link, firstComment: firstComment?.trim() || undefined },
-        { timeout: 30000, headers: { 'X-Workspace-Id': workspaceId } }
+        { timeout: 120000, headers: { 'X-Workspace-Id': workspaceId, 'Idempotency-Key': deliveryKey(postId, { platform, accountId }) } }
       );
       return { platform, accountId, ...res.data };
     })
@@ -1991,7 +1997,7 @@ app.post('/post', async (request, reply) => {
   const output = results.map((r, i) =>
     r.status === 'fulfilled'
       ? r.value
-      : { platform: destinations[i].platform, accountId: destinations[i].accountId, success: false, error: r.reason?.message }
+      : { platform: destinations[i].platform, accountId: destinations[i].accountId, success: false, ...failureResult(r.reason) }
   );
 
   const anyFailed = output.some((r) => !r.success);
@@ -2002,7 +2008,7 @@ app.post('/post', async (request, reply) => {
   try {
     const db = await getDb();
     await db.collection('posts').insertOne({
-      _id: crypto.randomUUID(),
+      _id: postId,
       type: 'immediate',
       content,
       ...(firstComment?.trim() && { firstComment: firstComment.trim() }),
@@ -2010,7 +2016,7 @@ app.post('/post', async (request, reply) => {
       platformResults: Object.fromEntries(
         output.map((r) => [
           r.accountId ? `${r.platform}:${r.accountId}` : r.platform,
-          { success: r.success, ...(r.error && { error: r.error }) },
+          { ...(Array.isArray(r.result) ? r.result[0] : r.result), success: r.success, ...(r.error && { error: r.error }), ...(r.uncertain && { uncertain: true }) },
         ])
       ),
       status: postStatus,
@@ -2022,7 +2028,10 @@ app.post('/post', async (request, reply) => {
     app.log.warn({ action: 'post_record', outcome: 'failure', err: err.message });
   }
 
-  return reply.code(anyFailed ? 207 : 200).send({ results: output });
+  const response = { success: !anyFailed, status: postStatus, postId, results: output };
+  const statusCode = anyFailed ? 207 : 200;
+  await receipts.updateOne({ _id: postId, workspaceId }, { $set: { status: 'done', statusCode, response, updatedAt: new Date() } });
+  return reply.code(statusCode).send(response);
 });
 
 // ─── Legacy post route ────────────────────────────────────────────────────────

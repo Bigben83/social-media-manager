@@ -76,6 +76,7 @@ export const PLATFORM_META: Record<string, { label: string; color: string; icon:
 export const usePlatformsStore = defineStore('platforms', () => {
   const statuses = ref<PlatformStatus[]>([])
   const loading = ref(false)
+  const publishingPlatforms = ref<string[]>(['twitter', 'mastodon', 'bluesky', 'instagram', 'facebook', 'pinterest', 'tiktok'])
 
   // Meta-specific state
   const metaCredentials = ref<MetaCredentials>({ configured: false })
@@ -133,6 +134,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
     try {
       const res = await axios.get('/api/credentials')
       const data = res.data
+      publishingPlatforms.value = (await axios.get('/api/platforms/capabilities')).data.publishing || []
       connectedPages.value = data.facebook?.pages || []
       allFbPages.value = data.facebook?.allPages || []
       connectedIgAccounts.value = data.instagram?.accounts || []
@@ -416,7 +418,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
   }
 
   return {
-    statuses, loading, fetchStatuses, getStatus, isConnected,
+    statuses, loading, publishingPlatforms, fetchStatuses, getStatus, isConnected,
     metaCredentials, metaDiscovery, metaLoading, metaError,
     connectedPages, connectedIgAccounts, allFbPages, allIgAccounts,
     fetchMetaConnections, fetchMetaCredentials, saveMetaApp, startMetaOAuth,

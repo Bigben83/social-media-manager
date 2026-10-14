@@ -55,3 +55,40 @@ test('OAuth initiation uses an expiring one-time state bound to the workspace', 
   expect(invalid.headers.location).toContain('Invalid_or_expired_OAuth_state');
   expect(axios.get).not.toHaveBeenCalled();
 });
+
+test('drafts retain first comments on create and update', async () => {
+  const created = await request('POST', '/drafts', 'drafts', { content: 'Post', firstComment: 'Comment' });
+  expect(created.json().firstComment).toBe('Comment');
+  await request('PUT', '/drafts/' + created.json()._id, 'drafts', { content: 'Post', firstComment: 'Updated' });
+  expect((await request('GET', '/drafts/' + created.json()._id, 'drafts')).json().firstComment).toBe('Updated');
+});
+
+test('immediate posting preserves partial results and supports Pinterest', async () => {
+  axios.post.mockResolvedValueOnce({ data: { success: true, result: { pinId: 'pin' } } })
+    .mockRejectedValueOnce({ response: { status: 400, data: { error: 'No access' } } });
+  const response = await request('POST', '/post', 'posting', { content: 'Post', destinations: [{ platform: 'pinterest', accountId: 'board', imageUrl: 'https://example.com/image.jpg' }, { platform: 'facebook', accountId: 'page' }] });
+  expect(response.statusCode).toBe(207);
+  expect(response.json().success).toBe(false);
+  expect(response.json().results[0].success).toBe(true);
+  expect(response.json().results[1].retryable).toBe(false);
+  expect(axios.post.mock.calls[0][2].headers['Idempotency-Key']).toBeTruthy();
+});
+
+test('a repeated platform delivery returns its receipt without publishing twice', async () => {
+  const Base = require('../utils/BasePlatformService');
+  const service = new Base('facebook');
+  service.publishPost = jest.fn().mockResolvedValue({ postId: 'published' });
+  await service.app.ready();
+  const req = { method: 'POST', url: '/post', headers: { 'x-workspace-id': 'receipts', 'idempotency-key': 'delivery' }, payload: { content: 'Post', accountId: 'page' } };
+  expect((await service.app.inject(req)).json().success).toBe(true);
+  expect((await service.app.inject(req)).json().success).toBe(true);
+  expect(service.publishPost).toHaveBeenCalledTimes(1);
+  await service.app.close();
+});
+test('an immediate HTTP retry returns the original publishing result', async () => {
+  axios.post.mockResolvedValue({ data: { success: true, result: { postId: 'published' } } });
+  const req = { method: 'POST', url: '/post', headers: { 'x-workspace-id': 'repeat', 'idempotency-key': 'same-request' }, payload: { content: 'Post', destinations: [{ platform: 'facebook', accountId: 'page' }] } };
+  const first = await app.inject(req); const repeated = await app.inject(req);
+  expect(repeated.json()).toEqual(first.json());
+  expect(axios.post).toHaveBeenCalledTimes(1);
+});

@@ -27,7 +27,7 @@ function fakeDb() {
         findOne: async query => list.find(doc => matches(doc, query)) || null,
         findOneAndDelete: async query => remove(query),
         find(query = {}) { const cursor = { sort() { return cursor; }, limit() { return cursor; }, skip() { return cursor; }, project() { return cursor; }, async toArray() { return list.filter(doc => matches(doc, query)); } }; return cursor; },
-        async insertOne(doc) { const value = { ...doc, _id: doc._id || new ObjectId() }; if (list.some(old => String(old._id) === String(value._id))) throw new Error('duplicate _id'); list.push(value); return { insertedId: value._id }; },
+        async insertOne(doc) { const value = { ...doc, _id: doc._id || new ObjectId() }; if (list.some(old => String(old._id) === String(value._id))) throw Object.assign(new Error('duplicate _id'), { code: 11000 }); list.push(value); return { insertedId: value._id }; },
         async updateOne(query, update, options = {}) { let doc = list.find(item => matches(item, query)); if (!doc && options.upsert) { doc = { ...query, ...update.$setOnInsert }; if (list.some(old => String(old._id) === String(doc._id))) throw new Error('duplicate _id'); list.push(doc); } if (doc) { Object.assign(doc, update.$set); for (const [key, value] of Object.entries(update.$inc || {})) doc[key] = (doc[key] || 0) + value; } return { matchedCount: doc ? 1 : 0 }; },
         async updateMany(query, update) { list.filter(doc => matches(doc, query)).forEach(doc => Object.assign(doc, update.$set)); return {}; },
         async deleteOne(query) { return { deletedCount: remove(query) ? 1 : 0 }; },

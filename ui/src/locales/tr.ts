@@ -260,6 +260,8 @@ export default {
     imageGeneratingHint: 'Bu 30 saniyeye kadar sürebilir.',
     imageGenerateFailed: 'Görsel oluşturma başarısız',
 
+    publishFailed: 'Bazi hesaplarda yayin basarisiz. Iceriginiz korundu.',
+    deliverySucceeded: 'Yayinlandi',
     firstCommentToggle: 'İlk Yorum',
     firstCommentPlaceholder: 'İlk yorum ekle (hashtagler, bağlantılar, ek bilgi)…',
     firstCommentHint: 'Instagram, Facebook, Mastodon ve Bluesky\'de desteklenir.',
@@ -278,6 +280,7 @@ export default {
     newSchedule: '+ Yeni Gönderi',
     noJobs: 'Zamanlanmış gönderi yok.',
     statuses: {
+      processing: 'Yayinlaniyor',
       pending: 'Bekleyen',
       published: 'Yayınlandı',
       partial: 'Kısmi',

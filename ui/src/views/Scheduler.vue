@@ -583,6 +583,7 @@ const activeStatus = ref('pending')
 
 const statusOptions = computed(() => [
   { value: 'pending',   label: t('scheduler.statuses.pending') },
+  { value: 'processing', label: t('scheduler.statuses.processing') },
   { value: 'published', label: t('scheduler.statuses.published') },
   { value: 'partial',   label: t('scheduler.statuses.partial') },
   { value: 'failed',    label: t('scheduler.statuses.failed') },

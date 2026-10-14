@@ -1434,7 +1434,7 @@ function gradeLabel(grade: string): string {
 
 const otherPlatforms = computed(() => {
   const skip = new Set(['instagram', 'facebook', 'pinterest', 'tiktok'])
-  return Object.fromEntries(Object.entries(PLATFORM_META).filter(([k]) => !skip.has(k)))
+  return Object.fromEntries(Object.entries(PLATFORM_META).filter(([k]) => !skip.has(k) && platformsStore.publishingPlatforms.includes(k)))
 })
 
 function isConnected(platform: string) {

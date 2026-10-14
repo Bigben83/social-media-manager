@@ -260,6 +260,8 @@ export default {
     imageGeneratingHint: 'This may take up to 30 seconds.',
     imageGenerateFailed: 'Image generation failed',
 
+    publishFailed: 'Some accounts could not be published. Your content has been retained.',
+    deliverySucceeded: 'Published',
     firstCommentToggle: 'First Comment',
     firstCommentPlaceholder: 'Add a first comment (hashtags, links, extra context)…',
     firstCommentHint: 'Supported on Instagram, Facebook, Mastodon, and Bluesky.',
@@ -278,6 +280,7 @@ export default {
     newSchedule: '+ New Post',
     noJobs: 'No scheduled posts.',
     statuses: {
+      processing: 'Publishing',
       pending: 'Pending',
       published: 'Published',
       partial: 'Partial',

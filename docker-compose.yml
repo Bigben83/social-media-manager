@@ -233,6 +233,7 @@ services:
       - facebook
 
   scheduler:
+    stop_grace_period: 150s
     build:
       context: ./services
       dockerfile: scheduler/Dockerfile

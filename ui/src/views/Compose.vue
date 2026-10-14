@@ -579,8 +579,10 @@
         </div>
 
         <!-- Success message -->
-        <div v-if="composeStore.lastResult" class="bg-green-900/30 border border-green-700/60 rounded-xl px-4 py-3 text-sm text-green-300">
-          {{ $t('compose.successMessage') }}
+        <div v-if="composeStore.lastResult" role="status" class="border rounded-xl px-4 py-3 text-sm" :class="composeStore.lastResult.ok ? 'bg-green-900/30 border-green-700 text-green-300' : 'bg-red-900/30 border-red-700 text-red-300'">
+          <p>{{ composeStore.lastResult.ok ? $t('compose.successMessage') : $t('compose.publishFailed') }}</p>
+          <p v-if="composeStore.lastResult.error">{{ composeStore.lastResult.error }}</p>
+          <p v-for="(result, index) in composeStore.lastResult.results" :key="index">{{ result.platform }}{{ result.accountId ? ': ' + result.accountId : '' }} — {{ result.success ? $t('compose.deliverySucceeded') : result.error }}</p>
         </div>
 
         <!-- Draft saved message -->
@@ -1184,7 +1186,7 @@ async function handleSaveDraft() {
 }
 
 async function handlePost() {
-  await composeStore.post(scheduleTimezone.value)
-  if (composeStore.lastResult) setTimeout(() => router.push('/dashboard'), 1500)
+  const ok = await composeStore.post(scheduleTimezone.value)
+  if (ok) setTimeout(() => router.push('/dashboard'), 1500)
 }
 </script>
