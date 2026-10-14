@@ -1,10 +1,7 @@
-FROM node:current-alpine3.17
-
-COPY package*.json ./
-RUN npm install
-
+FROM node:24-alpine
 WORKDIR /services/socket
-
-COPY . .
-
-CMD [ "npm", "start" ]
+COPY socket/package*.json ./
+RUN npm ci --omit=dev --no-fund --no-audit
+COPY utils ./utils
+COPY socket/ .
+CMD ["node", "index.js"]

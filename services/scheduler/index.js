@@ -14,7 +14,7 @@ const { validatePost, scheduleDelay } = require('./utils/publishing');
 const { createPostProcessor } = require('./worker');
 
 const log = createLogger('scheduler');
-const app = Fastify({ logger: log });
+const app = Fastify({ loggerInstance: log });
 let postQueue;
 let redis;
 let postWorker;

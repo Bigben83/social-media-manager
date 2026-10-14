@@ -118,6 +118,8 @@ class InstagramService extends BasePlatformService {
       const items = (res.data.data || []).map((post) =>
         this.normalizeFeedItem({
           originalId: post.id,
+          workspaceId,
+          accountId: account.id,
           author: {
             name: post.username || account.username || '',
             username: post.username || account.username || '',

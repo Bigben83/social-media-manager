@@ -2,9 +2,12 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
 import { usePlatformsStore } from './platforms'
+import { useWorkspaceStore } from './workspace'
 
 export interface FeedItem {
   _id?: string
+  accountId?: string
+  workspaceId?: string
   platform: string
   originalId: string
   author: { name: string; username: string; avatar?: string; profileUrl?: string }
@@ -21,7 +24,7 @@ export interface FeedItem {
 export const useFeedStore = defineStore('feed', () => {
   const items = ref<FeedItem[]>([])
   const loading = ref(false)
-  const activePlatforms = ref<Set<string>>(new Set(['twitter', 'mastodon', 'bluesky', 'linkedin', 'instagram', 'facebook', 'pinterest', 'tiktok']))
+  const activePlatforms = ref<Set<string>>(new Set(['twitter', 'mastodon', 'bluesky', 'instagram', 'facebook', 'pinterest', 'tiktok']))
   const activePageIds = ref<Set<string>>(new Set())
   const activeIgAccountIds = ref<Set<string>>(new Set())
   const activeTag = ref<string | null>(null)
@@ -36,13 +39,13 @@ export const useFeedStore = defineStore('feed', () => {
       // Facebook page sub-filter (only when specific pages are selected)
       if (item.platform === 'facebook' && activePageIds.value.size > 0) {
         const activePages = platformsStore.connectedPages.filter((p) => activePageIds.value.has(p.id))
-        if (!activePages.some((p) => p.name === item.author.username || p.name === item.author.name)) return false
+        if (item.accountId ? !activePageIds.value.has(item.accountId) : !activePages.some((p) => p.name === item.author.username || p.name === item.author.name)) return false
       }
 
       // Instagram account sub-filter (only when specific accounts are selected)
       if (item.platform === 'instagram' && activeIgAccountIds.value.size > 0) {
         const activeAccounts = platformsStore.connectedIgAccounts.filter((a) => activeIgAccountIds.value.has(a.id))
-        if (!activeAccounts.some((a) => a.username === item.author.username)) return false
+        if (item.accountId ? !activeIgAccountIds.value.has(item.accountId) : !activeAccounts.some((a) => a.username === item.author.username)) return false
       }
 
       if (searchQuery.value) {
@@ -57,13 +60,15 @@ export const useFeedStore = defineStore('feed', () => {
   })
 
   async function fetchFeeds(platform?: string) {
+    const workspaceStore = useWorkspaceStore()
+    const workspaceId = workspaceStore.activeWorkspaceId
     loading.value = true
     try {
       const params: Record<string, string | number> = { limit: 100 }
       if (platform) params.platform = platform
       if (activeTag.value) params.tag = activeTag.value
       const res = await axios.get('/feeds/feeds', { params })
-      items.value = res.data.items || []
+      if (workspaceStore.activeWorkspaceId === workspaceId) items.value = res.data.items || []
     } catch (err) {
       console.error('Feed fetch error:', err)
     } finally {

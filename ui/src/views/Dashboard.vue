@@ -190,13 +190,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { io } from 'socket.io-client'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { io, type Socket } from 'socket.io-client'
+import { useWorkspaceStore } from '../stores/workspace'
 import { useFeedStore } from '../stores/feed'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
 import type { FeedItem as FeedItemType } from '../stores/feed'
 import FeedItem from '../components/feed/FeedItem.vue'
 
+const workspaceStore = useWorkspaceStore()
+let socket: Socket | undefined
+let disposed = false
+function connectFeed() {
+  socket?.disconnect()
+  if (disposed) return
+  const workspaceId = workspaceStore.activeWorkspaceId
+  socket = io({ auth: { workspaceId } })
+  socket.on('feed.items', (data: { workspaceId: string; items: FeedItemType[] }) => {
+    if (data.workspaceId === workspaceStore.activeWorkspaceId && Array.isArray(data.items)) data.items.forEach(item => feedStore.addItem(item))
+  })
+}
+watch(() => workspaceStore.activeWorkspaceId, connectFeed)
+onUnmounted(() => { disposed = true; socket?.disconnect() })
 const feedStore = useFeedStore()
 const platformsStore = usePlatformsStore()
 
@@ -229,11 +244,6 @@ onMounted(async () => {
     platformsStore.fetchMetaConnections(),
   ])
 
-  const socket = io()
-  socket.on('feed.items', (data: { platform: string; items: unknown[] }) => {
-    if (Array.isArray(data.items)) {
-      data.items.forEach((item) => feedStore.addItem(item as FeedItemType))
-    }
-  })
+  connectFeed()
 })
 </script>

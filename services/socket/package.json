@@ -4,14 +4,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon index.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "amqplib": "^0.10.3",
-    "nodemon": "^3.0.1",
-    "socket.io": "^4.7.2"
+    "socket.io": "^4.8.4",
+    "pino": "^10.4.0",
+    "axios": "^1.16.0",
+    "mongodb": "^6.20.0",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.12.7"
   },
   "engines": {
-    "node": ">=12.0.0"
+    "node": ">=24"
   }
 }

@@ -1,7 +1,8 @@
 require('dotenv').config();
 const { createLogger } = require('./utils/logger');
 const log = createLogger('gateway');
-const app = require('fastify')({ logger: log });
+const app = require('fastify')({ loggerInstance: log });
+app.get('/health', async () => ({ status: 'ok', service: 'gateway' }));
 const multipart = require('@fastify/multipart');
 const axios = require('axios');
 const fs = require('fs');
@@ -11,7 +12,6 @@ const { pipeline } = require('stream/promises');
 const { ObjectId } = require('mongodb');
 const { getDb } = require('./utils/MongoDBConnector');
 const { encryptToken, decryptToken, warnIfNoKey } = require('./utils/crypto');
-const RabbitMQProducer = require('./utils/RabbitMQProducer');
 const {
   generateText, streamText, listModels, extractJson,
   PROVIDER_MODELS, PROVIDER_BASE_URLS, GEMINI_BASE_URL, CLOUD_PROVIDERS, VISION_PROVIDERS, anthropicSdkAvailable,
@@ -2052,17 +2052,7 @@ app.post('/post', async (request, reply) => {
 
 // ─── Legacy post route ────────────────────────────────────────────────────────
 
-let rabbitMQProducer = new RabbitMQProducer();
-
-app.post('/', async (request, reply) => {
-  try {
-    await rabbitMQProducer.sendMessage('formatter', request.body.message);
-    reply.send({ status: 'ok' });
-  } catch (error) {
-    app.log.error({ action: 'legacy_post', outcome: 'failure', err: error.message });
-    reply.status(500).send({ error: 'Internal Server Error' });
-  }
-});
+app.post('/', async (_request, reply) => reply.code(410).send({ error: 'Use /posts/immediate to publish to selected accounts' }));
 
 // ─── Meta App Credentials ────────────────────────────────────────────────────
 

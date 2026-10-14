@@ -7,10 +7,10 @@ import router from './router'
 import i18n from './locales'
 import { library } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
-import { faGithub, faXTwitter, faLinkedin, faMastodon, faInstagram, faReddit, faYoutube } from '@fortawesome/free-brands-svg-icons'
+import { faGithub, faXTwitter, faLinkedin, faMastodon, faInstagram, faReddit, faYoutube, faFacebook, faPinterest, faTiktok, faBluesky } from '@fortawesome/free-brands-svg-icons'
 import { faCloud } from '@fortawesome/free-solid-svg-icons'
 
-library.add(faGithub, faXTwitter, faLinkedin, faMastodon, faInstagram, faReddit, faYoutube, faCloud)
+library.add(faGithub, faXTwitter, faLinkedin, faMastodon, faInstagram, faReddit, faYoutube, faFacebook, faPinterest, faTiktok, faBluesky, faCloud)
 
 const pinia = createPinia()
 const app = createApp(App)

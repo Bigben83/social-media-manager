@@ -1,295 +1,202 @@
 services:
-
   nginx:
-    image: nginx:latest
-    ports:
-      - "8081:80"
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    ports: ["8081:80"]
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - media_uploads:/media:ro
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - gateway
-      - ui
-
-  messageBroker:
-    container_name: messageBroker
-    image: rabbitmq:management
-    restart: unless-stopped
-    ports:
-      - 5672:5672
-      - 15672:15672
-    environment:
-      RABBITMQ_DEFAULT_USER: username
-      RABBITMQ_DEFAULT_PASS: password
-    networks:
-      - socialMediaManagerNetwork
-
+    networks: [socialMediaManagerNetwork]
+    depends_on: [gateway, ui]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
   mongodb:
     container_name: mongodb
     image: mongo:7
     restart: unless-stopped
-    ports:
-      - 27018:27017
+    ports: ["27018:27017"]
     environment:
       MONGO_INITDB_DATABASE: socialmedia
-    volumes:
-      - mongodb-data:/data/db
-    networks:
-      - socialMediaManagerNetwork
-
+    volumes: ["mongodb-data:/data/db"]
+    networks: [socialMediaManagerNetwork]
   redis:
     container_name: redis
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - 6379:6379
-    volumes:
-      - redis-data:/data
-    networks:
-      - socialMediaManagerNetwork
-
-  ai-grammer-correction:
-    build: ./services/ai_grammar_correction
-    volumes:
-      - ./services/ai_grammar_correction:/services/grammar_correction
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-    command: tail -f /dev/null
-
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: ["redis-data:/data"]
+    networks: [socialMediaManagerNetwork]
   gateway:
-    build: ./services/gateway
-    volumes:
-      - ./services/utils:/services/gateway/utils
-      - ./services/gateway:/services/gateway
-      - gateway_modules:/services/gateway/node_modules
-      - media_uploads:/uploads
-    env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  socket:
-    build: ./services/socket
-    volumes:
-      - ./services/utils:/services/socket/utils
-      - ./services/socket:/services/socket
-      - socket_modules:/services/socket/node_modules
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-
-  formatter:
-    build: ./services/formatter
-    volumes:
-      - ./services/utils:/services/formatter/utils
-      - ./services/formatter:/services/formatter
-      - formatter_modules:/services/formatter/node_modules
-    restart: unless-stopped
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-
-  twitter:
     build:
       context: ./services
-      dockerfile: twitter/dockerfile
-    volumes:
-      - twitter_modules:/services/twitter/node_modules
+      dockerfile: gateway/dockerfile
     restart: unless-stopped
     env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  linkedin:
-    build: ./services/linkedin
-    volumes:
-      - ./services/utils:/services/linkedin/utils
-      - ./services/linkedin:/services/linkedin
-      - linkedin_modules:/services/linkedin/node_modules
-    restart: unless-stopped
-    env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  mastodon:
+    volumes: ["media_uploads:/uploads"]
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb, redis]
+    stop_grace_period: 150s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8084/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  scheduler:
     build:
       context: ./services
-      dockerfile: mastodon/Dockerfile
-    volumes:
-      - mastodon_modules:/services/mastodon/node_modules
+      dockerfile: scheduler/Dockerfile
     restart: unless-stopped
     env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  bluesky:
-    build:
-      context: ./services
-      dockerfile: bluesky/Dockerfile
-    volumes:
-      - bluesky_modules:/services/bluesky/node_modules
-    restart: unless-stopped
-    env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  instagram:
-    build:
-      context: ./services
-      dockerfile: instagram/Dockerfile
-    volumes:
-      - instagram_modules:/services/instagram/node_modules
-    restart: unless-stopped
-    env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  facebook:
-    build:
-      context: ./services
-      dockerfile: facebook/Dockerfile
-    volumes:
-      - facebook_modules:/services/facebook/node_modules
-    restart: unless-stopped
-    env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  pinterest:
-    build:
-      context: ./services
-      dockerfile: pinterest/Dockerfile
-    volumes:
-      - pinterest_modules:/services/pinterest/node_modules
-    restart: unless-stopped
-    env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
-  tiktok:
-    build:
-      context: ./services
-      dockerfile: tiktok/Dockerfile
-    volumes:
-      - tiktok_modules:/services/tiktok/node_modules
-    restart: unless-stopped
-    env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb, redis]
+    stop_grace_period: 150s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3011/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
   feed-aggregator:
     build:
       context: ./services
       dockerfile: feed-aggregator/Dockerfile
-    volumes:
-      - feed_aggregator_modules:/services/feed-aggregator/node_modules
     restart: unless-stopped
     env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - messageBroker
-      - mongodb
-      - twitter
-      - linkedin
-      - mastodon
-      - bluesky
-      - instagram
-      - pinterest
-      - tiktok
-      - facebook
-
-  scheduler:
-    stop_grace_period: 150s
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  socket:
     build:
       context: ./services
-      dockerfile: scheduler/Dockerfile
-    volumes:
-      - scheduler_modules:/services/scheduler/node_modules
+      dockerfile: socket/dockerfile
     restart: unless-stopped
     env_file: .env
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - mongodb
-      - redis
-
-  # ── Optional: Ollama local AI ─────────────────────────────────────────────────
-  # Uncomment to run Ollama inside Docker (CPU only).
-  # For GPU acceleration, add a `deploy.resources.reservations.devices` block.
-  # After starting, pull a model:  docker exec -it ollama ollama pull llama3.2
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: ollama
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ollama-data:/root/.ollama
-  #   networks:
-  #     - socialMediaManagerNetwork
-
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8084/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  twitter:
+    build:
+      context: ./services
+      dockerfile: twitter/dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  mastodon:
+    build:
+      context: ./services
+      dockerfile: mastodon/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  bluesky:
+    build:
+      context: ./services
+      dockerfile: bluesky/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  instagram:
+    build:
+      context: ./services
+      dockerfile: instagram/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  facebook:
+    build:
+      context: ./services
+      dockerfile: facebook/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  pinterest:
+    build:
+      context: ./services
+      dockerfile: pinterest/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3008/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  tiktok:
+    build:
+      context: ./services
+      dockerfile: tiktok/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
   ui:
     build: ./ui
-    volumes:
-      - ./ui:/app/ui
-      - ui_modules:/app/ui/node_modules
-    networks:
-      - socialMediaManagerNetwork
-    depends_on:
-      - gateway
-
+    restart: unless-stopped
+    networks: [socialMediaManagerNetwork]
+    depends_on: [gateway]
 networks:
   socialMediaManagerNetwork:
     driver: bridge
-
 volumes:
   mongodb-data:
   redis-data:
   media_uploads:
   ollama-data:
-  gateway_modules:
-  socket_modules:
-  formatter_modules:
-  twitter_modules:
-  linkedin_modules:
-  mastodon_modules:
-  bluesky_modules:
-  instagram_modules:
-  facebook_modules:
-  pinterest_modules:
-  tiktok_modules:
-  feed_aggregator_modules:
-  scheduler_modules:
-  ui_modules:

@@ -1,5 +1,4 @@
 const Fastify = require('fastify');
-const RabbitMQConnector = require('./RabbitMQConnector');
 const { createLogger } = require('./logger');
 const { getDb } = require('./MongoDBConnector');
 const { createHash } = require('crypto');
@@ -13,13 +12,13 @@ const { createHash } = require('crypto');
  *   - getStatus()        → bağlantı durumu döner
  *   - authenticate(code) → OAuth callback işler
  */
-class BasePlatformService extends RabbitMQConnector {
+class BasePlatformService {
   constructor(platformName) {
-    super();
     this.platformName = platformName;
     this.log = createLogger(platformName);
-    this.app = Fastify({ logger: this.log });
+    this.app = Fastify({ loggerInstance: this.log });
     this._setupRoutes();
+    this.app.get('/health', async () => ({ status: 'ok', service: platformName }));
   }
 
   /** HTTP route'ları kaydet — platform servisleri override edebilir */
@@ -94,7 +93,6 @@ class BasePlatformService extends RabbitMQConnector {
 
   /** HTTP sunucusunu başlat */
   async start(port = 3000) {
-    await this.connect();
     await this.app.listen({ port, host: '0.0.0.0' });
     this.app.log.info({ action: 'service_start', port, outcome: 'success' }, `${this.platformName} service started`);
   }
@@ -128,6 +126,8 @@ class BasePlatformService extends RabbitMQConnector {
    * Platform servisleri bu şablonu kullanarak veriyi standartlaştırır.
    */
   normalizeFeedItem({
+    workspaceId,
+    accountId,
     originalId,
     author,
     content,
@@ -140,6 +140,8 @@ class BasePlatformService extends RabbitMQConnector {
     createdAt = new Date(),
   }) {
     return {
+      workspaceId,
+      accountId,
       platform: this.platformName,
       originalId: String(originalId),
       author: {

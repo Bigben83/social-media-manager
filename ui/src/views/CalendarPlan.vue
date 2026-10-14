@@ -285,21 +285,18 @@ const platformsStore = usePlatformsStore()
 const composeStore = useComposeStore()
 
 const PLATFORMS = [
-  { key: 'linkedin',  label: 'LinkedIn',   color: '#0077B5', icon: 'fa-brands fa-linkedin' },
   { key: 'instagram', label: 'Instagram',  color: '#E1306C', icon: 'fa-brands fa-instagram' },
   { key: 'facebook',  label: 'Facebook',   color: '#1877F2', icon: 'fa-brands fa-facebook' },
   { key: 'twitter',   label: 'Twitter/X',  color: '#000000', icon: 'fa-brands fa-x-twitter' },
   { key: 'tiktok',    label: 'TikTok',     color: '#EE1D52', icon: 'fa-brands fa-tiktok' },
   { key: 'pinterest', label: 'Pinterest',  color: '#E60023', icon: 'fa-brands fa-pinterest' },
-  { key: 'youtube',   label: 'YouTube',    color: '#FF0000', icon: 'fa-brands fa-youtube' },
   { key: 'mastodon',  label: 'Mastodon',   color: '#6364FF', icon: 'fa-brands fa-mastodon' },
   { key: 'bluesky',   label: 'Bluesky',    color: '#0085FF', icon: 'fa-brands fa-bluesky' },
-  { key: 'reddit',    label: 'Reddit',     color: '#FF4500', icon: 'fa-brands fa-reddit' },
 ]
 
 const selectedMonth   = ref(new Date().toISOString().slice(0, 7))
 const selectedAccount = ref('')
-const selectedPlatforms = ref<string[]>(['linkedin', 'instagram'])
+const selectedPlatforms = ref<string[]>(['facebook', 'instagram'])
 const postsPerWeek = ref(3)
 const loading    = ref(false)
 const savingAll  = ref(false)

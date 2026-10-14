@@ -1,12 +1,4 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-
-// https://vitejs.dev/config/
-export default defineConfig({
-  server:{
-    host:"ui",
-    port:5173,
-    strictPort:true
-  },
-  plugins: [vue()],
-})
+import tailwindcss from '@tailwindcss/vite'
+export default defineConfig({ plugins: [vue(), tailwindcss()], server: { host: '0.0.0.0', port: 5173, strictPort: true } })

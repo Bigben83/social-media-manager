@@ -6,28 +6,28 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.cjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^6.4.2",
     "@fortawesome/free-brands-svg-icons": "^6.4.2",
     "@fortawesome/free-solid-svg-icons": "^6.4.2",
     "@fortawesome/vue-fontawesome": "^3.0.3",
-    "axios": "^1.4.0",
-    "socket.io-client": "^4.7.2",
-    "vue": "^3.3.4",
-    "vue-router": "^4.2.5",
-    "pinia": "^2.1.7",
+    "axios": "^1.16.0",
+    "socket.io-client": "^4.8.4",
+    "vue": "^3.5.44",
+    "vue-router": "^4.6.4",
+    "pinia": "^3.0.4",
     "dayjs": "^1.11.10",
-    "vue-i18n": "^9.8.0"
+    "vue-i18n": "^11.4.14"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^4.2.3",
-    "autoprefixer": "^10.4.15",
-    "postcss": "^8.4.29",
-    "tailwindcss": "^3.3.3",
-    "typescript": "^5.0.2",
-    "vite": "^4.4.5",
-    "vue-tsc": "^1.8.5"
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "vue-tsc": "^3.3.13"
   }
 }

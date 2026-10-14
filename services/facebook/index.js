@@ -90,6 +90,8 @@ class FacebookService extends BasePlatformService {
       const items = (res.data.data || []).map((post) =>
         this.normalizeFeedItem({
           originalId: post.id,
+          workspaceId,
+          accountId: page.id,
           author: {
             name: page.name || '',
             username: page.name || '',

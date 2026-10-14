@@ -14,3 +14,5 @@ start().catch((err) => {
   app.log.error({ action: 'service_start', outcome: 'failure', err: err.message }, 'Gateway failed to start');
   process.exit(1);
 });
+
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => app.close().then(() => process.exit(0)));

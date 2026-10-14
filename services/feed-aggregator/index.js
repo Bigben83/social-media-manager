@@ -3,14 +3,12 @@ const Fastify = require('fastify');
 const axios = require('axios');
 const cron = require('node-cron');
 const { getDb } = require('./utils/MongoDBConnector');
-const RabbitMQProducer = require('./utils/RabbitMQProducer');
 const { createLogger } = require('./utils/logger');
 
 const FEED_REFRESH_INTERVAL = process.env.FEED_REFRESH_INTERVAL || '*/5 * * * *';
 
 const PLATFORM_SERVICES = {
   twitter:   process.env.TWITTER_SERVICE_URL   || 'http://twitter:3001',
-  linkedin:  process.env.LINKEDIN_SERVICE_URL  || 'http://linkedin:3002',
   mastodon:  process.env.MASTODON_SERVICE_URL  || 'http://mastodon:3003',
   bluesky:   process.env.BLUESKY_SERVICE_URL   || 'http://bluesky:3004',
   instagram: process.env.INSTAGRAM_SERVICE_URL || 'http://instagram:3005',
@@ -20,8 +18,8 @@ const PLATFORM_SERVICES = {
 };
 
 const log = createLogger('feed-aggregator');
-const app = Fastify({ logger: log });
-let producer;
+const app = Fastify({ loggerInstance: log });
+
 
 // ─── Feed Çekme ──────────────────────────────────────────────────────────────
 
@@ -31,12 +29,13 @@ async function fetchPlatformFeed(platform, serviceUrl, workspaceId = 'default') 
       timeout: 15000,
       headers: { 'X-Workspace-Id': workspaceId },
     });
-    const items = response.data.items || [];
+    const items = (response.data.items || []).map(item => ({ ...item, workspaceId }));
     log.info({ action: 'feed_fetch', platform, count: items.length, outcome: 'success' });
 
     // WebSocket üzerinden UI'ya bildir
-    if (producer && items.length > 0) {
-      await producer.sendMessage('feed.items', JSON.stringify({ platform, items, fetchedAt: new Date() }));
+    if (items.length > 0) {
+      try { await axios.post(`${process.env.SOCKET_SERVICE_URL || 'http://socket:8084'}/events/feed`, { workspaceId, platform, items: items.slice(0, 100), fetchedAt: new Date() }, { timeout: 5000 }); }
+      catch (err) { log.warn({ action: 'feed_notify', err: err.message }); }
     }
 
     return items;
@@ -59,8 +58,8 @@ async function getAllWorkspaceIds() {
   }
 }
 
-async function fetchAllFeeds() {
-  const workspaceIds = await getAllWorkspaceIds();
+async function fetchAllFeeds(workspaceId) {
+  const workspaceIds = workspaceId ? [workspaceId] : await getAllWorkspaceIds();
   log.info({ action: 'feed_fetch_all', workspaces: workspaceIds.length }, 'Fetching feeds for all workspaces');
 
   const summary = {};
@@ -84,20 +83,22 @@ async function fetchAllFeeds() {
 
 app.get('/health', async () => ({ status: 'ok', service: 'feed-aggregator' }));
 
-app.post('/fetch', async (request) => {
+app.post('/fetch', async (request, reply) => {
   const { platform } = request.body || {};
   const workspaceId = request.headers['x-workspace-id'] || 'default';
   if (platform && PLATFORM_SERVICES[platform]) {
     const items = await fetchPlatformFeed(platform, PLATFORM_SERVICES[platform], workspaceId);
     return { success: true, platform, count: items.length };
   }
-  const summary = await fetchAllFeeds();
+  if (platform) return reply.code(400).send({ error: 'Unsupported platform' });
+  const summary = await fetchAllFeeds(workspaceId);
   return { success: true, summary };
 });
 
-app.get('/feeds', async (request) => {
+app.get('/feeds', async (request, reply) => {
   const { platform, tag, limit = 50, skip = 0 } = request.query;
   const workspaceId = request.headers['x-workspace-id'] || 'default';
+  if (!Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 200 || !Number.isSafeInteger(Number(skip)) || Number(skip) < 0) return reply.code(400).send({ error: 'Invalid pagination' });
   const db = await getDb();
   const col = db.collection('feeds');
 
@@ -141,9 +142,6 @@ app.get('/platform-status', async (request) => {
 // ─── Başlatma ────────────────────────────────────────────────────────────────
 
 async function start() {
-  producer = new RabbitMQProducer();
-  await producer.connect();
-
   // Periyodik feed yenileme
   cron.schedule(FEED_REFRESH_INTERVAL, () => {
     fetchAllFeeds().catch((err) => log.error({ action: 'feed_fetch_all', outcome: 'failure', err: err.message }));

@@ -4,17 +4,17 @@
   "description": "TikTok platform service",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "fastify": "^4.24.3",
-    "mongodb": "^6.3.0",
-    "amqplib": "^0.10.3",
-    "dotenv": "^16.3.1"
+    "axios": "^1.16.0",
+    "fastify": "^5.12.7",
+    "mongodb": "^6.20.0",
+    "dotenv": "^16.6.1",
+    "pino": "^10.4.0"
   },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
+  "devDependencies": {},
+  "engines": {
+    "node": ">=24"
   }
 }

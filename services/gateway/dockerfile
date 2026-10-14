@@ -1,7 +1,7 @@
-FROM node:20-alpine
+FROM node:24-alpine
 WORKDIR /services/gateway
-COPY package*.json ./
-RUN npm ci --omit=dev --no-fund --no-audit \
-    && sha256sum package-lock.json | cut -d ' ' -f 1 > node_modules/.dependency-lock-hash
-COPY . .
-CMD ["sh", "entrypoint.sh"]
+COPY gateway/package*.json ./
+RUN npm ci --omit=dev --no-fund --no-audit
+COPY utils ./utils
+COPY gateway/ .
+CMD ["node", "start.js"]

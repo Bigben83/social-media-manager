@@ -1,5 +1,4 @@
 jest.mock('../utils/MongoDBConnector', () => ({ getDb: jest.fn() }));
-jest.mock('../utils/RabbitMQProducer', () => class { async sendMessage() {} });
 jest.mock('axios');
 const fs = require('fs');
 const os = require('os');

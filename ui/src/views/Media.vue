@@ -119,7 +119,6 @@
             </div>
             <div v-else class="flex gap-1">
               <input
-                ref="newFolderInputRef"
                 v-model="newFolderName"
                 type="text"
                 :placeholder="$t('media.folderNamePlaceholder')"
@@ -355,7 +354,6 @@ const folderCounts = ref<Record<string, number>>({})
 
 const showNewFolderInput = ref(false)
 const newFolderName = ref('')
-const newFolderInputRef = ref<HTMLInputElement | null>(null)
 
 const movingFileId = ref<string | null>(null)
 
