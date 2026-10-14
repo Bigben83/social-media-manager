@@ -22,6 +22,7 @@
 //   anthropic  — Claude via the official @anthropic-ai/sdk
 
 const axios = require('axios');
+const { StringDecoder } = require('string_decoder');
 const { createLogger } = require('./utils/logger');
 
 const log = createLogger('gateway-ai');
@@ -262,7 +263,7 @@ async function generateText(pconf, opts) {
  * onError(message) on failure. Never throws after handlers are wired.
  */
 async function streamText(pconf, opts, handlers) {
-  const { prompt, system } = opts;
+  const { prompt, system, signal } = opts;
   const model = opts.model || pconf.model;
   const timeout = opts.timeout || DEFAULT_TIMEOUT;
   const provider = pconf.provider;
@@ -274,25 +275,24 @@ async function streamText(pconf, opts, handlers) {
 
   // Pipe an axios stream through a line parser.
   const pipeLines = (stream, parseLine) => {
-    let buffer = '';
-    stream.on('data', (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try { parseLine(line); } catch (_) { /* partial / keep-alive line */ }
-      }
+    let buffer = ''; const decoder = new StringDecoder('utf8');
+    const abort = () => { stream.destroy(); finish(); };
+    signal?.addEventListener('abort', abort, { once: true });
+    const parse = line => { if (line.trim() && !finished) { try { parseLine(line); } catch (err) { fail(err); stream.destroy(); } } };
+    stream.on('data', chunk => {
+      buffer += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const lines = buffer.split('\n'); buffer = lines.pop() || '';
+      for (const line of lines) parse(line);
     });
-    stream.on('end', finish);
-    stream.on('error', fail);
+    stream.on('end', () => { buffer += decoder.end(); parse(buffer); signal?.removeEventListener('abort',abort); finish(); });
+    stream.on('error', err => { signal?.removeEventListener('abort',abort); fail(err); });
   };
 
   try {
     if (provider === 'ollama') {
       const res = await ollamaPost(pconf, {
         model, messages: ollamaMessages(prompt, system), stream: true, keep_alive: OLLAMA_KEEP_ALIVE,
-      }, { responseType: 'stream', timeout });
+      }, { responseType: 'stream', timeout, signal });
       pipeLines(res.data, (line) => {
         const data = JSON.parse(line);
         if (data.error) throw new Error(data.error);
@@ -308,12 +308,13 @@ async function streamText(pconf, opts, handlers) {
       const headers = pconf.apiKey ? { Authorization: `Bearer ${pconf.apiKey}` } : {};
       const res = await axios.post(`${pconf.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         model, messages: openAiMessages(prompt, system), stream: true,
-      }, { headers, responseType: 'stream', timeout });
+      }, { headers, responseType: 'stream', timeout, signal });
       pipeLines(res.data, (line) => {
         if (!line.startsWith('data:')) return;
         const payload = line.slice(5).trim();
         if (payload === '[DONE]') { finish(); return; }
         const data = JSON.parse(payload);
+        if (data.error) throw new Error(data.error.message || String(data.error));
         const token = data.choices?.[0]?.delta?.content || '';
         if (token) onToken(token);
       });
@@ -325,11 +326,12 @@ async function streamText(pconf, opts, handlers) {
       const res = await axios.post(
         `${GEMINI_BASE_URL}/models/${model}:streamGenerateContent?alt=sse&key=${pconf.apiKey}`,
         geminiBody(prompt, system),
-        { responseType: 'stream', timeout },
+        { responseType: 'stream', timeout, signal },
       );
       pipeLines(res.data, (line) => {
         if (!line.startsWith('data:')) return;
         const data = JSON.parse(line.slice(5).trim());
+        if (data.error) throw new Error(data.error.message || String(data.error));
         const token = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
         if (token) onToken(token);
       });
@@ -348,8 +350,8 @@ async function streamText(pconf, opts, handlers) {
       let emitted = false;
       const run = async (withFallback) => {
         const stream = withFallback
-          ? client.beta.messages.stream({ ...params, ...ANTHROPIC_FALLBACK })
-          : client.messages.stream(params);
+          ? client.beta.messages.stream({ ...params, ...ANTHROPIC_FALLBACK }, { signal })
+          : client.messages.stream(params, { signal });
         for await (const event of stream) {
           if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
             emitted = true;

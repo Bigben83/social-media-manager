@@ -94,7 +94,7 @@ export const useAiStore = defineStore('ai', () => {
       if (payload.setActive) config.value.provider = name
       return true
     } catch (err: any) {
-      error.value = err.response?.data?.error || `Failed to save ${name} config`
+      error.value = err.response?.data?.detail || err.response?.data?.error || `Failed to save ${name} config`
       return false
     } finally {
       saving.value = false
@@ -108,7 +108,7 @@ export const useAiStore = defineStore('ai', () => {
       if (config.value.provider === name) config.value.provider = 'ollama'
       return true
     } catch (err: any) {
-      error.value = err.response?.data?.error || `Failed to disconnect ${name}`
+      error.value = err.response?.data?.detail || err.response?.data?.error || `Failed to disconnect ${name}`
       return false
     }
   }
@@ -131,7 +131,7 @@ export const useAiStore = defineStore('ai', () => {
       config.value = merged
       return true
     } catch (err: any) {
-      error.value = err.response?.data?.error || 'Failed to save config'
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Failed to save config'
       return false
     } finally {
       saving.value = false
@@ -147,7 +147,7 @@ export const useAiStore = defineStore('ai', () => {
       models.value = res.data.models || []
       return true
     } catch (err: any) {
-      error.value = err.response?.data?.error || 'Could not connect to Ollama'
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Could not connect to Ollama'
       models.value = []
       return false
     } finally {
@@ -162,7 +162,7 @@ export const useAiStore = defineStore('ai', () => {
       const res = await axios.post('/api/ai/generate', { prompt, system, model })
       return res.data.text as string
     } catch (err: any) {
-      error.value = err.response?.data?.error || 'Generation failed'
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Generation failed'
       throw err
     } finally {
       loading.value = false
@@ -196,7 +196,7 @@ export const useAiStore = defineStore('ai', () => {
       })
       return res.data.caption as string
     } catch (err: any) {
-      error.value = err.response?.data?.error || 'Caption generation failed'
+      error.value = err.response?.data?.detail || err.response?.data?.error || 'Caption generation failed'
       throw err
     } finally {
       loading.value = false
