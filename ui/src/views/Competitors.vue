@@ -745,7 +745,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
-import { useCompetitorStore, type Competitor, type KeywordIntent, type CompetitorSuggestion } from '../stores/competitors'
+import { useCompetitorStore, type Competitor, type KeywordIntent } from '../stores/competitors'
 import { useComposeStore } from '../stores/compose'
 
 const { t } = useI18n()
@@ -867,7 +867,7 @@ function otherCompetitorNames(currentId: string): string {
   const others = competitorStore.competitors.filter((c) => c._id !== currentId).map((c) => c.name)
   if (others.length === 0) return ''
   if (others.length === 1) return others[0]
-  return others.slice(0, -1).join(', ') + ' & ' + others.at(-1)
+  return others.slice(0, -1).join(', ') + ' & ' + others.slice(-1)[0]
 }
 
 function freshnessBadge(lastScraped: string | null) {

@@ -485,6 +485,11 @@ export default {
       disconnect: 'Disconnect all',
       disconnectConfirm: 'This will disconnect all Facebook Pages and Instagram accounts. Continue?',
 
+      findPageTitle: 'Missing a Facebook Page?',
+      findPageHint: 'Look up an authorised Page by URL or ID. Reconnect with Facebook if your access has changed.',
+      pageReferencePlaceholder: 'https://www.facebook.com/yourpage',
+      findPage: 'Find Page',
+      refreshAccounts: 'Refresh available accounts',
       discoveryTitle: 'Choose Pages & Accounts to Connect',
       discoverySubtitle: 'Select any combination of Facebook Pages and Instagram accounts below.',
       pagesHeading: 'Facebook Pages',
@@ -565,7 +570,13 @@ export default {
     },
   },
 
+  globalSettings: {
+    title: 'Global Settings',
+    subtitle: 'Manage shared app credentials and AI providers.',
+    appCredentialsNote: 'These credentials are shared across all workspaces.',
+  },
   ai: {
+    providerUnavailable: 'This provider is unavailable. The gateway dependencies need repair.',
     sectionTitle: 'AI Integration',
     sectionSubtitle: 'Connect a local Ollama instance to generate post content with AI.',
     endpointLabel: 'Ollama Endpoint',

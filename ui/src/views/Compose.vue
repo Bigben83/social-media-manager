@@ -30,7 +30,7 @@
               <!-- Avatar circle -->
               <div
                 class="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center text-white font-bold text-base ring-2 ring-offset-2 ring-offset-gray-950 transition-all"
-                :style="dest.selected ? { ringColor: dest.color } : {}"
+                :style="dest.selected ? { '--tw-ring-color': dest.color } : {}"
                 :class="dest.selected ? 'ring-white' : 'ring-transparent'"
               >
                 <img v-if="dest.picture" :src="dest.picture" class="w-full h-full object-cover" />

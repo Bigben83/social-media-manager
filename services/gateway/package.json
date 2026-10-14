@@ -1,27 +1,27 @@
 {
-    "name": "api-gateway",
-    "version": "1.0.0",
-    "description": "",
-    "main": "start.js",
-    "scripts": {
-        "start": "nodemon start.js",
-        "test": "jest --forceExit"
-    },
-    "dependencies": {
-        "@anthropic-ai/sdk": "^0.133.0",
-        "@fastify/multipart": "^8.3.0",
-        "amqplib": "^0.10.3",
-        "axios": "^1.6.7",
-        "dotenv": "^16.3.1",
-        "fastify": "^4.24.3",
-        "mongodb": "^6.3.0",
-        "nodemon": "^3.0.1"
-    },
-    "engines": {
-        "node": ">=18.0.0"
-    },
-    "devDependencies": {
-        "jest": "^29.6.4",
-        "supertest": "^6.3.3"
-    }
+  "name": "api-gateway",
+  "version": "1.0.0",
+  "description": "",
+  "main": "start.js",
+  "scripts": {
+    "start": "node start.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@fastify/multipart": "^8.3.0",
+    "amqplib": "^0.10.3",
+    "axios": "^1.6.7",
+    "dotenv": "^16.3.1",
+    "fastify": "^4.24.3",
+    "mongodb": "^6.3.0",
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.6.4",
+    "supertest": "^6.3.3"
+  }
 }

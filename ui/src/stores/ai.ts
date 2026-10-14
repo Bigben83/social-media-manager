@@ -21,6 +21,7 @@ export interface ImageProvider {
 
 export interface ProviderInfo {
   name: string
+  available?: boolean
   configured: boolean
   active: boolean
   model: string

@@ -30,6 +30,7 @@ lib-cov
 
 # Output of `npm build`
 build/
+dist/
 
 # Output of `node-gyp`
 build/Release
@@ -43,8 +44,7 @@ build/Release
 # dotenv environment variables file
 .env
 
-# npm package lock
-package-lock.json
+# Dependency lockfiles are committed for reproducible builds
 
 # macOS files
 .DS_Store

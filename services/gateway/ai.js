@@ -29,8 +29,8 @@ const log = createLogger('gateway-ai');
 let AnthropicSdk = null;
 try {
   AnthropicSdk = require('@anthropic-ai/sdk');
-} catch (_) {
-  // SDK not installed yet — the container must be rebuilt (docker compose build gateway).
+} catch (err) {
+  log.error({ action: 'anthropic_sdk_load', code: err.code, err: err.message, outcome: 'failure' });
 }
 
 const DEFAULT_TIMEOUT = 120000;
@@ -129,7 +129,7 @@ function anthropicContent(prompt, images = []) {
 
 function anthropicClient(pconf, timeout) {
   if (!AnthropicSdk) {
-    throw new AiError('anthropic', '@anthropic-ai/sdk is not installed — rebuild the gateway container (docker compose build gateway)', 503);
+    throw new AiError('anthropic', 'Claude SDK unavailable — repair gateway dependencies and restart the gateway', 503);
   }
   requireKey(pconf);
   return new AnthropicSdk({ apiKey: pconf.apiKey, timeout, maxRetries: 1 });

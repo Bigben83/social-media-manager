@@ -14,8 +14,10 @@ const { encryptToken, decryptToken, warnIfNoKey } = require('./utils/crypto');
 const RabbitMQProducer = require('./utils/RabbitMQProducer');
 const {
   generateText, streamText, listModels, extractJson,
-  PROVIDER_MODELS, PROVIDER_BASE_URLS, GEMINI_BASE_URL, CLOUD_PROVIDERS, VISION_PROVIDERS,
+  PROVIDER_MODELS, PROVIDER_BASE_URLS, GEMINI_BASE_URL, CLOUD_PROVIDERS, VISION_PROVIDERS, anthropicSdkAvailable,
 } = require('./ai');
+
+const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery } = require('./meta');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi']);
@@ -1052,6 +1054,7 @@ app.get('/ai/providers', async (request) => {
     providers.push({
       name,
       configured,
+      available: name !== 'anthropic' || anthropicSdkAvailable(),
       active: active === name,
       model: doc?.model || PROVIDER_MODELS[name]?.[0] || '',
       apiKeyHint: maskApiKey(doc?.apiKey),
@@ -1070,6 +1073,7 @@ app.put('/ai/provider/:name', async (request, reply) => {
   const ws = request.workspaceId;
   const { name } = request.params;
   const { apiKey, model, endpoint, baseUrl, visionModel, setActive = false } = request.body || {};
+  if (name === 'anthropic' && setActive && !anthropicSdkAvailable()) return reply.code(503).send({ error: 'Claude is unavailable: the gateway dependency installation needs repair' });
 
   if (name === 'ollama') {
     if (!endpoint) return reply.code(400).send({ error: 'endpoint is required for Ollama' });
@@ -2069,6 +2073,10 @@ app.get('/auth/meta/init', async (request, reply) => {
 
   const redirectUri = `${APP_BASE_URL}/api/auth/meta/callback`;
   const scopes = [
+    'pages_show_list',
+    'business_management',
+    'pages_manage_engagement',
+    'instagram_manage_comments',
     'pages_manage_posts',
     'pages_read_engagement',
     'instagram_basic',
@@ -2076,15 +2084,20 @@ app.get('/auth/meta/init', async (request, reply) => {
     'instagram_manage_insights',
   ].join(',');
 
-  const url = `https://www.facebook.com/v22.0/dialog/oauth?client_id=${cred.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code&state=${encodeURIComponent(ws)}`;
+  const state = crypto.randomBytes(32).toString('hex');
+  const db = await getDb();
+  await db.collection('oauth_states').insertOne({ _id: state, workspaceId: ws, provider: 'meta', expiresAt: new Date(Date.now() + 15 * 60 * 1000) });
+  const url = `https://www.facebook.com/v22.0/dialog/oauth?client_id=${cred.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code&state=${encodeURIComponent(state)}&auth_type=rerequest`;
   return { url };
 });
 
 // OAuth callback — Facebook redirects here after user authorises
 app.get('/auth/meta/callback', async (request, reply) => {
   const { code, state, error: oauthError } = request.query;
-  // Recover workspace from state param (browser redirects carry no X-Workspace-Id header)
-  const ws = (state && String(state).trim()) ? String(state) : request.workspaceId;
+  const db = await getDb();
+  const flow = typeof state === 'string' ? await db.collection('oauth_states').findOneAndDelete({ _id: state, provider: 'meta', expiresAt: { $gt: new Date() } }) : null;
+  if (!flow) return reply.redirect(`${APP_BASE_URL}/settings?meta_error=Invalid_or_expired_OAuth_state`);
+  const ws = flow.workspaceId;
 
   if (oauthError) {
     return reply.redirect(`${APP_BASE_URL}/settings?meta_error=${encodeURIComponent(oauthError)}`);
@@ -2123,59 +2136,17 @@ app.get('/auth/meta/callback', async (request, reply) => {
     });
     const userToken = longRes.data.access_token;
 
-    // Fetch all managed Facebook Pages
-    const pagesRes = await axios.get(`${GRAPH_API}/me/accounts`, {
-      params: { access_token: userToken, fields: 'id,name,access_token,picture' },
-    });
-
-    const pages = [];
-    const igAccounts = [];
-
-    for (const page of pagesRes.data.data || []) {
-      pages.push({
-        id: page.id,
-        name: page.name,
-        accessToken: encryptToken(page.access_token),
-        picture: page.picture?.data?.url || null,
-        selected: false,
-      });
-
-      // Check for linked Instagram Business Account
-      try {
-        const igRes = await axios.get(`${GRAPH_API}/${page.id}`, {
-          params: {
-            fields: 'instagram_business_account',
-            access_token: page.access_token,
-          },
-        });
-        if (igRes.data.instagram_business_account?.id) {
-          const igId = igRes.data.instagram_business_account.id;
-          // Fetch IG account details
-          const igProfile = await axios.get(`${GRAPH_API}/${igId}`, {
-            params: {
-              fields: 'id,username,name,profile_picture_url',
-              access_token: userToken,
-            },
-          });
-          igAccounts.push({
-            id: igId,
-            username: igProfile.data.username || igProfile.data.name,
-            name: igProfile.data.name,
-            avatar: igProfile.data.profile_picture_url || null,
-            accessToken: encryptToken(userToken),
-            pageId: page.id,
-            selected: false,
-          });
-        }
-      } catch (_) {
-        // Page has no linked Instagram account — skip
-      }
-    }
-
-    // Store discovery results for the UI to pick from
-    await setCredentials(ws, 'meta_discovery', { pages, igAccounts, discoveredAt: new Date() });
-
-    reply.redirect(`${APP_BASE_URL}/settings?meta_discovery=1`);
+    const incoming = await discoverAccounts(userToken);
+    const fb = await getCredentials(ws, 'facebook');
+    const ig = await getCredentials(ws, 'instagram');
+    const selected = { pages: fb?.pages || [], igAccounts: ig?.accounts || [] };
+    const discovery = mergeDiscovery(selected, incoming);
+    // Retain previous selections only for accounts the new authorisation still exposes.
+    discovery.pages = discovery.pages.filter(p => incoming.pages.some(n => n.id === p.id));
+    discovery.igAccounts = discovery.igAccounts.filter(a => incoming.igAccounts.some(n => n.id === a.id));
+    await setCredentials(ws, 'meta_user', { accessToken: encryptToken(userToken) });
+    await setCredentials(ws, 'meta_discovery', { ...discovery, discoveredAt: new Date() });
+    reply.redirect(`${APP_BASE_URL}/settings?meta_discovery=1&workspace=${encodeURIComponent(ws)}`);
   } catch (err) {
     app.log.error({ action: 'meta_oauth_callback', platform: 'meta', outcome: 'failure', err: err.response?.data?.error?.message || err.message });
     reply.redirect(`${APP_BASE_URL}/settings?meta_error=${encodeURIComponent(err.message)}`);
@@ -2186,8 +2157,54 @@ app.get('/auth/meta/callback', async (request, reply) => {
 app.get('/auth/meta/discovered', async (request) => {
   const ws = request.workspaceId;
   const discovery = await getCredentials(ws, 'meta_discovery');
-  if (!discovery) return { pages: [], igAccounts: [] };
-  return { pages: discovery.pages || [], igAccounts: discovery.igAccounts || [] };
+  if (!discovery) return publicDiscovery(null);
+  return publicDiscovery(discovery);
+});
+
+async function metaUserToken(ws) {
+  const user = await getCredentials(ws, 'meta_user');
+  const discovery = await getCredentials(ws, 'meta_discovery');
+  const ig = await getCredentials(ws, 'instagram');
+  return decryptToken(user?.accessToken || discovery?.igAccounts?.[0]?.accessToken || ig?.accounts?.[0]?.accessToken);
+}
+
+app.post('/auth/meta/discover-page', async (request, reply) => {
+  const ws = request.workspaceId;
+  const token = await metaUserToken(ws);
+  if (!token) return reply.code(400).send({ error: 'Reconnect with Facebook before looking up a Page' });
+  try {
+    const incoming = await discoverPage(request.body?.pageReference, token);
+    const pending = await getCredentials(ws, 'meta_discovery');
+    const fb = await getCredentials(ws, 'facebook');
+    const ig = await getCredentials(ws, 'instagram');
+    const discovery = mergeDiscovery(pending || { pages: fb?.pages || [], igAccounts: ig?.accounts || [] }, incoming);
+    await setCredentials(ws, 'meta_user', { accessToken: encryptToken(token) });
+    await setCredentials(ws, 'meta_discovery', { ...discovery, discoveredAt: new Date() });
+    return publicDiscovery(discovery);
+  } catch (err) { return reply.code(400).send({ error: err.response ? 'Meta could not authorise this Page; check Page access and reconnect' : err.message }); }
+});
+
+app.post('/auth/meta/refresh', async (request, reply) => {
+  const ws = request.workspaceId;
+  const token = await metaUserToken(ws);
+  if (!token) return reply.code(400).send({ error: 'Reconnect with Facebook to refresh available accounts' });
+  try {
+    let incoming = await discoverAccounts(token);
+    const pending = await getCredentials(ws, 'meta_discovery');
+    const fb = await getCredentials(ws, 'facebook');
+    const ig = await getCredentials(ws, 'instagram');
+    const existing = pending || { pages: fb?.pages || [], igAccounts: ig?.accounts || [] };
+    for (const page of existing.pages || []) {
+      if (incoming.pages.some(p => p.id === page.id)) continue;
+      try { incoming = mergeDiscovery(incoming, await discoverPage(page.id, token)); }
+      catch { incoming.warnings.push({ pageId: page.id, pageName: page.name, error: 'Page access could not be confirmed; reconnect to restore it' }); }
+    }
+    const discovery = mergeDiscovery(existing, incoming);
+    discovery.pages = discovery.pages.filter(p => incoming.pages.some(n => n.id === p.id));
+    discovery.igAccounts = discovery.igAccounts.filter(a => incoming.igAccounts.some(n => n.id === a.id));
+    await setCredentials(ws, 'meta_discovery', { ...discovery, discoveredAt: new Date() });
+    return publicDiscovery(discovery);
+  } catch { return reply.code(503).send({ error: 'Could not refresh Meta accounts; reconnect or retry' }); }
 });
 
 // User has chosen which pages/accounts to connect
@@ -2198,6 +2215,8 @@ app.post('/auth/meta/save', async (request, reply) => {
   const discovery = await getCredentials(ws, 'meta_discovery');
   if (!discovery) return reply.code(400).send({ error: 'No discovery data found — reconnect via OAuth' });
 
+  if (![selectedPageIds, selectedIgAccountIds].every(ids => Array.isArray(ids) && ids.every(id => typeof id === 'string'))) return reply.code(400).send({ error: 'Account IDs must be arrays of strings' });
+  if (selectedPageIds.some(id => !discovery.pages.some(p => p.id === id)) || selectedIgAccountIds.some(id => !discovery.igAccounts.some(a => a.id === id))) return reply.code(400).send({ error: 'Selected account is not in the current discovery' });
   const fbPages = (discovery.pages || []).map((p) => ({
     ...p,
     selected: selectedPageIds.includes(p.id),
@@ -2222,6 +2241,8 @@ app.delete('/credentials/meta', async (request) => {
   await deleteCredentials(ws, 'facebook');
   await deleteCredentials(ws, 'instagram');
   await deleteCredentials(ws, 'meta_discovery');
+  await deleteCredentials(ws, 'meta_user');
+  _tokenExpiryCache = null;
   return { success: true };
 });
 

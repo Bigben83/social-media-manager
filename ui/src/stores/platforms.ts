@@ -27,8 +27,10 @@ export interface MetaIgAccount {
 }
 
 export interface MetaDiscovery {
-  pages: MetaPage[]
-  igAccounts: MetaIgAccount[]
+  pending?: boolean
+  warnings?: { pageId?: string; pageName?: string; error: string }[]
+  pages: (MetaPage & { selected?: boolean })[]
+  igAccounts: (MetaIgAccount & { selected?: boolean })[]
 }
 
 export interface PinterestBoard {
@@ -333,10 +335,30 @@ export const usePlatformsStore = defineStore('platforms', () => {
   async function fetchMetaDiscovery() {
     try {
       const res = await axios.get('/api/auth/meta/discovered')
-      metaDiscovery.value = res.data
+      metaDiscovery.value = res.data.pending ? res.data : null
     } catch (err) {
-      console.error('Meta discovery fetch error:', err)
+      metaError.value = 'Could not load available Meta accounts'
     }
+  }
+
+  async function discoverMetaPage(pageReference: string) {
+    return updateMetaDiscovery('/api/auth/meta/discover-page', { pageReference })
+  }
+
+  async function refreshMetaDiscovery() {
+    return updateMetaDiscovery('/api/auth/meta/refresh', {})
+  }
+
+  async function updateMetaDiscovery(url: string, payload: object): Promise<boolean> {
+    metaLoading.value = true
+    metaError.value = null
+    try {
+      metaDiscovery.value = (await axios.post(url, payload)).data
+      return true
+    } catch (err: any) {
+      metaError.value = err.response?.data?.error || 'Could not discover Meta accounts'
+      return false
+    } finally { metaLoading.value = false }
   }
 
   async function saveMetaSelection(selectedPageIds: string[], selectedIgAccountIds: string[]) {
@@ -345,9 +367,11 @@ export const usePlatformsStore = defineStore('platforms', () => {
     try {
       await axios.post('/api/auth/meta/save', { selectedPageIds, selectedIgAccountIds })
       metaDiscovery.value = null
-      await fetchStatuses()
+      await Promise.all([fetchStatuses(), fetchMetaConnections()])
+      return true
     } catch (err: any) {
       metaError.value = err.response?.data?.error || 'Failed to save selection'
+      return false
     } finally {
       metaLoading.value = false
     }
@@ -396,7 +420,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
     metaCredentials, metaDiscovery, metaLoading, metaError,
     connectedPages, connectedIgAccounts, allFbPages, allIgAccounts,
     fetchMetaConnections, fetchMetaCredentials, saveMetaApp, startMetaOAuth,
-    fetchMetaDiscovery, saveMetaSelection, disconnectMeta,
+    fetchMetaDiscovery, discoverMetaPage, refreshMetaDiscovery, saveMetaSelection, disconnectMeta,
     saveFbPageSelection, saveIgAccountSelection,
     tokenExpiry, expiringAccounts, hasExpiryWarning,
     fetchTokenExpiry, dismissTokenWarning, refreshMetaTokens,

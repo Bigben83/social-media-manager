@@ -79,6 +79,7 @@ export interface Competitor {
   websiteUrl: string
   socialUrls: Partial<Record<string, string>>
   scrapedContent: { source: string; url: string; text: string; scrapedAt: string }[]
+  quantitativeProfile?: { pricingTiers: { name: string; price: string; highlights: string[] }[]; keyFeatures: string[]; techStack: string[]; targetCustomer: string; jobPostings: number | null; growthSignals: string[]; productCount: number | null }
   aiSummary: string
   aiAnalysis?: AiAnalysis
   keywords: CompetitorKeyword[]

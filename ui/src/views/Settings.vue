@@ -114,7 +114,7 @@
                 :key="account.id"
                 class="text-xs text-yellow-300"
               >
-                {{ $tc('settings.meta.expiryWarningBody', account.daysLeft ?? 0, { username: '@' + account.username, days: account.daysLeft }) }}
+                {{ $t('settings.meta.expiryWarningBody', { username: '@' + account.username, days: account.daysLeft }, account.daysLeft ?? 0) }}
               </p>
               <p class="text-xs text-gray-500">{{ $t('settings.meta.expiryAutoNote') }}</p>
               <div class="flex gap-2 pt-1">
@@ -349,6 +349,17 @@
 
       </div>
 
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-3">
+        <p class="font-semibold">{{ $t('settings.meta.findPageTitle') }}</p>
+        <p class="text-xs text-gray-400">{{ $t('settings.meta.findPageHint') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <input v-model="pageReference" type="text" :placeholder="$t('settings.meta.pageReferencePlaceholder')" class="flex-1 min-w-48 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm" />
+          <button @click="findMetaPage" :disabled="!pageReference.trim() || platformsStore.metaLoading" class="px-4 py-2 bg-blue-600 rounded-lg disabled:opacity-40 text-sm">{{ $t('settings.meta.findPage') }}</button>
+          <button @click="refreshDiscovery" :disabled="platformsStore.metaLoading" class="px-4 py-2 bg-gray-700 rounded-lg disabled:opacity-40 text-sm">{{ $t('settings.meta.refreshAccounts') }}</button>
+        </div>
+        <p v-if="platformsStore.metaError" role="alert" class="text-sm text-red-400">{{ platformsStore.metaError }}</p>
+      </div>
+
       <!-- ═══════════════════════════════════════════════════════════════════
            PAGE/ACCOUNT PICKER — shown after OAuth callback
       ════════════════════════════════════════════════════════════════════ -->
@@ -362,7 +373,7 @@
         </div>
 
         <div class="p-5 space-y-5">
-
+          <p v-for="(warning, index) in discovery.warnings" :key="index" class="text-sm text-yellow-400">{{ warning.pageName || warning.pageId }}: {{ warning.error }}</p>
           <!-- Facebook Pages -->
           <div>
             <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{{ $t('settings.meta.pagesHeading') }}</p>
@@ -429,7 +440,7 @@
             v-for="(meta, key) in otherPlatforms"
             :key="key"
             class="bg-gray-900 border rounded-xl p-4 transition-colors"
-            :class="isConnected(key) ? 'border-gray-700' : 'border-gray-800'"
+            :class="isConnected(String(key)) ? 'border-gray-700' : 'border-gray-800'"
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
@@ -441,24 +452,24 @@
                 </span>
                 <div>
                   <p class="font-medium text-sm">{{ $t(`platforms.${key}`) }}</p>
-                  <p v-if="getStatus(key)?.username" class="text-xs text-gray-400">
-                    @{{ getStatus(key)?.username }}
+                  <p v-if="getStatus(String(key))?.username" class="text-xs text-gray-400">
+                    @{{ getStatus(String(key))?.username }}
                   </p>
-                  <p v-else-if="getStatus(key)?.error" class="text-xs text-red-400">
-                    {{ getStatus(key)?.error }}
+                  <p v-else-if="getStatus(String(key))?.error" class="text-xs text-red-400">
+                    {{ getStatus(String(key))?.error }}
                   </p>
                   <p v-else class="text-xs text-gray-600">{{ $t('settings.notConnected') }}</p>
                 </div>
               </div>
               <div class="flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full" :class="isConnected(key) ? 'bg-green-400' : 'bg-gray-600'"></span>
-                <span class="text-xs" :class="isConnected(key) ? 'text-green-400' : 'text-gray-600'">
-                  {{ isConnected(key) ? $t('settings.connected') : $t('settings.notConnected') }}
+                <span class="w-2 h-2 rounded-full" :class="isConnected(String(key)) ? 'bg-green-400' : 'bg-gray-600'"></span>
+                <span class="text-xs" :class="isConnected(String(key)) ? 'text-green-400' : 'text-gray-600'">
+                  {{ isConnected(String(key)) ? $t('settings.connected') : $t('settings.notConnected') }}
                 </span>
               </div>
             </div>
 
-            <div v-if="!isConnected(key)" class="mt-3 bg-gray-800 rounded-lg p-3 text-xs text-gray-400 font-mono">
+            <div v-if="!isConnected(String(key))" class="mt-3 bg-gray-800 rounded-lg p-3 text-xs text-gray-400 font-mono">
               <span v-if="key === 'twitter'">TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET</span>
               <span v-else-if="key === 'mastodon'">MASTODON_INSTANCE_URL, MASTODON_ACCESS_TOKEN</span>
               <span v-else-if="key === 'bluesky'">BLUESKY_IDENTIFIER, BLUESKY_APP_PASSWORD</span>
@@ -1234,8 +1245,6 @@ const fbConnected = computed(() => fbStatus.value?.connected ?? false)
 const igConnected = computed(() => igStatus.value?.connected ?? false)
 
 // Pull connected pages/accounts from the shared store
-const fbPages = computed(() => platformsStore.connectedPages)
-const igAccounts = computed(() => platformsStore.connectedIgAccounts)
 
 async function loadMetaConnections() {
   await platformsStore.fetchMetaConnections()
@@ -1243,8 +1252,19 @@ async function loadMetaConnections() {
 
 // ─── OAuth discovery ─────────────────────────────────────────────────────────
 
-const discovery = computed(() => platformsStore.metaDiscovery || { pages: [], igAccounts: [] })
-const showDiscovery = computed(() => !!(platformsStore.metaDiscovery && (discovery.value.pages.length > 0 || discovery.value.igAccounts.length > 0)))
+const discovery = computed(() => platformsStore.metaDiscovery || { pages: [], igAccounts: [], warnings: [] })
+const showDiscovery = computed(() => !!platformsStore.metaDiscovery)
+const pageReference = ref('')
+function seedDiscoverySelection() {
+  selectedPageIds.value = discovery.value.pages.filter(p => p.selected).map(p => p.id)
+  selectedIgAccountIds.value = discovery.value.igAccounts.filter(a => a.selected).map(a => a.id)
+}
+async function findMetaPage() {
+  if (await platformsStore.discoverMetaPage(pageReference.value)) { pageReference.value = ''; seedDiscoverySelection() }
+}
+async function refreshDiscovery() {
+  if (await platformsStore.refreshMetaDiscovery()) seedDiscoverySelection()
+}
 
 const selectedPageIds = ref<string[]>([])
 const selectedIgAccountIds = ref<string[]>([])
@@ -1257,10 +1277,11 @@ function pageNameForId(pageId: string): string {
 async function confirmSelection() {
   selectionError.value = ''
   if (!selectedPageIds.value.length && !selectedIgAccountIds.value.length) {
-    selectionError.value = platformsStore.metaError || 'Select at least one Page or Instagram account.'
+    selectionError.value = t('settings.meta.nothingSelected')
     return
   }
-  await platformsStore.saveMetaSelection(selectedPageIds.value, selectedIgAccountIds.value)
+  const saved = await platformsStore.saveMetaSelection(selectedPageIds.value, selectedIgAccountIds.value)
+  if (!saved) { selectionError.value = platformsStore.metaError || t('settings.meta.nothingSelected'); return }
   await loadMetaConnections()
   selectedPageIds.value = []
   selectedIgAccountIds.value = []
@@ -1534,10 +1555,7 @@ const allConnectedAccounts = computed((): ProfileAccount[] => {
   return accounts
 })
 
-function profileFilled(key: string): boolean {
-  const p = editingProfiles.value[key]
-  return !!p && !!(p.businessName || p.description || p.industry)
-}
+
 
 async function runFiveForces(key: string) {
   fiveForcesRunning.value = key
@@ -1597,9 +1615,10 @@ async function saveProfile(key: string) {
 // ─── On mount ────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  // Check for OAuth callback query params
+  // Restore pending discovery on refreshes as well as OAuth redirects.
+  await platformsStore.fetchMetaDiscovery()
+  seedDiscoverySelection()
   if (route.query.meta_discovery) {
-    await platformsStore.fetchMetaDiscovery()
     window.history.replaceState({}, '', '/settings')
   }
   if (route.query.meta_error) {

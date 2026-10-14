@@ -485,6 +485,11 @@ export default {
       disconnect: 'Tümünü Bağlantıyı Kes',
       disconnectConfirm: 'Bu işlem tüm Facebook Sayfaları ve Instagram hesaplarının bağlantısını keser. Devam edilsin mi?',
 
+      findPageTitle: 'Facebook sayfasi eksik mi?',
+      findPageHint: 'Yetkili bir sayfayi URL veya kimlikle bulun. Erisim degistiyse Facebook ile yeniden baglanin.',
+      pageReferencePlaceholder: 'https://www.facebook.com/yourpage',
+      findPage: 'Sayfayi Bul',
+      refreshAccounts: 'Hesaplari yenile',
       discoveryTitle: 'Bağlanacak Sayfa ve Hesapları Seç',
       discoverySubtitle: 'Aşağıdan istediğin Facebook Sayfası ve Instagram hesabı kombinasyonunu seç.',
       pagesHeading: 'Facebook Sayfaları',
@@ -565,7 +570,13 @@ export default {
     },
   },
 
+  globalSettings: {
+    title: 'Genel Ayarlar',
+    subtitle: 'Ortak uygulama bilgilerini ve yapay zeka saglayicilarini yonetin.',
+    appCredentialsNote: 'Bu bilgiler tum calisma alanlarinda ortaktir.',
+  },
   ai: {
+    providerUnavailable: 'Bu saglayici kullanilamiyor. Sunucu bagimliliklari onarilmalidir.',
     sectionTitle: 'Yapay Zeka Entegrasyonu',
     sectionSubtitle: 'Gönderi içeriği oluşturmak için yerel bir Ollama örneği bağla.',
     endpointLabel: 'Ollama Adresi',

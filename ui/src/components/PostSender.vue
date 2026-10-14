@@ -43,9 +43,9 @@ const sendMessage = async () => {
 
 onMounted(() => {
   socket.on('message', (message: string) => {
-    message = JSON.parse(message);
-    twitter.value = message.twitter;
-    linkedin.value = message.linkedin;
+    const parsed = JSON.parse(message) as { twitter: string; linkedin: string };
+    twitter.value = parsed.twitter;
+    linkedin.value = parsed.linkedin;
   });
 });
 

@@ -491,12 +491,12 @@
                     :class="bar.avgEngagement === maxByDayAvg && bar.avgEngagement > 0 ? 'fill-green-400' : 'fill-blue-500 opacity-70'"
                     rx="2"
                   >
-                    <title>{{ ($t('analytics.dayNamesShort') as string[])[bar.day] }} — avg {{ bar.avgEngagement }}</title>
+                    <title>{{ ($tm('analytics.dayNamesShort') as string[])[bar.day] }} — avg {{ bar.avgEngagement }}</title>
                   </rect>
                 </g>
               </svg>
               <div class="flex justify-between mt-1 text-xs text-gray-600 px-1">
-                <span v-for="name in ($t('analytics.dayNamesShort') as string[])" :key="name">{{ name }}</span>
+                <span v-for="name in ($tm('analytics.dayNamesShort') as string[])" :key="name">{{ name }}</span>
               </div>
             </div>
 
@@ -522,14 +522,14 @@
                 <!-- Day rows -->
                 <div v-for="(row, d) in heatmapGrid" :key="d" class="flex items-center gap-px mb-px">
                   <span class="text-xs text-gray-600 shrink-0 text-right pr-1" style="width: 28px">
-                    {{ ($t('analytics.dayNamesShort') as string[])[d] }}
+                    {{ ($tm('analytics.dayNamesShort') as string[])[d] }}
                   </span>
                   <div
                     v-for="cell in row"
                     :key="cell.hour"
                     class="shrink-0 rounded-sm"
                     :style="{ width: '18px', height: '14px', background: heatmapCellBg(cell.avg) }"
-                    :title="`${($t('analytics.dayNamesShort') as string[])[d]} ${cell.hour}:00 — avg ${cell.avg}`"
+                    :title="`${($tm('analytics.dayNamesShort') as string[])[d]} ${cell.hour}:00 — avg ${cell.avg}`"
                   ></div>
                 </div>
               </div>
@@ -539,7 +539,7 @@
           <!-- Top Performing Posts -->
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
             <h3 class="text-sm font-semibold text-white mb-4">{{ $t('analytics.topPostsTitle') }}</h3>
-            <div v-if="insights.topPosts.length === 0" class="text-sm text-gray-600">{{ $t('analytics.noTopPosts') }}</div>
+            <div v-if="(insights.topPosts || []).length === 0" class="text-sm text-gray-600">{{ $t('analytics.noTopPosts') }}</div>
             <div v-else class="space-y-0">
               <div
                 v-for="post in insights.topPosts"

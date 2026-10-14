@@ -218,6 +218,7 @@
             </div>
           </div>
           <div class="p-5 space-y-4">
+            <p v-if="getProvider(providerName)?.available === false" role="alert" class="text-sm text-red-400">{{ $t('ai.providerUnavailable') }}</p>
             <div v-if="getProvider(providerName)?.configured && !providerForms[providerName].editing">
               <div class="flex items-center justify-between text-sm">
                 <div class="space-y-1">
@@ -227,9 +228,9 @@
                 </div>
                 <div class="flex gap-2">
                   <button @click="providerForms[providerName].editing = true" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-gray-400 hover:text-gray-200 transition-colors">Edit</button>
-                  <button v-if="aiStore.config.provider !== providerName" @click="setActiveProvider(providerName)" :disabled="aiStore.saving"
+                  <button v-if="aiStore.config.provider !== providerName" @click="setActiveProvider(providerName)" :disabled="aiStore.saving || getProvider(providerName)?.available === false"
                     class="text-xs px-2.5 py-1 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-md text-white transition-colors">
-                    {{ $t('ai.setAsActive') }}
+                    {{ $t('ai.setActive') }}
                   </button>
                   <button @click="disconnectCloudProvider(providerName)" class="text-xs px-2.5 py-1 bg-red-900/40 hover:bg-red-900/60 border border-red-800 rounded-md text-red-400 hover:text-red-300 transition-colors">{{ $t('ai.disconnect') }}</button>
                 </div>
