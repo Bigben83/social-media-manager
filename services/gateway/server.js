@@ -21,6 +21,7 @@ const { externalGet } = require('./utils/externalFetch');
 const { registerAnalytics, destinationMatch } = require('./analytics');
 const { registerBackgroundJobs } = require('./jobs');
 const { detectUploadType } = require('./media');
+const { campaignContextBlock, MAX_CAMPAIGN_CONTEXT } = require('./calendarContext');
 const { repairScopedData } = require('./migrations');
 const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery } = require('./meta');
 
@@ -1666,10 +1667,10 @@ function monthNameFor(calMonth) {
 
 const CALENDAR_SYSTEM = 'You are a social media content strategist. Return ONLY a valid JSON object — no markdown, no explanation, no code fences.';
 
-async function generateCalendarBrief(pconf, { brandContext, monthName, platforms }) {
+async function generateCalendarBrief(pconf, { brandContext, campaignContext = '', monthName, platforms }) {
   const platformNoteKeys = platforms.map((p) => `"${p}": "<one-sentence strategy>"`).join(', ');
   const prompt = `${brandContext ? brandContext + '\n\n' : ''}Create a brief for the ${monthName} content calendar. Platforms: ${platforms.join(', ')}.
-
+${campaignContextBlock(campaignContext)}
 Return this exact JSON:
 {
   "theme": "<one compelling sentence that defines the month's narrative — the red thread across all content>",
@@ -1694,7 +1695,7 @@ Return ONLY valid JSON.`;
   return brief;
 }
 
-async function generateCalendarPostsForPlatform(pconf, { brandContext, monthName, platform, brief, postsPerWeek }) {
+async function generateCalendarPostsForPlatform(pconf, { brandContext, campaignContext = '', monthName, platform, brief, postsPerWeek }) {
   const total = postsPerWeek * 4;
   const hint = CALENDAR_PLATFORM_HINTS[platform] || 'platform-native tone and length.';
   const prompt = `${brandContext ? brandContext + '\n\n' : ''}Month: ${monthName}. Platform: ${platform}.
@@ -1706,7 +1707,7 @@ Tone: ${brief.toneGuidance || ''}
 ${brief.platformNotes?.[platform] ? `Platform strategy: ${brief.platformNotes[platform]}` : ''}
 
 Platform conventions for ${platform}: ${hint}
-
+${campaignContextBlock(campaignContext)}
 Write exactly ${total} ready-to-publish ${platform} posts: ${postsPerWeek} per week for weeks 1–4.
 Mix post types across educational, promotional, engagement and storytelling.
 Spread posts across different days; use the platform's peak times for "suggestedTime".
@@ -1745,28 +1746,28 @@ Return ONLY this JSON object:
 }
 
 backgroundHandlers.content_brief = async (job, { checkpoint, setProgress, saveCheckpoint }) => {
-  const { brandContext, monthName, activePlatforms, calMonth } = job.payload;
+  const { brandContext, campaignContext = '', monthName, activePlatforms, calMonth } = job.payload;
   await setProgress({ step: 'brief', completed: 0, total: 1 });
-  const brief = checkpoint.brief || await generateCalendarBrief(await getActiveProviderConfig(job.workspaceId), { brandContext, monthName, platforms: activePlatforms });
+  const brief = checkpoint.brief || await generateCalendarBrief(await getActiveProviderConfig(job.workspaceId), { brandContext, campaignContext, monthName, platforms: activePlatforms });
   await saveCheckpoint({ brief });
   await setProgress({ completed: 1 });
-  return { success: true, brief, monthName, month: calMonth };
+  return { success: true, brief, monthName, month: calMonth, campaignContext };
 };
 backgroundHandlers.content_calendar = async (job, { checkpoint, setProgress, saveCheckpoint, assertWorkspace }) => {
-  const { brandContext, monthName, activePlatforms, calMonth, accountKey, postsPerWeek, approvedBrief } = job.payload;
+  const { brandContext, campaignContext = '', monthName, activePlatforms, calMonth, accountKey, postsPerWeek, approvedBrief } = job.payload;
   const pconf = await getActiveProviderConfig(job.workspaceId);
   const total = activePlatforms.length + 1;
   let brief = checkpoint.brief || approvedBrief;
-  if (!brief) { await setProgress({ step: 'brief', completed: 0, total }); brief = await generateCalendarBrief(pconf, { brandContext, monthName, platforms: activePlatforms }); }
+  if (!brief) { await setProgress({ step: 'brief', completed: 0, total }); brief = await generateCalendarBrief(pconf, { brandContext, campaignContext, monthName, platforms: activePlatforms }); }
   await saveCheckpoint({ brief });
   const byPlatform = { ...checkpoint.byPlatform };
   for (const platform of activePlatforms) {
     await setProgress({ step: platform, completed: Object.keys(byPlatform).length + 1, total });
-    if (!byPlatform[platform]) { byPlatform[platform] = await generateCalendarPostsForPlatform(pconf, { brandContext, monthName, platform, brief, postsPerWeek }); await saveCheckpoint({ byPlatform }); }
+    if (!byPlatform[platform]) { byPlatform[platform] = await generateCalendarPostsForPlatform(pconf, { brandContext, campaignContext, monthName, platform, brief, postsPerWeek }); await saveCheckpoint({ byPlatform }); }
   }
   const calendarId = checkpoint.calendarId || new ObjectId().toString();
   await saveCheckpoint({ calendarId });
-  const doc = { accountKey: accountKey || null, month: calMonth, monthName, platforms: activePlatforms, postsPerWeek, brief, posts: activePlatforms.flatMap(p => byPlatform[p]), workspaceId: job.workspaceId, createdAt: job.createdAt };
+  const doc = { accountKey: accountKey || null, campaignContext, month: calMonth, monthName, platforms: activePlatforms, postsPerWeek, brief, posts: activePlatforms.flatMap(p => byPlatform[p]), workspaceId: job.workspaceId, createdAt: job.createdAt };
   await assertWorkspace();
   await (await getDb()).collection('content_calendars').updateOne({ _id: new ObjectId(calendarId), workspaceId: job.workspaceId }, { $setOnInsert: doc }, { upsert: true });
   await setProgress({ step: 'done', completed: total, total });
@@ -1775,12 +1776,13 @@ backgroundHandlers.content_calendar = async (job, { checkpoint, setProgress, sav
 for (const [route, type] of [['/ai/content-brief', 'content_brief'], ['/ai/content-calendar', 'content_calendar']]) {
   app.post(route, async (request, reply) => {
     const ws = request.workspaceId;
-    const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw } = request.body || {};
+    const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw, campaignContext = '' } = request.body || {};
+    if (typeof campaignContext !== 'string' || campaignContext.length > MAX_CAMPAIGN_CONTEXT) return reply.code(400).send({ error: 'Campaign context must be text of at most 20,000 characters' });
     if (!Array.isArray(platforms) || !platforms.length || platforms.length > 7 || platforms.some(p => typeof p !== 'string' || !PLATFORM_SERVICES[p])) return reply.code(400).send({ error: 'Select supported platforms' });
     if (month !== undefined && (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month))) return reply.code(400).send({ error: 'Invalid month' });
     if (approvedBrief && (typeof approvedBrief.theme !== 'string' || !Array.isArray(approvedBrief.pillars))) return reply.code(400).send({ error: 'Invalid approved brief' });
     const calMonth = month || new Date().toISOString().slice(0, 7);
-    const job = await aiJobs.submit(ws, type, { accountKey, activePlatforms: [...new Set(platforms)], calMonth, monthName: monthNameFor(calMonth), postsPerWeek: Math.min(7, Math.max(1, parseInt(rawPpw) || 3)), approvedBrief: approvedBrief || null, brandContext: calendarBrandContext(await loadCalendarProfile(await getDb(), ws, accountKey)) });
+    const job = await aiJobs.submit(ws, type, { accountKey, campaignContext: campaignContext.trim(), activePlatforms: [...new Set(platforms)], calMonth, monthName: monthNameFor(calMonth), postsPerWeek: Math.min(7, Math.max(1, parseInt(rawPpw) || 3)), approvedBrief: approvedBrief || null, brandContext: calendarBrandContext(await loadCalendarProfile(await getDb(), ws, accountKey)) });
     return reply.code(202).send(publicAiJob(job));
   });
 }

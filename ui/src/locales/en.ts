@@ -108,6 +108,9 @@ export default {
   },
 
   calendarPlan: {
+    contextLabel: "Campaign context and source posts (optional)",
+    contextPlaceholder: "Next month, highlight the XXXX feature.\n\nCreate an introduction series. Use the following text for the first eight posts:\n1. …\n2. …",
+    contextHint: "Add goals, feature details, must-use messages, or numbered source posts. These guide both the brief and every platform’s posts.",
     title: 'Content Plan',
     subtitle: 'AI-generated monthly content calendar with narrative brief and platform-native posts.',
     month: 'Month',

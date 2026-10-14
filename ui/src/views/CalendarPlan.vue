@@ -10,6 +10,7 @@
 
       <!-- Configuration card -->
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
+        <fieldset :disabled="loading || briefLoading" class="min-w-0">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <!-- Month -->
           <div>
@@ -48,8 +49,26 @@
               >+</button>
             </div>
             <p class="text-[11px] text-gray-600 mt-1 text-center">
-              {{ $t('calendarPlan.postsPerWeekHint', { total: postsPerWeek * 4, grand: Math.min(selectedPlatforms.length * postsPerWeek * 4, 60) }) }}
+              {{ $t('calendarPlan.postsPerWeekHint', { total: postsPerWeek * 4, grand: selectedPlatforms.length * postsPerWeek * 4 }) }}
             </p>
+          </div>
+        </div>
+
+        <div class="mb-5">
+          <label for="campaign-context" class="block text-xs text-gray-400 mb-1.5">{{ $t('calendarPlan.contextLabel') }}</label>
+          <textarea
+            id="campaign-context"
+            v-model="campaignContext"
+            rows="6"
+            maxlength="20000"
+            :disabled="loading || briefLoading"
+            :placeholder="$t('calendarPlan.contextPlaceholder')"
+            aria-describedby="campaign-context-hint"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500 disabled:opacity-60 resize-y"
+          ></textarea>
+          <div class="flex justify-between gap-4 mt-1">
+            <p id="campaign-context-hint" class="text-xs text-gray-500">{{ $t('calendarPlan.contextHint') }}</p>
+            <span class="text-xs text-gray-500 whitespace-nowrap">{{ campaignContext.length.toLocaleString() }} / 20,000</span>
           </div>
         </div>
 
@@ -92,6 +111,7 @@
             </button>
           </div>
         </div>
+        </fieldset>
       </div>
 
       <!-- Brief preview (approval step) -->
@@ -105,7 +125,7 @@
           <div class="flex gap-2">
             <button
               @click="generateBrief"
-              :disabled="briefLoading"
+              :disabled="briefLoading || loading"
               class="flex items-center gap-1.5 text-xs px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-gray-200 transition-colors"
             >
               <i class="fa-solid fa-rotate-right text-[10px]" :class="{ 'animate-spin': briefLoading }"></i>
@@ -272,7 +292,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
@@ -298,6 +318,7 @@ const selectedMonth   = ref(new Date().toISOString().slice(0, 7))
 const selectedAccount = ref('')
 const selectedPlatforms = ref<string[]>(['facebook', 'instagram'])
 const postsPerWeek = ref(3)
+const campaignContext = ref('')
 const loading    = ref(false)
 const savingAll  = ref(false)
 const error      = ref('')
@@ -306,6 +327,12 @@ const calendar   = ref<any>(null)
 const briefLoading       = ref(false)
 const pendingBrief       = ref<any>(null)
 const pendingBriefMonthName = ref('')
+
+// A reviewed brief belongs to these exact campaign inputs.
+watch([campaignContext, selectedMonth, selectedAccount, () => selectedPlatforms.value.join(',')], () => {
+  pendingBrief.value = null
+  pendingBriefMonthName.value = ''
+})
 
 interface ProfileAccount { key: string; label: string }
 const connectedAccounts = computed((): ProfileAccount[] => {
@@ -383,6 +410,7 @@ async function generateBrief() {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
+      campaignContext: campaignContext.value.trim(),
     })
     pendingBrief.value = result.brief
     pendingBriefMonthName.value = result.monthName
@@ -404,6 +432,7 @@ async function approveAndGenerate() {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
+      campaignContext: campaignContext.value.trim(),
       approvedBrief: pendingBrief.value,
       postsPerWeek: postsPerWeek.value,
     })
@@ -427,6 +456,7 @@ async function generate() {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
       month: selectedMonth.value,
+      campaignContext: campaignContext.value.trim(),
       postsPerWeek: postsPerWeek.value,
     })
   } catch (err: any) {

@@ -108,6 +108,9 @@ export default {
   },
 
   calendarPlan: {
+    contextLabel: "Kampanya bağlamı ve kaynak gönderiler (isteğe bağlı)",
+    contextPlaceholder: "Gelecek ay XXXX özelliğini öne çıkarın.\n\nBir tanıtım serisi oluşturun. İlk sekiz gönderi için şu metni kullanın:\n1. …\n2. …",
+    contextHint: "Hedefler, özellik ayrıntıları, gerekli mesajlar veya numaralı kaynak gönderiler ekleyin. Bunlar hem özeti hem de her platformun gönderilerini yönlendirir.",
     title: 'İçerik Planı',
     subtitle: 'YZ tarafından oluşturulan aylık içerik takvimi: anlatı özeti ve platforma özel gönderiler.',
     month: 'Ay',
