@@ -58,7 +58,7 @@ before(async()=>{
     assert.equal(endpoint,'http://local-ollama:11434');assert.equal(JSON.stringify(payload).includes('never-send-to-model'),false);
     if(payload.messages.at(-1).role==='tool')return assistant('The tool completed.');
     const content=payload.messages.at(-1).content;
-    return /publish/i.test(content)?assistant('',[toolCall('prepare_post',{workspaceId:'one',content:'Exact local post',destinations:[{platform:'facebook',accountId:'page-one'}]})]):assistant('',[toolCall('create_drafts',{workspaceId:'one',requestId:'local-draft',drafts:[{content:'Local introduction'}]})]);
+    return /publish/i.test(content)?assistant('',[toolCall('prepare_post',{workspaceId:'one',content:'Exact local post',destinations:[{platform:'facebook',accountId:'page-one'}]})]):assistant('',[toolCall('create_drafts',{workspaceId:'one',requestId:'local-draft',drafts:JSON.stringify([{content:'Local introduction',destinations:'[]'}])})]);
   },callGateway:async(...args)=>{deliveries.push(args);return {success:true,results:[{success:true,platform:'facebook'}]};}});
   httpServer.on('request',service.app);
   const status=await fetch(base+'/connector/local/status',{headers:{Cookie:'smm-connector='+ownerToken}});assert.equal(status.status,200);const data=await status.json();csrf=data.csrf;cookies='smm-connector='+ownerToken+'; '+status.headers.getSetCookie()[0].split(';')[0];
