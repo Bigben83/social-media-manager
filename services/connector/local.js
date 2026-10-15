@@ -21,6 +21,17 @@ function localError(err) {
   if(err.response?.data?.error)return String(err.response.data.error).slice(0,500);
   return String(err.message||'Local assistant failed').slice(0,500);
 }
+// Some local models JSON-encode nested arrays/objects inside otherwise valid arguments.
+// Decode only fields declared as structured values; the MCP schemas still validate every value.
+function normalizeArguments(schema,value,depth=0) {
+  if(!schema||depth>12)return value;
+  if(['object','array'].includes(schema.type)&&typeof value==='string'){
+    try{const parsed=JSON.parse(value);if(schema.type==='array'?Array.isArray(parsed):parsed&&typeof parsed==='object'&&!Array.isArray(parsed))value=parsed;}catch{/* Preserve malformed input for the MCP validator. */}
+  }
+  if(schema.type==='array'&&Array.isArray(value))return value.map(item=>normalizeArguments(schema.items,item,depth+1));
+  if(schema.type==='object'&&value&&typeof value==='object'&&!Array.isArray(value))return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,normalizeArguments(schema.properties?.[key]||(typeof schema.additionalProperties==='object'?schema.additionalProperties:null),item,depth+1)]));
+  return value;
+}
 async function modelRequest(endpoint, payload, signal) {
   try{return (await axios.post(endpoint.replace(/\/$/,'')+'/api/chat',{...payload,think:false},{timeout:120000,signal,maxContentLength:2*1024*1024})).data;}
   catch(err){
@@ -41,6 +52,7 @@ async function runAssistantTurn({client,session,requestModel,checkpoint,checkAcc
   const listed=(await client.listTools()).tools.filter(tool=>tool.name!=='confirm_post');
   const tools=listed.map(tool=>({type:'function',function:{name:tool.name,description:tool.description,parameters:tool.inputSchema}}));
   const allowed=new Set(listed.map(tool=>tool.name));
+  const schemas=new Map(listed.map(tool=>[tool.name,tool.inputSchema]));
   let calls=0;
   for(let step=0;step<LIMITS.steps;step++){
     await checkAccess();
@@ -60,13 +72,13 @@ async function runAssistantTurn({client,session,requestModel,checkpoint,checkAcc
       let result;
       try{
         if(!allowed.has(name))throw new Error(name==='confirm_post'?'Publishing requires the user to click the confirmation button.':'Tool is unavailable');
-        const args=typeof call.arguments==='string'?JSON.parse(call.arguments):call.arguments;
+        const args=normalizeArguments(schemas.get(name),typeof call.arguments==='string'?JSON.parse(call.arguments):call.arguments);
         if(!args||typeof args!=='object'||Array.isArray(args))throw new Error('Invalid tool arguments');
         if(name!=='list_workspaces'&&args.workspaceId!==session.workspaceId)throw new Error('Use only the selected workspace');
         await checkAccess();
         result=await client.callTool({name,arguments:args});
       }catch(err){result={isError:true,content:[{type:'text',text:localError(err)}]};}
-      const encoded=JSON.stringify(result);
+      const encoded=JSON.stringify(result.isError?{isError:true,error:result.content?.[0]?.text||'Tool failed'}:readResult(result));
       session.messages.push({role:'tool',tool_name:String(name),content:encoded.length<=LIMITS.toolCharacters?encoded:JSON.stringify({isError:true,error:'Tool result too large; request fewer items.'})});
       session.events.push({tool:String(name),success:!result.isError,...(result.isError&&{error:String(result.content?.[0]?.text||'Tool failed').slice(0,1000)}),at:new Date().toISOString()});
       session.events=session.events.slice(-60);
@@ -189,4 +201,4 @@ async function mountLocalAssistant(app,{db,provider,adminAccess,callGateway,call
     });
   });
 }
-module.exports={mountLocalAssistant,runAssistantTurn,readResult};
+module.exports={mountLocalAssistant,runAssistantTurn,readResult,normalizeArguments};

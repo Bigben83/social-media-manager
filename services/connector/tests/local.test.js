@@ -1,7 +1,7 @@
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const {createServer}=require('node:http');
-const {runAssistantTurn}=require('../local');
+const {runAssistantTurn,normalizeArguments}=require('../local');
 const {createApp}=require('../index');
 const {passwordHash,hash}=require('../auth');
 const fakeDb=require('../../gateway/tests/fakeDb');
@@ -9,6 +9,14 @@ const toolCall=(name,args)=>({function:{name,arguments:args}});
 const assistant=(content='',calls=[])=>({message:{role:'assistant',content,...(calls.length&&{tool_calls:calls})}});
 const result=data=>({content:[{type:'text',text:JSON.stringify(data)}],structuredContent:data});
 const session=()=>({workspaceId:'one',model:'test-llama',status:'running',messages:[{role:'user',content:'Please help'}],events:[]});
+
+test('local structured arguments decode JSON strings without changing text or accepting invalid shapes',()=>{
+  const schema={type:'object',properties:{drafts:{type:'array',items:{type:'object',properties:{content:{type:'string'},destinations:{type:'array',items:{type:'object'}}}}}}};
+  const args=normalizeArguments(schema,{drafts:JSON.stringify([{content:'{"preserve":"this text"}',destinations:'[]'}])});
+  assert.deepEqual(args,{drafts:[{content:'{"preserve":"this text"}',destinations:[]}]});
+  assert.deepEqual(normalizeArguments(schema,{drafts:'{"bad":"shape"}'}),{drafts:'{"bad":"shape"}'});
+  assert.deepEqual(normalizeArguments(schema,{drafts:'invalid JSON'}),{drafts:'invalid JSON'});
+});
 
 test('local agent executes MCP tools and supplies their results to Ollama without exposing confirmation',async()=>{
   const row=session(),calls=[],requests=[];
