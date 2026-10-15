@@ -7,6 +7,8 @@
         <p class="text-sm text-gray-400">{{ $t('globalSettings.subtitle') }}</p>
       </div>
 
+      <ClaudeConnector />
+
       <!-- ═══ FACEBOOK & INSTAGRAM APP CREDENTIALS ═════════════════════════════ -->
       <div id="meta-app" class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
         <div class="p-5 border-b border-gray-800 flex items-center gap-3">
@@ -449,6 +451,7 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore, PROVIDER_MODELS, CLOUD_PROVIDER_NAMES } from '../stores/ai'
+import ClaudeConnector from '../components/ClaudeConnector.vue'
 
 const { t } = useI18n()
 const platformsStore = usePlatformsStore()

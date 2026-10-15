@@ -8,6 +8,14 @@
         <p class="text-sm text-gray-500 mt-1">{{ $t('calendarPlan.subtitle') }}</p>
       </div>
 
+      <div class="mb-5">
+        <label for="saved-content-plan" class="block text-xs text-gray-400 mb-1.5">{{ $t('calendarPlan.savedPlans') }}</label>
+        <select id="saved-content-plan" v-model="selectedSavedPlan" @change="loadSavedPlan(selectedSavedPlan)" :disabled="loading || briefLoading" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100">
+          <option value="">{{ $t('calendarPlan.chooseSavedPlan') }}</option>
+          <option v-for="plan in savedPlans" :key="plan.calendarId" :value="plan.calendarId">{{ plan.monthName }} — {{ plan.brief?.theme || plan.calendarId }}</option>
+        </select>
+      </div>
+
       <!-- Configuration card -->
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
         <fieldset :disabled="loading || briefLoading" class="min-w-0">
@@ -92,7 +100,8 @@
               </label>
             </div>
           </div>
-          <div class="flex gap-2 shrink-0">
+          <div class="flex flex-wrap gap-2 shrink-0">
+            <button @click="copyClaudePrompt" class="px-4 py-2 bg-amber-800 hover:bg-amber-700 rounded-lg text-sm font-medium text-white">{{ $t('calendarPlan.copyClaudePrompt') }}</button>
             <button
               @click="generateBrief"
               :disabled="briefLoading || loading || !selectedPlatforms.length"
@@ -112,6 +121,14 @@
           </div>
         </div>
         </fieldset>
+      </div>
+
+      <div v-if="showClaudePrompt" class="bg-gray-900 border border-amber-800/50 rounded-2xl p-5 mb-6">
+        <p class="text-sm text-amber-200 mb-2">{{ claudePromptCopied ? $t('calendarPlan.claudePromptCopied') : $t('calendarPlan.claudePromptReady') }}</p>
+        <textarea :value="claudePrompt" readonly rows="8" :aria-label="$t('calendarPlan.claudePromptLabel')" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200"></textarea>
+        <p class="text-xs text-gray-400 mt-2">{{ $t('calendarPlan.claudePromptHint') }}</p>
+        <a href="https://claude.ai/new" target="_blank" rel="noopener" class="inline-block mt-3 text-sm text-amber-300 underline">{{ $t('calendarPlan.openClaude') }}</a>
+        <a href="/global-settings#claude-connector" class="ml-4 text-xs text-gray-400 underline">{{ $t('calendarPlan.connectorSetup') }}</a>
       </div>
 
       <!-- Brief preview (approval step) -->
@@ -293,7 +310,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+import { useWorkspaceStore } from '../stores/workspace'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
@@ -301,6 +319,8 @@ import { useComposeStore } from '../stores/compose'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
+const workspaceStore = useWorkspaceStore()
 const platformsStore = usePlatformsStore()
 const composeStore = useComposeStore()
 
@@ -319,6 +339,41 @@ const selectedAccount = ref('')
 const selectedPlatforms = ref<string[]>(['facebook', 'instagram'])
 const postsPerWeek = ref(3)
 const campaignContext = ref('')
+const savedPlans = ref<any[]>([])
+const selectedSavedPlan = ref('')
+const showClaudePrompt = ref(false)
+const claudePromptCopied = ref(false)
+const claudePrompt = computed(() => [
+  'Use the SocialManager MCP connector to create and save a content plan. Write the content in this Claude conversation; do not invoke a generation API.',
+  'Workspace: ' + (workspaceStore.activeWorkspace?.name || '') + ' (' + workspaceStore.activeWorkspaceId + '). Read get_workspace_context for this exact workspace first.',
+  'Month: ' + selectedMonth.value + '. Platforms: ' + selectedPlatforms.value.join(', ') + '. Posts per week per platform: ' + postsPerWeek.value + ' for weeks 1–4.',
+  selectedAccount.value ? 'Account profile: ' + selectedAccount.value : 'Use the workspace brand context.',
+  'Campaign context and source posts: ' + JSON.stringify(campaignContext.value.trim()),
+  'Use numbered source posts for the corresponding opening posts in order. Preserve facts and explicit wording requirements and adapt to each platform. Do not invent product claims.',
+  'Write a narrative brief and platform-specific posts, then use save_content_plan with a stable requestId, the exact campaignContext, and this workspaceId. Include week, suggestedDay, suggestedTime, hashtags and postType for each post.',
+  'Return the saved plan link. Do not publish or schedule anything unless I separately request it and confirm its preview.',
+].join('\n\n'))
+async function copyClaudePrompt() {
+  showClaudePrompt.value = true
+  claudePromptCopied.value = false
+  try { await navigator.clipboard.writeText(claudePrompt.value); claudePromptCopied.value = true } catch { /* The prompt remains available to copy manually. */ }
+}
+async function refreshSavedPlans() {
+  try { savedPlans.value = (await axios.get('/api/ai/content-calendars')).data.calendars || [] } catch { /* Generation remains available when history cannot load. */ }
+}
+async function loadSavedPlan(id: string) {
+  if (!id) return
+  try {
+    const saved = (await axios.get('/api/ai/content-calendar/' + encodeURIComponent(id))).data
+    calendar.value = saved
+    selectedMonth.value = saved.month
+    selectedPlatforms.value = saved.platforms || []
+    selectedAccount.value = saved.accountKey || ''
+    postsPerWeek.value = saved.postsPerWeek || 3
+    campaignContext.value = saved.campaignContext || ''
+    error.value = ''
+  } catch (err: any) { error.value = errorMessage(err, 'Could not load the saved content plan') }
+}
 const loading    = ref(false)
 const savingAll  = ref(false)
 const error      = ref('')
@@ -332,6 +387,7 @@ const pendingBriefMonthName = ref('')
 watch([campaignContext, selectedMonth, selectedAccount, () => selectedPlatforms.value.join(',')], () => {
   pendingBrief.value = null
   pendingBriefMonthName.value = ''
+  claudePromptCopied.value = false
 })
 
 interface ProfileAccount { key: string; label: string }
@@ -527,7 +583,9 @@ async function saveAllDrafts() {
   }
 }
 
-onMounted(() => {
-  platformsStore.fetchMetaConnections()
+watch(calendar, () => { refreshSavedPlans() })
+onMounted(async () => {
+  await Promise.all([platformsStore.fetchMetaConnections(), refreshSavedPlans()])
+  if (typeof route.query.calendar === 'string') { selectedSavedPlan.value = route.query.calendar; await loadSavedPlan(route.query.calendar) }
 })
 </script>

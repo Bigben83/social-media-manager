@@ -37,6 +37,27 @@ Content Plan includes an optional campaign context box (up to 20,000 characters)
 
 Video shorts for Instagram and Facebook are planned in [the product roadmap](ROADMAP.md). The future workflow will separate script writing from video generation, with provider/model selection, captions, preview, and publishing review.
 
+## Claude app connector (MCP)
+
+Connect SocialManager to Claude conversations using your Claude account. Claude writes the content in the conversation and calls SocialManager tools to save it. This workflow does not use an Anthropic text-generation API key. Organisation/compliance-management credentials are not generation credentials.
+
+Server setup:
+
+1. Run `node scripts/configure-connector.cjs --url https://your-manager-domain.example/mcp`. It writes a salted password hash to the ignored `.env` and a generated password to the ignored `.connector-owner-password` file. The password is not printed. Use `--secret-file /private/path` to store it elsewhere, or `--rotate` to change it and invalidate existing connector-owner browser sessions.
+2. Rebuild and start the connector, gateway, UI, and proxy: `docker compose build connector gateway ui`, then `docker compose up -d connector gateway ui`. Recreate Nginx after updating its bind-mounted configuration: `docker compose up -d --no-deps --force-recreate nginx`.
+3. Open Global Settings → Claude app connector. Add the displayed URL as a custom connector in Claude. Use OAuth and **Register automatically** when prompted for the OAuth client registration method.
+4. Sign in with the connector owner password, select the workspaces, and approve the requested permissions. Reading/drafts are selected by default; publishing and scheduling are explicit additional permissions.
+
+On this installation the connector URL is `https://manager.tazz.com.au/mcp`. Its owner password is stored privately at `/home/social-media-manager-rollbacks/mcp-admin-password`. Retrieve it in your own terminal over SSH; do not paste it into a chat or commit it.
+
+The connector supports reading brand profiles, connected destinations, uploaded media, plans, drafts, and scheduled-post history; saving plans and draft batches; and optionally preparing and executing publishing/scheduling previews. A post preview binds the exact content, accounts, media, workspace, and time. Claude must present it and obtain explicit user confirmation before calling the execution tool. Completed results are cached; a lost dispatch response remains uncertain and requires checking the account or Scheduler before making another submission. The connector never silently retries an uncertain public post.
+
+Only media already uploaded to the authorised workspace may be used by connector posting tools. OAuth access tokens expire after one hour, refresh tokens rotate, grants expire after 30 days, and replaying a used refresh token revokes its grant. Revoke connections immediately at `/connector`. Tokens/codes/browser sessions are hashed at rest; OAuth client secrets are encrypted. Connector authorization does not change the app's existing authentication or network access model.
+
+In **Content Plan**, choose the month/platforms, enter campaign context, and click **Copy Claude prompt**. Paste it into Claude with the connector enabled. Claude can save its plan and return a workspace-specific link. Open it from **Saved plans** or the returned link. The other Generate buttons continue to use the configured API/local provider; MCP does not turn a Claude chat subscription into an automatic server-side generation API.
+
+The endpoint uses the official MCP SDK with Streamable HTTP, OAuth discovery, PKCE, dynamic client registration, and revocation. Remote clients require internet access to the HTTPS URL. No additional host port is published. Configure the existing external proxy to preserve `Authorization`, `Accept`, and MCP headers and route `/mcp`, `/connector`, `/authorize`, `/token`, `/register`, `/revoke`, and the OAuth `/.well-known/` paths to this stack. This deployment's Nginx configuration includes those routes.
+
 ## AI configuration
 
 Ollama, Anthropic Claude, OpenAI, Groq, Gemini, and OpenAI-compatible endpoints are supported. Image generation supports the configured OpenAI, Gemini, xAI, or local image server. Keys are encrypted in MongoDB. A saved key or installed SDK does not prove that a provider accepts the credential: test with a real request. Provider authentication and stream errors are surfaced to the UI. Each configured cloud provider has a live Test Connection action; a static model list does not count as a successful connection.

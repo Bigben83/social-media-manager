@@ -1,4 +1,13 @@
 export default {
+  claudeConnector: {
+    "title": "Claude uygulama bağlayıcısı",
+    "description": "Marka bağlamını okumak, planlar ve taslaklar oluşturmak ve isteğe bağlı olarak onaylanan gönderileri yayımlamak veya zamanlamak için Claude sohbetlerini kullanın.",
+    "urlLabel": "Uzak MCP sunucu URL adresi",
+    "instructions": "Claude içinde bu URL ile özel bir bağlayıcı ekleyin. İstenirse OAuth ve otomatik kaydı seçin, bağlayıcı parolanızla oturum açın ve çalışma alanlarını ve izinleri seçin.",
+    "setupRequired": "Sunucu yöneticisinin bağlayıcı parolası kurulumunu tamamlaması gerekiyor.",
+    "manageAccess": "Bağlayıcı erişimini kur veya yönet",
+    "apiNote": "Bu akış Claude sohbetinizi kullanır. Uygulamadaki diğer Oluştur düğmeleri aşağıda yapılandırılan API veya yerel sağlayıcıyı kullanmaya devam eder."
+},
   nav: {
     feed: 'Akış',
     compose: 'Yeni Gönderi',
@@ -108,6 +117,15 @@ export default {
   },
 
   calendarPlan: {
+    savedPlans: "Kayıtlı planlar",
+    chooseSavedPlan: "Kayıtlı bir plan seçin…",
+    copyClaudePrompt: "Claude istemini kopyala",
+    claudePromptCopied: "İstem kopyalandı. SocialManager bağlayıcısı etkinken Claude sohbetinize yapıştırın.",
+    claudePromptReady: "SocialManager bağlayıcısı etkinken bu istemi Claude sohbetinize kopyalayın.",
+    claudePromptLabel: "Claude için istem",
+    claudePromptHint: "Claude tamamlanan planı bu çalışma alanına kaydedebilir. Daha sonra açmak için yukarıdaki Kayıtlı planlar listesini kullanın.",
+    openClaude: "Claude uygulamasını aç",
+    connectorSetup: "Bağlayıcı kurulumu",
     contextLabel: "Kampanya bağlamı ve kaynak gönderiler (isteğe bağlı)",
     contextPlaceholder: "Gelecek ay XXXX özelliğini öne çıkarın.\n\nBir tanıtım serisi oluşturun. İlk sekiz gönderi için şu metni kullanın:\n1. …\n2. …",
     contextHint: "Hedefler, özellik ayrıntıları, gerekli mesajlar veya numaralı kaynak gönderiler ekleyin. Bunlar hem özeti hem de her platformun gönderilerini yönlendirir.",

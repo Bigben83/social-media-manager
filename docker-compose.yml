@@ -75,6 +75,20 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
+  connector:
+    build:
+      context: ./services
+      dockerfile: connector/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks: [socialMediaManagerNetwork]
+    depends_on: [mongodb, gateway, scheduler]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3012/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
   socket:
     build:
       context: ./services

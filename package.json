@@ -16,11 +16,12 @@
     "services/instagram",
     "services/facebook",
     "services/pinterest",
-    "services/tiktok"
+    "services/tiktok",
+    "services/connector"
   ],
   "scripts": {
     "postinstall": "node scripts/link-utils.cjs",
-    "test": "node scripts/link-utils.cjs && npm run test --workspace api-gateway -- --runInBand && npm run test --workspace ui && npm run test --workspace scheduler-service && node --test tests/*.test.cjs",
+    "test": "node scripts/link-utils.cjs && npm run test --workspace api-gateway -- --runInBand && npm run test --workspace ui && npm run test --workspace scheduler-service && node --test tests/*.test.cjs && npm run test --workspace connector-service",
     "build": "npm run build --workspace ui",
     "check": "npm test && npm run build && node scripts/check-syntax.cjs"
   }

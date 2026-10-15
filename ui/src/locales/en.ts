@@ -1,4 +1,13 @@
 export default {
+  claudeConnector: {
+    "title": "Claude app connector",
+    "description": "Use Claude conversations to read brand context, create plans and drafts, and optionally publish or schedule confirmed posts.",
+    "urlLabel": "Remote MCP server URL",
+    "instructions": "In Claude, add a custom connector with this URL. Choose OAuth and Register automatically if prompted, sign in with your connector password, then select workspaces and permissions.",
+    "setupRequired": "The server administrator needs to finish connector password setup.",
+    "manageAccess": "Set up or manage connector access",
+    "apiNote": "This workflow uses your Claude conversation. The app’s other Generate buttons continue to use the API or local provider configured below."
+},
   nav: {
     feed: 'Feed',
     compose: 'New Post',
@@ -108,6 +117,15 @@ export default {
   },
 
   calendarPlan: {
+    savedPlans: "Saved plans",
+    chooseSavedPlan: "Choose a saved plan…",
+    copyClaudePrompt: "Copy Claude prompt",
+    claudePromptCopied: "Prompt copied. Paste it into Claude with your SocialManager connector enabled.",
+    claudePromptReady: "Copy this prompt into Claude with your SocialManager connector enabled.",
+    claudePromptLabel: "Prompt for Claude",
+    claudePromptHint: "Claude can save the completed plan back to this workspace. Use Saved plans above to open it afterwards.",
+    openClaude: "Open Claude",
+    connectorSetup: "Connector setup",
     contextLabel: "Campaign context and source posts (optional)",
     contextPlaceholder: "Next month, highlight the XXXX feature.\n\nCreate an introduction series. Use the following text for the first eight posts:\n1. …\n2. …",
     contextHint: "Add goals, feature details, must-use messages, or numbered source posts. These guide both the brief and every platform’s posts.",
