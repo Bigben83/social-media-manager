@@ -4,6 +4,8 @@
 
 Self-hosted social media management for separate brands and workspaces. The UI supports English and Turkish. The application uses Vue 3, Fastify 5 on Node 24, MongoDB 7, Redis/BullMQ, and Nginx.
 
+Connect Claude or ChatGPT through the built-in Model Context Protocol (MCP) server to automate social media workflows from a conversation. Ask your assistant to read your brand context, create and save content plans, write or revise batches of drafts, select uploaded media and connected accounts, and prepare posts for scheduling or immediate publishing. With the required permissions and your explicit confirmation of each publishing or scheduling preview, the assistant can execute delivery and check the results. Content is written in your Claude or ChatGPT conversation, so this workflow needs no separate text-generation API key. See [Claude and ChatGPT connectors (MCP)](#claude-and-chatgpt-connectors-mcp) for setup.
+
 ## Supported integrations
 
 Facebook Pages, linked professional Instagram accounts, Twitter/X, Mastodon, Bluesky, Pinterest, and TikTok have publishing adapters. Provider permissions, account type, and media accessibility still apply. LinkedIn, Reddit, and YouTube are unavailable and hidden from connection/publishing choices. Their old source is retained for reference; their containers are not part of production.
