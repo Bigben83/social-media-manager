@@ -15,7 +15,7 @@ const app = require('../server');
 const request = (method, url, workspace = 'test', payload) => app.inject({ method, url, headers: { 'x-workspace-id': workspace }, payload });
 beforeAll(async () => {
   await app.ready();
-  for (const _id of ['test','other','lookup','oauth','drafts','posting','repeat','receipts','ws-a','ws-b']) await db.collection('workspaces').insertOne({ _id });
+  for (const _id of ['test','other','lookup','oauth','drafts','posting','repeat','receipts','ws-a','ws-b','refresh-a','refresh-b']) await db.collection('workspaces').insertOne({ _id });
 });
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { axios.get.mockReset(); axios.post.mockReset(); });
@@ -56,6 +56,72 @@ test('OAuth initiation uses an expiring one-time state bound to the workspace', 
   const invalid = await request('GET', '/auth/meta/callback?state=oauth&code=invalid');
   expect(invalid.headers.location).toContain('Invalid_or_expired_OAuth_state');
   expect(axios.get).not.toHaveBeenCalled();
+});
+
+function mockMetaProfiles() {
+  axios.get.mockImplementation(async url => {
+    const endpoint = url.split('/v22.0/')[1];
+    const data = {
+      'oauth/access_token': { access_token: 'fresh-user-token' },
+      'me/accounts': { data: [{ id: 'shared' }, { id: 'new-page' }] },
+      'me/businesses': { data: [] },
+      shared: { id: 'shared', name: 'Updated Page', access_token: 'fresh-page-token', picture: { data: { url: 'https://images.example/fresh-fb.jpg' } }, instagram_business_account: { id: 'shared-ig' } },
+      'new-page': { id: 'new-page', name: 'New Page', access_token: 'new-page-token' },
+      'shared-ig': { id: 'shared-ig', username: 'updated.ig', profile_picture_url: 'https://images.example/fresh-ig.jpg' },
+    }[endpoint];
+    if (!data) throw new Error('Unexpected Meta endpoint');
+    return { data };
+  });
+}
+
+async function seedSavedMeta(ws) {
+  const credentials = db.collection('platform_credentials');
+  for (const [type, data] of [
+    ['meta_user', { accessToken: 'old-user-token' }],
+    ['facebook', { pages: [{ id: 'shared', name: 'Old Page', picture: 'old-fb', selected: false, accessToken: 'old-page-token' }] }],
+    ['instagram', { accounts: [{ id: 'shared-ig', username: 'old.ig', avatar: 'old-ig', selected: true, accessToken: 'old-user-token' }, { id: 'unavailable-ig', selected: false, accessToken: 'keep-token' }] }],
+  ]) await credentials.updateOne({ _id: `${ws}:${type}` }, { $set: data }, { upsert: true });
+}
+
+test('refresh updates saved pictures and tokens only in the requested workspace without connecting new accounts', async () => {
+  const credentials = db.collection('platform_credentials');
+  for (const ws of ['refresh-a', 'refresh-b']) await seedSavedMeta(ws);
+  mockMetaProfiles();
+  const response = await request('POST', '/auth/meta/refresh', 'refresh-a', {});
+  expect(response.statusCode).toBe(200);
+  expect(response.json().pages).toHaveLength(2);
+  const saved = (await request('GET', '/credentials', 'refresh-a')).json();
+  expect(saved.facebook.allPages).toEqual([{ id: 'shared', name: 'Updated Page', picture: 'https://images.example/fresh-fb.jpg', selected: false }]);
+  expect(saved.instagram.accounts[0]).toMatchObject({ id: 'shared-ig', avatar: 'https://images.example/fresh-ig.jpg' });
+  expect(saved.instagram.allAccounts).toHaveLength(2);
+  const fb = await credentials.findOne({ _id: 'refresh-a:facebook' });
+  expect(fb.pages[0].accessToken).toMatch(/^ENC:v1:/);
+  expect((await credentials.findOne({ _id: 'refresh-b:facebook' })).pages[0].picture).toBe('old-fb');
+  expect(JSON.stringify(saved)).not.toContain('token');
+  expect(JSON.stringify(response.json())).not.toContain('token');
+});
+
+test('reconnecting refreshes existing accounts before the discovery picker is confirmed', async () => {
+  const credentials = db.collection('platform_credentials');
+  await seedSavedMeta('refresh-b');
+  await credentials.updateOne({ _id: 'meta_app' }, { $set: { appId: 'app', appSecret: 'secret' } }, { upsert: true });
+  await db.collection('oauth_states').insertOne({ _id: 'reconnect-state', provider: 'meta', workspaceId: 'refresh-b', expiresAt: new Date(Date.now() + 60000) });
+  mockMetaProfiles();
+  const response = await request('GET', '/auth/meta/callback?state=reconnect-state&code=code', 'refresh-a');
+  expect(response.headers.location).toContain('workspace=refresh-b');
+  const fb = await credentials.findOne({ _id: 'refresh-b:facebook' });
+  expect(fb.pages).toHaveLength(1);
+  expect(fb.pages[0]).toMatchObject({ picture: 'https://images.example/fresh-fb.jpg', selected: false });
+  expect(fb.pages[0].accessToken).toMatch(/^ENC:v1:/);
+  expect((await credentials.findOne({ _id: 'refresh-b:instagram' })).accounts[0]).toMatchObject({ avatar: 'https://images.example/fresh-ig.jpg', selected: true });
+});
+
+test('failed discovery leaves saved accounts and pictures intact', async () => {
+  await seedSavedMeta('refresh-a');
+  const before = JSON.stringify((await request('GET', '/credentials', 'refresh-a')).json());
+  axios.get.mockRejectedValue(new Error('Meta unavailable'));
+  expect((await request('POST', '/auth/meta/refresh', 'refresh-a', {})).statusCode).toBe(503);
+  expect(JSON.stringify((await request('GET', '/credentials', 'refresh-a')).json())).toBe(before);
 });
 
 test('drafts retain first comments on create and update', async () => {

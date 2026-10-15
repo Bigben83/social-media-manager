@@ -52,9 +52,10 @@
         <!-- Step 2: OAuth connect -->
         <div class="p-5" :class="{ 'opacity-40 pointer-events-none': !metaAppConfigured }">
           <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Step 2 — Connect Accounts</p>
+          <p v-if="platformsStore.metaError" role="alert" class="mb-3 text-sm text-red-400">{{ platformsStore.metaError }}</p>
 
           <!-- Already connected — show summary + manage -->
-          <div v-if="fbConnected || igConnected" class="space-y-3">
+          <div v-if="hasMetaAccounts" class="space-y-3">
             <div v-if="platformsStore.allFbPages.length" class="space-y-1.5">
               <p class="text-xs text-gray-500">{{ $t('settings.meta.selectPages') }}</p>
               <label
@@ -63,8 +64,7 @@
                 class="flex items-center gap-3 bg-gray-800/60 hover:bg-gray-800 rounded-lg px-3 py-2 cursor-pointer transition-colors"
               >
                 <input type="checkbox" :value="page.id" v-model="workspaceFbPageIds" class="w-4 h-4 accent-blue-500" />
-                <img v-if="page.picture" :src="page.picture" class="w-6 h-6 rounded-full shrink-0" />
-                <span v-else class="w-6 h-6 rounded-full bg-blue-700 flex items-center justify-center text-xs font-bold shrink-0">f</span>
+                <AccountAvatar :src="page.picture" platform="facebook" class="w-6 h-6 text-xs" />
                 <span class="text-sm flex-1">{{ page.name }}</span>
               </label>
               <div class="flex items-center justify-between pt-1">
@@ -87,8 +87,7 @@
                 class="flex items-center gap-3 bg-gray-800/60 hover:bg-gray-800 rounded-lg px-3 py-2 cursor-pointer transition-colors"
               >
                 <input type="checkbox" :value="account.id" v-model="workspaceIgAccountIds" class="w-4 h-4 accent-pink-500" />
-                <img v-if="account.avatar" :src="account.avatar" class="w-6 h-6 rounded-full shrink-0" />
-                <span v-else class="w-6 h-6 rounded-full bg-pink-700 flex items-center justify-center text-xs font-bold shrink-0">I</span>
+                <AccountAvatar :src="account.avatar" platform="instagram" class="w-6 h-6 text-xs" />
                 <span class="text-sm flex-1">@{{ account.username }}</span>
               </label>
               <div class="flex items-center justify-between pt-1">
@@ -134,7 +133,14 @@
               </div>
             </div>
 
-            <div class="flex gap-2 pt-2">
+            <div class="flex flex-wrap gap-2 pt-2">
+              <button
+                @click="refreshDiscovery"
+                :disabled="platformsStore.metaLoading"
+                class="px-4 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
+              >
+                {{ $t('settings.meta.refreshAccounts') }}
+              </button>
               <button
                 @click="platformsStore.startMetaOAuth()"
                 :disabled="platformsStore.metaLoading"
@@ -385,8 +391,7 @@
                 class="flex items-center gap-3 bg-gray-800 rounded-xl px-4 py-3 cursor-pointer hover:bg-gray-750 transition-colors"
               >
                 <input type="checkbox" :value="page.id" v-model="selectedPageIds" class="w-4 h-4 accent-blue-500" />
-                <img v-if="page.picture" :src="page.picture" class="w-8 h-8 rounded-full" />
-                <span v-else class="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center text-xs font-bold shrink-0">f</span>
+                <AccountAvatar :src="page.picture" platform="facebook" class="w-8 h-8 text-xs" />
                 <span class="text-sm font-medium">{{ page.name }}</span>
                 <span class="ml-auto text-xs text-gray-600 font-mono">{{ page.id }}</span>
               </label>
@@ -404,8 +409,7 @@
                 class="flex items-center gap-3 bg-gray-800 rounded-xl px-4 py-3 cursor-pointer hover:bg-gray-750 transition-colors"
               >
                 <input type="checkbox" :value="account.id" v-model="selectedIgAccountIds" class="w-4 h-4 accent-pink-500" />
-                <img v-if="account.avatar" :src="account.avatar" class="w-8 h-8 rounded-full" />
-                <span v-else class="w-8 h-8 rounded-full bg-pink-700 flex items-center justify-center text-xs font-bold shrink-0">I</span>
+                <AccountAvatar :src="account.avatar" platform="instagram" class="w-8 h-8 text-xs" />
                 <div>
                   <p class="text-sm font-medium">@{{ account.username }}</p>
                   <p class="text-xs text-gray-600">{{ $t('settings.meta.igLinkedTo') }} {{ pageNameForId(account.pageId) }}</p>
@@ -1155,6 +1159,7 @@ import { useHashtagStore, type HashtagGroup } from '../stores/hashtags'
 import { useWorkspaceStore, type Workspace } from '../stores/workspace'
 import { COMMON_TIMEZONES } from '../utils/timezone'
 import { useRouter } from 'vue-router'
+import AccountAvatar from '../components/AccountAvatar.vue'
 
 const { t } = useI18n()
 
@@ -1237,12 +1242,8 @@ async function switchTo(id: string) {
 
 const metaAppConfigured = computed(() => platformsStore.metaCredentials.configured)
 
-// ─── Connected platforms derived from statuses ───────────────────────────────
-
-const fbStatus = computed(() => platformsStore.getStatus('facebook'))
-const igStatus = computed(() => platformsStore.getStatus('instagram'))
-const fbConnected = computed(() => fbStatus.value?.connected ?? false)
-const igConnected = computed(() => igStatus.value?.connected ?? false)
+// Saved accounts remain manageable even when health checks fail or all are deselected.
+const hasMetaAccounts = computed(() => platformsStore.allFbPages.length > 0 || platformsStore.allIgAccounts.length > 0)
 
 // Pull connected pages/accounts from the shared store
 
@@ -1332,6 +1333,11 @@ const workspaceFbPageIds = ref<string[]>([])
 const workspaceIgAccountIds = ref<string[]>([])
 const fbPagesSaved = ref(false)
 const igAccountsSaved = ref(false)
+
+watch([() => platformsStore.allFbPages, () => platformsStore.allIgAccounts], () => {
+  workspaceFbPageIds.value = platformsStore.allFbPages.filter(p => p.selected).map(p => p.id)
+  workspaceIgAccountIds.value = platformsStore.allIgAccounts.filter(a => a.selected).map(a => a.id)
+})
 
 async function saveFbPageSelection() {
   await platformsStore.saveFbPageSelection(workspaceFbPageIds.value)

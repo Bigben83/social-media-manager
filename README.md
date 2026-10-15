@@ -33,6 +33,8 @@ Select the intended workspace before connecting Meta. OAuth uses a short-lived, 
 
 Meta can omit a Page from its account listing even when a direct lookup is authorized. In **Choose Pages & Accounts to Connect**, use **Find Page** with its Facebook URL or numeric Page ID, then select the Page and linked Instagram account and click **Connect Selected**. Refresh fetches discovery again. Permission errors appear as warnings; refresh cannot grant missing Meta permissions. Instagram must be a professional account linked to the Facebook Page.
 
+In Settings, **Refresh available accounts** and reconnecting also update pictures and tokens for saved accounts in the active workspace, preserving their selections. New accounts still require **Connect Selected**. Saved accounts remain visible when a health check fails or all accounts are deselected; unavailable pictures show the platform icon.
+
 ## Content planning
 
 Content Plan includes an optional campaign context box (up to 20,000 characters). Add the feature to highlight, campaign goals, or numbered text for an introduction series. This context accompanies both brief generation and every platform’s post generation, remains in the recoverable background job, and is saved with the calendar. Changing campaign inputs clears a previously reviewed brief so the next approval uses the current context. Model output should still be reviewed before publishing.

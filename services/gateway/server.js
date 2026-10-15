@@ -23,7 +23,7 @@ const { registerBackgroundJobs } = require('./jobs');
 const { detectUploadType } = require('./media');
 const { campaignContextBlock, MAX_CAMPAIGN_CONTEXT } = require('./calendarContext');
 const { repairScopedData } = require('./migrations');
-const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery } = require('./meta');
+const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery, refreshExistingAccounts } = require('./meta');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi']);
@@ -1986,6 +1986,16 @@ app.get('/credentials/meta-app', async (request) => {
 
 // ─── Meta OAuth Flow ──────────────────────────────────────────────────────────
 
+async function refreshSavedMetaConnections(ws, incoming) {
+  for (const [type, field, fresh] of [['facebook', 'pages', incoming.pages], ['instagram', 'accounts', incoming.igAccounts]]) {
+    const saved = await getCredentials(ws, type);
+    if (saved && fresh.length) {
+      await setCredentials(ws, type, { [field]: refreshExistingAccounts(saved[field] || [], fresh) });
+    }
+  }
+  tokenExpiryCache.delete(ws);
+}
+
 // Return the Facebook OAuth URL to redirect the user to
 app.get('/auth/meta/init', async (request, reply) => {
   const ws = request.workspaceId;
@@ -2069,6 +2079,7 @@ app.get('/auth/meta/callback', async (request, reply) => {
     discovery.igAccounts = discovery.igAccounts.filter(a => incoming.igAccounts.some(n => n.id === a.id));
     await setCredentials(ws, 'meta_user', { accessToken: encryptToken(userToken) });
     await setCredentials(ws, 'meta_discovery', { ...discovery, discoveredAt: new Date() });
+    await refreshSavedMetaConnections(ws, incoming);
     reply.redirect(`${APP_BASE_URL}/settings?meta_discovery=1&workspace=${encodeURIComponent(ws)}`);
   } catch (err) {
     app.log.error({ action: 'meta_oauth_callback', platform: 'meta', outcome: 'failure', err: err.response?.data?.error?.message || err.message });
@@ -2126,6 +2137,7 @@ app.post('/auth/meta/refresh', async (request, reply) => {
     discovery.pages = discovery.pages.filter(p => incoming.pages.some(n => n.id === p.id));
     discovery.igAccounts = discovery.igAccounts.filter(a => incoming.igAccounts.some(n => n.id === a.id));
     await setCredentials(ws, 'meta_discovery', { ...discovery, discoveredAt: new Date() });
+    await refreshSavedMetaConnections(ws, incoming);
     return publicDiscovery(discovery);
   } catch { return reply.code(503).send({ error: 'Could not refresh Meta accounts; reconnect or retry' }); }
 });

@@ -131,10 +131,13 @@ export const usePlatformsStore = defineStore('platforms', () => {
   }
 
   async function fetchMetaConnections() {
+    // Capability availability must not prevent saved accounts from loading.
+    const capabilities = axios.get('/api/platforms/capabilities')
+      .then(res => { publishingPlatforms.value = res.data.publishing || [] })
+      .catch(() => { /* keep the last known publishing capabilities */ })
     try {
       const res = await axios.get('/api/credentials')
       const data = res.data
-      publishingPlatforms.value = (await axios.get('/api/platforms/capabilities')).data.publishing || []
       connectedPages.value = data.facebook?.pages || []
       allFbPages.value = data.facebook?.allPages || []
       connectedIgAccounts.value = data.instagram?.accounts || []
@@ -143,7 +146,10 @@ export const usePlatformsStore = defineStore('platforms', () => {
       allPinterestBoards.value = data.pinterest?.allBoards || []
       tiktokConnected.value = data.tiktok?.connected ?? false
       tiktokUsername.value = data.tiktok?.username || null
-    } catch (_) { /* ignore */ }
+    } catch (_) {
+      metaError.value = 'Could not load saved social accounts; retry refreshing'
+    }
+    await capabilities
   }
 
   async function fetchPinterestCredentials() {
@@ -356,6 +362,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
     metaError.value = null
     try {
       metaDiscovery.value = (await axios.post(url, payload)).data
+      await fetchMetaConnections()
       return true
     } catch (err: any) {
       metaError.value = err.response?.data?.error || 'Could not discover Meta accounts'
@@ -383,6 +390,12 @@ export const usePlatformsStore = defineStore('platforms', () => {
     metaLoading.value = true
     try {
       await axios.delete('/api/credentials/meta')
+      metaDiscovery.value = null
+      connectedPages.value = []
+      connectedIgAccounts.value = []
+      allFbPages.value = []
+      allIgAccounts.value = []
+      tokenExpiry.value = []
       await fetchStatuses()
     } catch (err) {
       console.error('Meta disconnect error:', err)
@@ -393,6 +406,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
 
   async function saveFbPageSelection(selectedPageIds: string[]) {
     metaLoading.value = true
+    metaError.value = null
     try {
       await axios.post('/api/credentials/facebook/pages', { selectedPageIds })
       allFbPages.value = allFbPages.value.map((p) => ({ ...p, selected: selectedPageIds.includes(p.id) }))
@@ -406,6 +420,7 @@ export const usePlatformsStore = defineStore('platforms', () => {
 
   async function saveIgAccountSelection(selectedAccountIds: string[]) {
     metaLoading.value = true
+    metaError.value = null
     try {
       await axios.post('/api/credentials/instagram/accounts', { selectedAccountIds })
       allIgAccounts.value = allIgAccounts.value.map((a) => ({ ...a, selected: selectedAccountIds.includes(a.id) }))

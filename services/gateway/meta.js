@@ -63,6 +63,15 @@ function mergeDiscovery(existing, incoming) {
   return { pages: merge(existing?.pages || [], incoming.pages || []), igAccounts: merge(existing?.igAccounts || [], incoming.igAccounts || []), warnings: incoming.warnings || [] };
 }
 
+// Refresh known accounts immediately; connecting new accounts still requires selection.
+function refreshExistingAccounts(existing, incoming) {
+  const byId = new Map(incoming.map(account => [account.id, account]));
+  return existing.map(account => {
+    const fresh = byId.get(account.id);
+    return fresh ? { ...account, ...fresh, selected: account.selected } : account;
+  });
+}
+
 async function discoverAccounts(userToken) {
   const pageIds = new Set((await listAll('me/accounts', userToken, { fields: 'id,name' })).map(p => p.id));
   const warnings = [];
@@ -95,4 +104,4 @@ function publicDiscovery(discovery) {
     warnings: discovery.warnings || [],
   };
 }
-module.exports = { pageReference, listAll, discoverPage, discoverAccounts, mergeDiscovery, publicDiscovery };
+module.exports = { pageReference, listAll, discoverPage, discoverAccounts, mergeDiscovery, publicDiscovery, refreshExistingAccounts };
