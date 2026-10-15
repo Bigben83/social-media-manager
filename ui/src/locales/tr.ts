@@ -3,7 +3,7 @@ export default {
     "title": "ChatGPT eklentisi (MCP)",
     "description": "Marka bağlamını okumak, plan ve taslak oluşturmak, onaylanan gönderileri yayımlamak veya zamanlamak için ChatGPT sohbetlerini kullanın.",
     "urlLabel": "Uzak MCP sunucu URL adresi",
-    "instructions": "Web üzerinden ChatGPT Eklentiler bölümünde + ve Özel MCP sunucusu ekle seçeneklerini açıp bu URL adresini girin. OAuth ve dinamik istemci kaydını (DCR) seçin; sabit istemci bilgilerini boş bırakın. Eklentiyi oluşturun, bağlayıcı parolanızla oturum açıp erişimi onaylayın, ardından eklentiyi yükleyin ve sohbette @ ile seçin. Çalışma alanı politikaları özel eklentileri kısıtlayabilir.",
+    "instructions": "Web üzerinden ChatGPT Eklentiler bölümünde + ve Özel MCP sunucusu ekle seçeneklerini açıp bu URL adresini girin. OAuth ve dinamik istemci kaydını (DCR) seçin; sabit istemci bilgilerini boş bırakın. Eklentiyi oluşturun, bağlayıcı parolanızla oturum açıp erişimi onaylayın, ardından eklentiyi yükleyin ve sohbette {'@'} ile seçin. Çalışma alanı politikaları özel eklentileri kısıtlayabilir.",
     "setupRequired": "Sunucu yöneticisinin bağlayıcı parolası kurulumunu tamamlaması gerekiyor.",
     "manageAccess": "Bağlayıcı erişimini kur veya yönet",
     "apiNote": "Bu akış OpenAI üretim API anahtarı olmadan ChatGPT sohbetinizi kullanır. Her sohbet uygulaması ayrı bir erişim onayı alır. Diğer Oluştur düğmeleri aşağıdaki API veya yerel sağlayıcıyı kullanır."
