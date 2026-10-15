@@ -2,7 +2,7 @@
   <div class="h-screen flex flex-col overflow-hidden bg-gray-950 text-gray-100">
 
     <!-- Header + tabs — always constrained, never scrolls -->
-    <div class="flex-shrink-0 max-w-3xl mx-auto w-full px-6 pt-6">
+    <div class="flex-shrink-0 mx-auto w-full px-6 pt-6" :class="mode === 'drafts' && draftView === 'cards' ? 'max-w-6xl' : 'max-w-3xl'">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold">{{ $t('scheduler.title') }}</h1>
         <router-link
@@ -275,11 +275,14 @@
       </div>
     </template>
 
-    <!-- ── Drafts panel — scrollable, constrained width ── -->
+    <!-- ── Drafts panel ── -->
     <template v-else>
 
       <!-- Drafts toolbar -->
-      <div class="flex-shrink-0 max-w-3xl mx-auto w-full px-6 pb-4 flex justify-end">
+      <div class="flex-shrink-0 mx-auto w-full px-6 pb-4 flex flex-wrap items-center justify-between gap-3" :class="draftView === 'cards' ? 'max-w-6xl' : 'max-w-3xl'">
+        <div role="group" :aria-label="$t('scheduler.draftView')" class="flex gap-1 bg-gray-900 border border-gray-800 p-1 rounded-lg">
+          <button v-for="view in (['list', 'cards'] as const)" :key="view" @click="draftView = view" :aria-pressed="draftView === view" class="px-3 py-1 rounded text-sm transition-colors" :class="draftView === view ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'">{{ $t(view === 'list' ? 'scheduler.draftListView' : 'scheduler.draftCardsView') }}</button>
+        </div>
         <button
           @click="openBulkModal"
           class="flex items-center gap-1.5 px-3 py-1.5 bg-violet-700 hover:bg-violet-600 rounded-lg text-sm font-medium transition-colors"
@@ -289,8 +292,8 @@
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-6 pb-6">
-        <div class="max-w-3xl mx-auto">
+      <div class="flex-1 overflow-y-auto pb-6">
+        <div class="mx-auto px-6" :class="draftView === 'cards' ? 'max-w-6xl' : 'max-w-3xl'">
           <div v-if="draftsLoading" class="text-center text-gray-500 mt-20">
             {{ $t('dashboard.loading') }}
           </div>
@@ -300,57 +303,8 @@
             <p>{{ $t('scheduler.noDrafts') }}</p>
           </div>
 
-          <div v-else class="space-y-3">
-            <div
-              v-for="draft in drafts"
-              :key="draft._id"
-              class="bg-gray-900 border border-gray-800 rounded-xl p-4"
-            >
-              <div class="flex items-start justify-between gap-4">
-                <div class="flex-1 min-w-0">
-                  <!-- AI batch badge -->
-                  <span v-if="(draft as any).batchId" class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-violet-900/50 text-violet-300 border border-violet-800 mb-1.5">
-                    ✨ AI
-                  </span>
-                  <p class="text-sm text-gray-200 line-clamp-2 mb-2">
-                    {{ draft.content || '(no content)' }}
-                  </p>
-                  <p v-if="draftMediaUrl(draft)" class="text-xs text-blue-400 mb-2 truncate">
-                    <svg class="w-3 h-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01" />
-                    </svg>
-                    {{ mediaName(draftMediaUrl(draft)) }}
-                  </p>
-                  <div class="flex flex-wrap gap-1 mb-2">
-                    <span
-                      v-for="dest in selectedDests(draft)"
-                      :key="dest.key"
-                      class="text-xs px-2 py-0.5 rounded-full"
-                      :style="{ backgroundColor: dest.color + '22', color: dest.color }"
-                    >
-                      {{ dest.label }}
-                    </span>
-                  </div>
-                  <p class="text-xs text-gray-600">{{ formatDate(draft.updatedAt) }}</p>
-                </div>
-                <div class="flex items-center gap-2 flex-shrink-0">
-                  <router-link
-                    :to="`/compose?draft=${draft._id}`"
-                    class="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-200 transition-colors"
-                  >
-                    {{ $t('scheduler.editDraft') }}
-                  </router-link>
-                  <button
-                    @click="deleteDraft(draft._id)"
-                    class="text-xs px-2 py-1.5 bg-gray-700 hover:bg-red-700 rounded-lg text-gray-400 hover:text-white transition-colors"
-                  >
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
+          <div v-else :class="draftView === 'cards' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch' : 'space-y-3'">
+            <DraftSummary v-for="draft in drafts" :key="draft._id" :draft="draft" :destinations="selectedDests(draft)" :layout="draftView" @delete="deleteDraft" />
           </div>
         </div>
       </div>
@@ -511,7 +465,8 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import dayjs from 'dayjs'
 import { PLATFORM_META, usePlatformsStore } from '../stores/platforms'
-import { useComposeStore, draftMediaUrl, type Destination } from '../stores/compose'
+import { useComposeStore, type Destination, type Draft } from '../stores/compose'
+import DraftSummary from '../components/scheduler/DraftSummary.vue'
 
 const { t, tm } = useI18n()
 const platformsStore = usePlatformsStore()
@@ -540,24 +495,6 @@ interface ScheduledJob {
   failReason?: string
 }
 
-interface DraftDestination {
-  key: string
-  platform: string
-  accountId?: string
-  label: string
-  color: string
-  selected: boolean
-}
-
-interface Draft {
-  _id: string
-  content: string
-  mediaUrl: string
-  scheduledAt: string
-  destinations: DraftDestination[]
-  updatedAt: string
-}
-
 interface CalendarDay {
   day: number | null
   date: string | null
@@ -568,6 +505,8 @@ interface CalendarDay {
 // ── Mode ───────────────────────────────────────────────────────────────────────
 
 const mode = ref<'scheduled' | 'calendar' | 'drafts'>('scheduled')
+const draftView = ref<'list' | 'cards'>(localStorage.getItem('scheduler.draftView') === 'cards' ? 'cards' : 'list')
+watch(draftView, value => { localStorage.setItem('scheduler.draftView', value) })
 
 const modeTabs = computed(() => [
   { value: 'scheduled' as const, label: t('scheduler.scheduledTab'), badge: null },
@@ -738,7 +677,19 @@ async function deleteDraft(id: string) {
 }
 
 function selectedDests(draft: Draft) {
-  return (draft.destinations || []).filter((d) => d.selected)
+  return (draft.destinations || []).filter(d => d.selected).map(d => {
+    const meta = PLATFORM_META[d.platform]
+    const page = d.platform === 'facebook' ? platformsStore.connectedPages.find(p => p.id === d.accountId) : undefined
+    const instagram = d.platform === 'instagram' ? platformsStore.connectedIgAccounts.find(a => a.id === d.accountId) : undefined
+    const board = d.platform === 'pinterest' ? platformsStore.connectedPinterestBoards.find(b => b.id === d.accountId) : undefined
+    return {
+      ...d,
+      key: d.key || [d.platform, d.accountId].filter(Boolean).join(':'),
+      label: page?.name || (instagram && `@${instagram.username}`) || board?.name || d.label || d.accountId || meta?.label || d.platform,
+      color: d.color || meta?.color || '#9ca3af',
+      picture: page?.picture || instagram?.avatar || d.picture,
+    }
+  })
 }
 
 function mediaName(url: string) {
@@ -889,6 +840,7 @@ watch(mode, (m) => {
 })
 
 onMounted(() => {
+  platformsStore.fetchMetaConnections()
   fetchJobs()
   fetchDrafts()
   fetchCalendarJobs()

@@ -84,3 +84,12 @@ The owner subsequently connected ChatGPT and saved image drafts. The connector s
 Compose and the draft list also recognise the older destination-only format. Regression coverage checks image editing/saving/publishing, video scheduling, intentional removal, idempotency, invalid media, and workspace ownership. The connector includes `repair-draft-media.js`, which defaults to a dry run; run `docker compose exec -T connector node repair-draft-media.js --apply` after backing up MongoDB to restore eligible legacy drafts. It only fills blank fields with a single owned attachment, preserves text and retry metadata, and skips concurrently edited records.
 
 Validation: all 89 automated tests, the TypeScript/production UI build, and 40 JavaScript syntax checks pass. No dependencies or access controls changed.
+
+
+## Scheduler draft dates and cards
+
+Added a List/Cards switch to Scheduler's Drafts tab, with the selection remembered in the browser. Both views show a saved planned date or an explicit no-date label, plus a separately labelled last update. Local draft wall times remain unchanged; timestamps with UTC/offset information use the viewer's timezone. These are draft planning dates; queued deliveries remain in Scheduled.
+
+Cards show the saved image or a video player, content, selected accounts, planned date and Edit/Delete actions. Text-only and unavailable-media states remain usable. Media comes from the existing draft attachment lookup, including legacy connector drafts. Connected account names are resolved for MCP drafts that do not save UI labels. The responsive grid uses one to three columns. English and Turkish are included; no dependencies or backend behavior changed.
+
+Validation: all 91 automated tests, the TypeScript/production UI build, and 40 JavaScript syntax checks pass. Browser checks cover dates in both layouts, media and legacy attachments, text-only/broken-media fallbacks, account labels, remembered layout, mobile cards, both languages, edit links and deletion using isolated fixtures. No social posts are sent.
