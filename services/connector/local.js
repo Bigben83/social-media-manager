@@ -68,7 +68,7 @@ async function runAssistantTurn({client,session,requestModel,checkpoint,checkAcc
       }catch(err){result={isError:true,content:[{type:'text',text:localError(err)}]};}
       const encoded=JSON.stringify(result);
       session.messages.push({role:'tool',tool_name:String(name),content:encoded.length<=LIMITS.toolCharacters?encoded:JSON.stringify({isError:true,error:'Tool result too large; request fewer items.'})});
-      session.events.push({tool:String(name),success:!result.isError,at:new Date().toISOString()});
+      session.events.push({tool:String(name),success:!result.isError,...(result.isError&&{error:String(result.content?.[0]?.text||'Tool failed').slice(0,1000)}),at:new Date().toISOString()});
       session.events=session.events.slice(-60);
       if(name==='prepare_post'&&!result.isError){
         session.pendingPreview=readResult(result);session.status='awaiting_confirmation';

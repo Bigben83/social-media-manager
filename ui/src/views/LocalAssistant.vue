@@ -37,7 +37,7 @@
         </div>
         <details v-if="session.events?.length" class="rounded-xl border border-gray-800 p-4">
           <summary class="text-sm cursor-pointer">{{ $t('localAssistant.toolActivity') }}</summary>
-          <ul class="mt-3 space-y-1 text-xs text-gray-400"><li v-for="(event, index) in session.events" :key="index">{{ event.success ? '✓' : '×' }} {{ event.tool }}</li></ul>
+          <ul class="mt-3 space-y-1 text-xs text-gray-400"><li v-for="(event, index) in session.events" :key="index">{{ event.success ? '✓' : '×' }} {{ event.tool }}<span v-if="event.error" class="block text-red-300 whitespace-pre-wrap">{{ event.error }}</span></li></ul>
         </details>
         <section v-if="session.status === 'awaiting_confirmation' && session.pendingPreview" class="rounded-2xl border border-amber-700 bg-amber-950/20 p-5 space-y-4">
           <h2 class="font-semibold text-amber-200">{{ $t('localAssistant.review') }}</h2>
