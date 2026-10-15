@@ -117,6 +117,7 @@ export default {
   },
 
   calendarPlan: {
+    claudeWorkflowHint: "Claude hesabınız için istemi kopyalayıp Claude içinde devam edin. Özet Oluştur ve Plan Oluştur, Genel Ayarlar bölümündeki sağlayıcıyı kullanır.",
     savedPlans: "Kayıtlı planlar",
     chooseSavedPlan: "Kayıtlı bir plan seçin…",
     copyClaudePrompt: "Claude istemini kopyala",

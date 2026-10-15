@@ -117,6 +117,7 @@ export default {
   },
 
   calendarPlan: {
+    claudeWorkflowHint: "For your Claude account, copy the prompt and continue in Claude. Generate Brief and Generate Plan use the provider in Global Settings.",
     savedPlans: "Saved plans",
     chooseSavedPlan: "Choose a saved plan…",
     copyClaudePrompt: "Copy Claude prompt",

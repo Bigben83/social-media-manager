@@ -16,6 +16,8 @@
         </select>
       </div>
 
+      <p class="text-xs text-gray-400 mb-4">{{ $t('calendarPlan.claudeWorkflowHint') }}</p>
+
       <!-- Configuration card -->
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
         <fieldset :disabled="loading || briefLoading" class="min-w-0">
@@ -101,7 +103,7 @@
             </div>
           </div>
           <div class="flex flex-wrap gap-2 shrink-0">
-            <button @click="copyClaudePrompt" class="px-4 py-2 bg-amber-800 hover:bg-amber-700 rounded-lg text-sm font-medium text-white">{{ $t('calendarPlan.copyClaudePrompt') }}</button>
+            <button @click="copyClaudePrompt" :disabled="!selectedPlatforms.length" class="px-4 py-2 bg-amber-800 hover:bg-amber-700 rounded-lg text-sm font-medium text-white">{{ $t('calendarPlan.copyClaudePrompt') }}</button>
             <button
               @click="generateBrief"
               :disabled="briefLoading || loading || !selectedPlatforms.length"
