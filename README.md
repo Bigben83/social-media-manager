@@ -37,7 +37,7 @@ Content Plan includes an optional campaign context box (up to 20,000 characters)
 
 Video shorts for Instagram and Facebook are planned in [the product roadmap](ROADMAP.md). The future workflow will separate script writing from video generation, with provider/model selection, captions, preview, and publishing review.
 
-## Claude app connector (MCP)
+## Claude and ChatGPT connectors (MCP)
 
 Connect SocialManager to Claude conversations using your Claude account. Claude writes the content in the conversation and calls SocialManager tools to save it. This workflow does not use an Anthropic text-generation API key. Organisation/compliance-management credentials are not generation credentials.
 
@@ -50,13 +50,26 @@ Server setup:
 
 On this installation the connector URL is `https://manager.tazz.com.au/mcp`. Its owner password is stored privately at `/home/social-media-manager-rollbacks/mcp-admin-password`. Retrieve it in your own terminal over SSH; do not paste it into a chat or commit it.
 
-The connector supports reading brand profiles, connected destinations, uploaded media, plans, drafts, and scheduled-post history; saving plans and draft batches; and optionally preparing and executing publishing/scheduling previews. A post preview binds the exact content, accounts, media, workspace, and time. Claude must present it and obtain explicit user confirmation before calling the execution tool. Completed results are cached; a lost dispatch response remains uncertain and requires checking the account or Scheduler before making another submission. The connector never silently retries an uncertain public post.
+The connector supports reading brand profiles, connected destinations, uploaded media, plans, drafts, and scheduled-post history; saving plans and draft batches; and optionally preparing and executing publishing/scheduling previews. A post preview binds the exact content, accounts, media, workspace, and time. The chat app must present it and obtain explicit user confirmation before calling the execution tool. Completed results are cached; a lost dispatch response remains uncertain and requires checking the account or Scheduler before making another submission. The connector never silently retries an uncertain public post.
 
 Only media already uploaded to the authorised workspace may be used by connector posting tools. OAuth access tokens expire after one hour, refresh tokens rotate, grants expire after 30 days, and replaying a used refresh token revokes its grant. Revoke connections immediately at `/connector`. Tokens/codes/browser sessions are hashed at rest; OAuth client secrets are encrypted. Connector authorization does not change the app's existing authentication or network access model.
 
 In **Content Plan**, choose the month/platforms, enter campaign context, and click **Copy Claude prompt**. Paste it into Claude with the connector enabled. Claude can save its plan and return a workspace-specific link. Open it from **Saved plans** or the returned link. The other Generate buttons continue to use the configured API/local provider; MCP does not turn a Claude chat subscription into an automatic server-side generation API.
 
 The endpoint uses the official MCP SDK with Streamable HTTP, OAuth discovery, PKCE, dynamic client registration, and revocation. Remote clients require internet access to the HTTPS URL. No additional host port is published. Configure the existing external proxy to preserve `Authorization`, `Accept`, and MCP headers and route `/mcp`, `/connector`, `/authorize`, `/token`, `/register`, `/revoke`, and the OAuth `/.well-known/` paths to this stack. This deployment's Nginx configuration includes those routes.
+
+### ChatGPT plugin setup
+
+ChatGPT uses the same MCP endpoint and owner password as Claude, with a separate OAuth approval. No OpenAI generation API key is needed for this conversation workflow.
+
+1. In ChatGPT on the web, open **Plugins**, select **+ → Add custom MCP server**, name it **SocialManager**, and enter `https://manager.tazz.com.au/mcp` as the server URL.
+2. Choose **OAuth** and **dynamic client registration (DCR)**. Leave static client ID/secret fields blank. This server advertises DCR rather than CIMD; do not choose anonymous or mixed authentication.
+3. Create the plugin, sign in on the SocialManager approval page using the existing connector owner password, and select its workspaces and permissions. Publishing/scheduling remain optional. Install the resulting plugin and select it with **@** in a conversation. Your ChatGPT workspace policies must allow custom MCP plugins.
+4. In SocialManager **Content Plan**, select the month/platforms and campaign context, then click **Copy ChatGPT prompt**. Paste it into ChatGPT with SocialManager selected. Open the returned plan link or use **Saved plans** afterwards. **Copy Claude prompt** remains available for Claude.
+
+Each chat app receives its own grant and tokens. Revoking ChatGPT at `/connector` leaves other grants active. Approved tools cover the same context, plans, drafts, uploaded media, and optional confirmed publishing/scheduling as Claude. The server validates workspace and scope permissions on every request; the ChatGPT origin does not authorize owner form submissions. The OAuth callback URI is supplied by ChatGPT during registration, including callback-specific paths; the server binds codes to that exact URI and uses PKCE.
+
+See OpenAI's [custom MCP plugin setup](https://developers.openai.com/api/docs/guides/custom-mcp-server), [OAuth authentication](https://developers.openai.com/plugins/build/auth), and [tool metadata reference](https://developers.openai.com/plugins/reference). UI labels and availability can vary by ChatGPT workspace. This adds a custom plugin for your account/workspace; it does not publish SocialManager to the public plugin directory. Other app Generate buttons continue to use the configured API/local provider.
 
 ## AI configuration
 

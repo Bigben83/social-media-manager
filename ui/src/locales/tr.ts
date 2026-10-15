@@ -1,4 +1,13 @@
 export default {
+  chatgptConnector: {
+    "title": "ChatGPT eklentisi (MCP)",
+    "description": "Marka bağlamını okumak, plan ve taslak oluşturmak, onaylanan gönderileri yayımlamak veya zamanlamak için ChatGPT sohbetlerini kullanın.",
+    "urlLabel": "Uzak MCP sunucu URL adresi",
+    "instructions": "Web üzerinden ChatGPT Eklentiler bölümünde + ve Özel MCP sunucusu ekle seçeneklerini açıp bu URL adresini girin. OAuth ve dinamik istemci kaydını (DCR) seçin; sabit istemci bilgilerini boş bırakın. Eklentiyi oluşturun, bağlayıcı parolanızla oturum açıp erişimi onaylayın, ardından eklentiyi yükleyin ve sohbette @ ile seçin. Çalışma alanı politikaları özel eklentileri kısıtlayabilir.",
+    "setupRequired": "Sunucu yöneticisinin bağlayıcı parolası kurulumunu tamamlaması gerekiyor.",
+    "manageAccess": "Bağlayıcı erişimini kur veya yönet",
+    "apiNote": "Bu akış OpenAI üretim API anahtarı olmadan ChatGPT sohbetinizi kullanır. Her sohbet uygulaması ayrı bir erişim onayı alır. Diğer Oluştur düğmeleri aşağıdaki API veya yerel sağlayıcıyı kullanır."
+},
   claudeConnector: {
     "title": "Claude uygulama bağlayıcısı",
     "description": "Marka bağlamını okumak, planlar ve taslaklar oluşturmak ve isteğe bağlı olarak onaylanan gönderileri yayımlamak veya zamanlamak için Claude sohbetlerini kullanın.",
@@ -117,15 +126,16 @@ export default {
   },
 
   calendarPlan: {
-    claudeWorkflowHint: "Claude hesabınız için istemi kopyalayıp Claude içinde devam edin. Özet Oluştur ve Plan Oluştur, Genel Ayarlar bölümündeki sağlayıcıyı kullanır.",
+    chatWorkflowHint: "ChatGPT veya Claude hesabınız için istemi kopyalayıp SocialManager eklentisinin etkin olduğu sohbette devam edin. Özet Oluştur ve Plan Oluştur, Genel Ayarlar sağlayıcısını kullanır.",
     savedPlans: "Kayıtlı planlar",
     chooseSavedPlan: "Kayıtlı bir plan seçin…",
     copyClaudePrompt: "Claude istemini kopyala",
-    claudePromptCopied: "İstem kopyalandı. SocialManager bağlayıcısı etkinken Claude sohbetinize yapıştırın.",
-    claudePromptReady: "SocialManager bağlayıcısı etkinken bu istemi Claude sohbetinize kopyalayın.",
-    claudePromptLabel: "Claude için istem",
-    claudePromptHint: "Claude tamamlanan planı bu çalışma alanına kaydedebilir. Daha sonra açmak için yukarıdaki Kayıtlı planlar listesini kullanın.",
-    openClaude: "Claude uygulamasını aç",
+    copyChatgptPrompt: "ChatGPT istemini kopyala",
+    chatPromptCopied: "İstem kopyalandı. SocialManager bağlayıcısı etkinken {app} sohbetinize yapıştırın.",
+    chatPromptReady: "SocialManager bağlayıcısı etkinken bu istemi {app} sohbetinize kopyalayın.",
+    chatPromptLabel: "{app} için istem",
+    chatPromptHint: "{app} tamamlanan planı bu çalışma alanına kaydedebilir. Daha sonra açmak için yukarıdaki Kayıtlı planlar listesini kullanın.",
+    openChatApp: "{app} uygulamasını aç",
     connectorSetup: "Bağlayıcı kurulumu",
     contextLabel: "Kampanya bağlamı ve kaynak gönderiler (isteğe bağlı)",
     contextPlaceholder: "Gelecek ay XXXX özelliğini öne çıkarın.\n\nBir tanıtım serisi oluşturun. İlk sekiz gönderi için şu metni kullanın:\n1. …\n2. …",

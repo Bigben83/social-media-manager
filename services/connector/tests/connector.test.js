@@ -27,8 +27,10 @@ before(async () => {
 });
 after(async()=>{await new Promise(resolve=>httpServer.close(resolve));});
 async function request(path,options={}){return fetch(base+path,{redirect:'manual',...options});}
-async function grant(scopes=['social:read','social:drafts','social:publish','social:schedule']) {
-  const registration=await request('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'Claude test',redirect_uris:['https://claude.ai/api/mcp/auth_callback'],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']})});assert.equal(registration.status,201);const client=await registration.json();
+async function grant(scopes=['social:read','social:drafts','social:publish','social:schedule'], host='claude') {
+  const clientName = host === 'chatgpt' ? 'ChatGPT test' : 'Claude test';
+  const redirectUri = host === 'chatgpt' ? 'https://chatgpt.com/connector/oauth/test-callback-id' : 'https://claude.ai/api/mcp/auth_callback';
+  const registration=await request('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:clientName,redirect_uris:[redirectUri],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']})});assert.equal(registration.status,201);const client=await registration.json();
   const verifier='v'.repeat(64),challenge=createHash('sha256').update(verifier).digest('base64url');
   const params=new URLSearchParams({client_id:client.client_id,response_type:'code',redirect_uri:client.redirect_uris[0],scope:scopes.join(' '),code_challenge:challenge,code_challenge_method:'S256',state:'test-state',resource:base+'/mcp'});
   const auth=await request('/authorize?'+params);assert.equal(auth.status,302);
@@ -74,23 +76,24 @@ test('draft saves are idempotent and reject destinations from another workspace'
   const {tokens}=await grant();const client=await connect(tokens);
   try{const args={workspaceId:'one',requestId:'draft-save-1',drafts:[{content:'An introduction',destinations:[{platform:'facebook',accountId:'page-one'}]}]};const first=data(await client.callTool({name:'create_drafts',arguments:args}));const again=data(await client.callTool({name:'create_drafts',arguments:args}));assert.deepEqual(again.draftIds,first.draftIds);const invalid=await client.callTool({name:'create_drafts',arguments:{...args,requestId:'invalid-destination',drafts:[{content:'Wrong workspace',destinations:[{platform:'facebook',accountId:'page-two'}]}]}});assert.equal(invalid.isError,true);}finally{await client.close();}
 });
-test('plans supplied by Claude preserve campaign context and link to the correct workspace',async()=>{
-  const {tokens}=await grant();const client=await connect(tokens);
+test('plans supplied by ChatGPT preserve campaign context and link to the correct workspace',async()=>{
+  const {tokens}=await grant(undefined,'chatgpt');const client=await connect(tokens);
   try{const args={workspaceId:'one',requestId:'plan-save-1',month:'2026-11',campaignContext:'Highlight XXXX',brief:{theme:'Introductions',pillars:['Feature']},posts:[{platform:'facebook',content:'Meet XXXX',week:1,suggestedDay:'Monday',suggestedTime:'09:00'}]};const result=data(await client.callTool({name:'save_content_plan',arguments:args}));assert.equal(result.success,true);assert.match(result.url,/workspace=one/);const plan=data(await client.callTool({name:'get_content_plan',arguments:{workspaceId:'one',planId:result.calendarId}}));assert.equal(plan.plan.campaignContext,args.campaignContext);}finally{await client.close();}
 });
 test('publishing only happens after confirmation and cannot repeat on a retry',async()=>{
-  const {tokens}=await grant();const client=await connect(tokens);const initial=deliveries.length;
+  const {tokens}=await grant(undefined,'chatgpt');const client=await connect(tokens);const initial=deliveries.length;
   try{const preview=data(await client.callTool({name:'prepare_post',arguments:{workspaceId:'one',content:'Publish this exact text',destinations:[{platform:'facebook',accountId:'page-one'}]}}));assert.equal(deliveries.length,initial);assert.equal(preview.requiresUserConfirmation,true);const params={workspaceId:'one',previewId:preview.previewId,confirmation:'CONFIRM'};const result=data(await client.callTool({name:'confirm_post',arguments:params}));assert.equal(result.success,true);await client.callTool({name:'confirm_post',arguments:params});assert.equal(deliveries.length,initial+1);assert.equal(deliveries.at(-1)[4]['Idempotency-Key'],'mcp_'+preview.previewId);}finally{await client.close();}
 });
 test('scheduling uses the approved UTC timestamp and preserves its outcome on retries',async()=>{
-  const {tokens}=await grant();const client=await connect(tokens);const initial=schedules.length;const scheduledAt=new Date(Date.now()+86400000).toISOString();
+  const {tokens}=await grant(undefined,'chatgpt');const client=await connect(tokens);const initial=schedules.length;const scheduledAt=new Date(Date.now()+86400000).toISOString();
   try{const preview=data(await client.callTool({name:'prepare_post',arguments:{workspaceId:'one',content:'Later post',destinations:[{platform:'facebook',accountId:'page-one'}],scheduledAt}}));const args={workspaceId:'one',previewId:preview.previewId,confirmation:'CONFIRM'};await client.callTool({name:'confirm_post',arguments:args});await client.callTool({name:'confirm_post',arguments:args});assert.equal(schedules.length,initial+1);assert.equal(schedules.at(-1)[2].scheduledAt,scheduledAt);}finally{await client.close();}
 });
 test('revocation immediately blocks existing access tokens',async()=>{
   const {tokens}=await grant();const info=await service.provider.verifyAccessToken(tokens.access_token);await service.provider.revokeGrant(info.extra.grantId);const denied=await request('/mcp',{method:'POST',headers:{Authorization:'Bearer '+tokens.access_token,'Content-Type':'application/json'},body:'{}'});assert.equal(denied.status,401);
 });
 test('connector owner forms reject forged requests and unsafe dynamic redirects',async()=>{
-  const login=await request('/connector/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({password,csrf:'forged'})});assert.equal(login.status,403);
+  const form=await request('/connector/login');const csrf=/name="csrf" value="([^"]+)"/.exec(await form.text())[1];const cookie=form.headers.getSetCookie().map(value=>value.split(';')[0]).join('; ');
+  const login=await request('/connector/login',{method:'POST',headers:{Origin:'https://chatgpt.com',Cookie:cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({password,csrf})});assert.equal(login.status,403);
   const invalid=await request('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({redirect_uris:['http://evil.example/callback'],token_endpoint_auth_method:'none'})});assert.equal(invalid.status,400);
 });
 test('PKCE, redirect binding and resource binding reject incorrect exchanges without consuming the valid code',async()=>{
@@ -113,4 +116,35 @@ test('connector configuration keeps existing settings and never prints the passw
     const password=fs.readFileSync(path.join(folder,'.connector-owner-password'),'utf8').trim();assert.equal(configured.stdout.includes(password),false);const originalEnv=fs.readFileSync(path.join(folder,'.env'),'utf8');assert.match(originalEnv,/ENCRYPTION_KEY=preserve-this-setting/);assert.match(originalEnv,/MCP_PUBLIC_URL=https:\/\/manager.example\/mcp/);
     const repeated=spawnSync(process.execPath,[script,'--url','https://manager.example/mcp'],{encoding:'utf8'});assert.equal(repeated.status,0);assert.equal(fs.readFileSync(path.join(folder,'.connector-owner-password'),'utf8').trim(),password);
   }finally{fs.rmSync(folder,{recursive:true,force:true});}
+});
+
+
+test('ChatGPT origins are allowed without weakening connector owner form protection',async()=>{
+  for(const origin of ['https://chatgpt.com','https://claude.ai']){
+    const mcp=await request('/mcp',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:'{}'});assert.equal(mcp.status,401);assert.match(mcp.headers.get('www-authenticate'),/resource_metadata=/);
+  }
+  for(const origin of ['https://chatgpt.com.evil.example','https://evil.example','null']){
+    const denied=await request('/mcp',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:'{}'});assert.equal(denied.status,403);
+  }
+
+});
+
+test('ChatGPT DCR grants expose scope metadata and enforce schedule-only and workspace access',async()=>{
+  const {tokens,client:registration,browser}=await grant(['social:read','social:drafts','social:schedule'],'chatgpt');const client=await connect(tokens);
+  try{
+    const tools=(await client.listTools()).tools;
+    assert.deepEqual(tools.find(t=>t.name==='create_drafts')._meta.securitySchemes,[{type:'oauth2',scopes:['social:read','social:drafts']}]);
+    assert.deepEqual(tools.find(t=>t.name==='confirm_post')._meta.securitySchemes,[{type:'oauth2',scopes:['social:read','social:schedule']}]);
+    assert.equal(tools.find(t=>t.name==='confirm_post').annotations.destructiveHint,true);
+    assert.equal(tools.find(t=>t.name==='confirm_post').annotations.openWorldHint,true);
+    assert.equal(tools.find(t=>t.name==='list_workspaces').annotations.readOnlyHint,true);
+    assert.equal(JSON.stringify(tools).includes('Claude'),false);
+    const dashboard=await(await browser('/connector')).text();assert.match(dashboard,/ChatGPT test/);assert.match(dashboard,/Claude test/);
+    const params={workspaceId:'one',content:'Schedule-only permission',destinations:[{platform:'facebook',accountId:'page-one'}]};
+    assert.equal((await client.callTool({name:'prepare_post',arguments:params})).isError,true);
+    assert.equal((await client.callTool({name:'get_workspace_context',arguments:{workspaceId:'two'}})).isError,true);
+    const info=await service.provider.verifyAccessToken(tokens.access_token);assert.equal((await service.provider.getGrant(info.extra.grantId)).clientId,registration.client_id);
+    const otherGrant=(await db.collection('mcp_grants').find({clientName:'Claude test'}).toArray()).find(value=>!value.revokedAt);assert.ok(otherGrant);
+    await service.provider.revokeGrant(info.extra.grantId);await assert.rejects(client.listTools());assert.equal((await service.provider.getGrant(otherGrant._id)).clientName,'Claude test');
+  }finally{await client.close();}
 });

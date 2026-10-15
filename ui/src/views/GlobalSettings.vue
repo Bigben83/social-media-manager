@@ -7,7 +7,8 @@
         <p class="text-sm text-gray-400">{{ $t('globalSettings.subtitle') }}</p>
       </div>
 
-      <ClaudeConnector />
+      <ChatConnector provider="chatgpt" />
+      <ChatConnector provider="claude" />
 
       <!-- ═══ FACEBOOK & INSTAGRAM APP CREDENTIALS ═════════════════════════════ -->
       <div id="meta-app" class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
@@ -451,7 +452,7 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore, PROVIDER_MODELS, CLOUD_PROVIDER_NAMES } from '../stores/ai'
-import ClaudeConnector from '../components/ClaudeConnector.vue'
+import ChatConnector from '../components/ChatConnector.vue'
 
 const { t } = useI18n()
 const platformsStore = usePlatformsStore()

@@ -16,7 +16,7 @@
         </select>
       </div>
 
-      <p class="text-xs text-gray-400 mb-4">{{ $t('calendarPlan.claudeWorkflowHint') }}</p>
+      <p class="text-xs text-gray-400 mb-4">{{ $t('calendarPlan.chatWorkflowHint') }}</p>
 
       <!-- Configuration card -->
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
@@ -103,7 +103,8 @@
             </div>
           </div>
           <div class="flex flex-wrap gap-2 shrink-0">
-            <button @click="copyClaudePrompt" :disabled="!selectedPlatforms.length" class="px-4 py-2 bg-amber-800 hover:bg-amber-700 rounded-lg text-sm font-medium text-white">{{ $t('calendarPlan.copyClaudePrompt') }}</button>
+            <button @click="copyChatPrompt('chatgpt')" :disabled="!selectedPlatforms.length" class="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 rounded-lg text-sm font-medium text-white">{{ $t('calendarPlan.copyChatgptPrompt') }}</button>
+            <button @click="copyChatPrompt('claude')" :disabled="!selectedPlatforms.length" class="px-4 py-2 bg-amber-800 hover:bg-amber-700 rounded-lg text-sm font-medium text-white">{{ $t('calendarPlan.copyClaudePrompt') }}</button>
             <button
               @click="generateBrief"
               :disabled="briefLoading || loading || !selectedPlatforms.length"
@@ -125,12 +126,12 @@
         </fieldset>
       </div>
 
-      <div v-if="showClaudePrompt" class="bg-gray-900 border border-amber-800/50 rounded-2xl p-5 mb-6">
-        <p class="text-sm text-amber-200 mb-2">{{ claudePromptCopied ? $t('calendarPlan.claudePromptCopied') : $t('calendarPlan.claudePromptReady') }}</p>
-        <textarea :value="claudePrompt" readonly rows="8" :aria-label="$t('calendarPlan.claudePromptLabel')" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200"></textarea>
-        <p class="text-xs text-gray-400 mt-2">{{ $t('calendarPlan.claudePromptHint') }}</p>
-        <a href="https://claude.ai/new" target="_blank" rel="noopener" class="inline-block mt-3 text-sm text-amber-300 underline">{{ $t('calendarPlan.openClaude') }}</a>
-        <a href="/global-settings#claude-connector" class="ml-4 text-xs text-gray-400 underline">{{ $t('calendarPlan.connectorSetup') }}</a>
+      <div v-if="showChatPrompt" class="bg-gray-900 border border-amber-800/50 rounded-2xl p-5 mb-6">
+        <p class="text-sm text-amber-200 mb-2">{{ chatPromptCopied ? $t('calendarPlan.chatPromptCopied', { app: chatAppName }) : $t('calendarPlan.chatPromptReady', { app: chatAppName }) }}</p>
+        <textarea :value="chatPrompt" readonly rows="8" :aria-label="$t('calendarPlan.chatPromptLabel', { app: chatAppName })" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200"></textarea>
+        <p class="text-xs text-gray-400 mt-2">{{ $t('calendarPlan.chatPromptHint', { app: chatAppName }) }}</p>
+        <a :href="chatProvider === 'chatgpt' ? 'https://chatgpt.com/' : 'https://claude.ai/new'" target="_blank" rel="noopener" class="inline-block mt-3 text-sm text-amber-300 underline">{{ $t('calendarPlan.openChatApp', { app: chatAppName }) }}</a>
+        <a :href="'/global-settings#' + chatProvider + '-connector'" class="ml-4 text-xs text-gray-400 underline">{{ $t('calendarPlan.connectorSetup') }}</a>
       </div>
 
       <!-- Brief preview (approval step) -->
@@ -343,10 +344,12 @@ const postsPerWeek = ref(3)
 const campaignContext = ref('')
 const savedPlans = ref<any[]>([])
 const selectedSavedPlan = ref('')
-const showClaudePrompt = ref(false)
-const claudePromptCopied = ref(false)
-const claudePrompt = computed(() => [
-  'Use the SocialManager MCP connector to create and save a content plan. Write the content in this Claude conversation; do not invoke a generation API.',
+const chatProvider = ref<'claude' | 'chatgpt'>('claude')
+const chatAppName = computed(() => chatProvider.value === 'chatgpt' ? 'ChatGPT' : 'Claude')
+const showChatPrompt = ref(false)
+const chatPromptCopied = ref(false)
+const chatPrompt = computed(() => [
+  'Use the SocialManager MCP connector to create and save a content plan. Write the content in this ' + chatAppName.value + ' conversation; do not invoke a generation API.',
   'Workspace: ' + (workspaceStore.activeWorkspace?.name || '') + ' (' + workspaceStore.activeWorkspaceId + '). Read get_workspace_context for this exact workspace first.',
   'Month: ' + selectedMonth.value + '. Platforms: ' + selectedPlatforms.value.join(', ') + '. Posts per week per platform: ' + postsPerWeek.value + ' for weeks 1–4.',
   selectedAccount.value ? 'Account profile: ' + selectedAccount.value : 'Use the workspace brand context.',
@@ -355,10 +358,11 @@ const claudePrompt = computed(() => [
   'Write a narrative brief and platform-specific posts, then use save_content_plan with a stable requestId, the exact campaignContext, and this workspaceId. Include week, suggestedDay, suggestedTime, hashtags and postType for each post.',
   'Return the saved plan link. Do not publish or schedule anything unless I separately request it and confirm its preview.',
 ].join('\n\n'))
-async function copyClaudePrompt() {
-  showClaudePrompt.value = true
-  claudePromptCopied.value = false
-  try { await navigator.clipboard.writeText(claudePrompt.value); claudePromptCopied.value = true } catch { /* The prompt remains available to copy manually. */ }
+async function copyChatPrompt(provider: 'claude' | 'chatgpt') {
+  chatProvider.value = provider
+  showChatPrompt.value = true
+  chatPromptCopied.value = false
+  try { await navigator.clipboard.writeText(chatPrompt.value); chatPromptCopied.value = true } catch { /* The prompt remains available to copy manually. */ }
 }
 async function refreshSavedPlans() {
   try { savedPlans.value = (await axios.get('/api/ai/content-calendars')).data.calendars || [] } catch { /* Generation remains available when history cannot load. */ }
@@ -389,7 +393,7 @@ const pendingBriefMonthName = ref('')
 watch([campaignContext, selectedMonth, selectedAccount, () => selectedPlatforms.value.join(',')], () => {
   pendingBrief.value = null
   pendingBriefMonthName.value = ''
-  claudePromptCopied.value = false
+  chatPromptCopied.value = false
 })
 
 interface ProfileAccount { key: string; label: string }

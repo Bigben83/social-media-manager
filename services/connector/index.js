@@ -24,7 +24,7 @@ async function createApp(options={}){
   app.use((req,res,next)=>{
     const host=req.headers.host?.split(':')[0];
     if(host!==resourceUrl.hostname&&!['localhost','127.0.0.1','connector'].includes(host))return res.status(403).json({error:'Invalid host'});
-    if(req.headers.origin&&req.headers.origin!==resourceUrl.origin&&!['https://claude.ai','https://claude.com'].includes(req.headers.origin))return res.status(403).json({error:'Invalid origin'});
+    if(req.headers.origin&&req.headers.origin!==resourceUrl.origin&&!['https://claude.ai','https://claude.com','https://chatgpt.com'].includes(req.headers.origin))return res.status(403).json({error:'Invalid origin'});
     next();
   });
   if(!configured){

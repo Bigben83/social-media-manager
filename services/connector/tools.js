@@ -13,7 +13,7 @@ const objectId = text => new ObjectId(createHash('sha256').update(text).digest('
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const publicResult = data => ({ content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data });
 function createToolServer({ db, auth, provider, callGateway, callScheduler, publicOrigin, log }) {
-  const server = new McpServer({ name: 'SocialManager', version: '1.0.0' }, { instructions: 'Use list_workspaces first and explicitly identify the intended workspace. Claude writes content in this conversation; saving plans/drafts does not call a generation API. Before publishing or scheduling, prepare_post, present the exact preview to the user, and call confirm_post only after their explicit confirmation. Never claim a post was published unless the returned delivery results confirm it.' });
+  const server = new McpServer({ name: 'SocialManager', version: '1.1.0' }, { instructions: 'Use list_workspaces first and explicitly identify the intended workspace. Write content in this conversation; saving plans/drafts does not call a generation API. Before publishing or scheduling, prepare_post, present the exact preview to the user, and call confirm_post only after their explicit confirmation. Never claim a post was published unless the returned delivery results confirm it.' });
   async function check(workspaceId, scope) {
     const grant = await provider.getGrant(auth.extra.grantId);
     if (!auth.scopes.includes(scope) || !grant.scopes.includes(scope)) throw new Error('Permission not granted: ' + scope);
@@ -54,7 +54,13 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
     // Hidden tools remain enforced server-side even if a client caches an older listing.
     if (scope && !auth.scopes.includes(scope)) return;
     if (options.dispatch && !auth.scopes.some(scope => ['social:publish','social:schedule'].includes(scope))) return;
-    server.registerTool(name, { description, inputSchema: schema, annotations: { readOnlyHint: options.readOnly || false, destructiveHint: options.destructive || false, idempotentHint: options.idempotent || false, openWorldHint: options.openWorld || false } }, async args => {
+    const scopes = scope ? [...new Set(['social:read', scope])] : ['social:read'];
+    // The SDK preserves the documented ChatGPT compatibility metadata on tools/list.
+    // Each dispatch scheme is an alternative; publish and schedule are separate grants.
+    const securitySchemes = options.dispatch
+      ? auth.scopes.filter(value => ['social:publish','social:schedule'].includes(value)).map(value => ({ type: 'oauth2', scopes: [...scopes, value] }))
+      : [{ type: 'oauth2', scopes }];
+    server.registerTool(name, { description, inputSchema: schema, _meta: { securitySchemes }, annotations: { readOnlyHint: options.readOnly || false, destructiveHint: options.destructive || false, idempotentHint: options.idempotent || false, openWorldHint: options.openWorld || false } }, async args => {
       try {
         if (args.workspaceId) await check(args.workspaceId, scope || 'social:read');
         const result = await callback(args);
@@ -84,21 +90,21 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
   tool('get_content_plan','Read a saved calendar, including the campaign context and drafted posts.',{workspaceId:workspaceSchema,planId:idSchema},'social:read',async({workspaceId,planId})=>{
     const plan=await db.collection('content_calendars').findOne({_id:new ObjectId(planId),workspaceId});if(!plan)throw new Error('Plan not found');return {plan};
   },{readOnly:true});
-  tool('save_content_plan','Save a complete content plan written in this Claude conversation. Does not generate content or publish. Reuse requestId to avoid duplicates.',{workspaceId:workspaceSchema,requestId:requestSchema,month:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),accountKey:z.string().max(200).optional(),campaignContext:z.string().max(20000).default(''),brief:z.object({theme:z.string().min(1).max(2000),pillars:z.array(z.string().max(1000)).max(20),toneGuidance:z.string().max(2000).default(''),platformNotes:z.record(z.enum(PLATFORMS),z.string().max(2000)).optional()}),posts:z.array(postSchema).min(1).max(196)},'social:drafts',async args=>{
+  tool('save_content_plan','Save a complete content plan written in this conversation. Does not generate content or publish. Reuse requestId to avoid duplicates.',{workspaceId:workspaceSchema,requestId:requestSchema,month:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),accountKey:z.string().max(200).optional(),campaignContext:z.string().max(20000).default(''),brief:z.object({theme:z.string().min(1).max(2000),pillars:z.array(z.string().max(1000)).max(20),toneGuidance:z.string().max(2000).default(''),platformNotes:z.record(z.enum(PLATFORMS),z.string().max(2000)).optional()}),posts:z.array(postSchema).min(1).max(196)},'social:drafts',async args=>{
     const {workspaceId,requestId,...content}=args;const _id=objectId(`${auth.extra.grantId}:${workspaceId}:plan:${requestId}`),digest=fingerprint(content);
     const old=await db.collection('content_calendars').findOne({_id,workspaceId});if(old&&old.mcpFingerprint!==digest)throw new Error('requestId already saved a different plan');
     const platforms=[...new Set(content.posts.map(p=>p.platform))];
     const monthName=new Date(content.month+'-01T00:00:00Z').toLocaleString('en',{month:'long',year:'numeric',timeZone:'UTC'});
-    await db.collection('content_calendars').updateOne({_id,workspaceId},{$setOnInsert:{...content,workspaceId,monthName,platforms,postsPerWeek:Math.max(1,Math.round(content.posts.length/platforms.length/4)),source:'claude-mcp',mcpGrantId:auth.extra.grantId,mcpFingerprint:digest,createdAt:new Date()}},{upsert:true});
+    await db.collection('content_calendars').updateOne({_id,workspaceId},{$setOnInsert:{...content,workspaceId,monthName,platforms,postsPerWeek:Math.max(1,Math.round(content.posts.length/platforms.length/4)),source:'mcp',mcpGrantId:auth.extra.grantId,mcpFingerprint:digest,createdAt:new Date()}},{upsert:true});
     return {success:true,calendarId:String(_id),postCount:content.posts.length,url:publicOrigin+'/calendar-plan?calendar='+_id+'&workspace='+encodeURIComponent(workspaceId)};
   },{idempotent:true});
   tool('list_drafts','Read saved drafts in this workspace.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({drafts:await db.collection('drafts').find({workspaceId}).sort({updatedAt:-1}).limit(limit).toArray()}),{readOnly:true});
-  tool('create_drafts','Save posts written by Claude as reviewable drafts. Does not publish or schedule delivery. Reuse requestId on retries.',{workspaceId:workspaceSchema,requestId:requestSchema,drafts:z.array(z.object({content:z.string().trim().min(1).max(20000),firstComment:z.string().max(10000).default(''),destinations:z.array(destinationSchema).max(20).default([])})).min(1).max(100)},'social:drafts',async({workspaceId,requestId,drafts})=>{
+  tool('create_drafts','Save posts written in this conversation as reviewable drafts. Does not publish or schedule delivery. Reuse requestId on retries.',{workspaceId:workspaceSchema,requestId:requestSchema,drafts:z.array(z.object({content:z.string().trim().min(1).max(20000),firstComment:z.string().max(10000).default(''),destinations:z.array(destinationSchema).max(20).default([])})).min(1).max(100)},'social:drafts',async({workspaceId,requestId,drafts})=>{
     const ids=[];
     for(let i=0;i<drafts.length;i++){
       const draft=drafts[i];await checkDestinations(workspaceId,draft.destinations);const _id=objectId(`${auth.extra.grantId}:${workspaceId}:draft:${requestId}:${i}`),digest=fingerprint(draft);
       const old=await db.collection('drafts').findOne({_id,workspaceId});if(old&&old.mcpFingerprint!==digest)throw new Error('requestId already saved different draft text');
-      await db.collection('drafts').updateOne({_id,workspaceId},{$setOnInsert:{...draft,destinations:draft.destinations.map(d=>({...d,key:destinationKey(d),selected:true})),mediaUrl:'',scheduledAt:'',source:'claude-mcp',mcpGrantId:auth.extra.grantId,mcpFingerprint:digest,createdAt:new Date(),updatedAt:new Date()}},{upsert:true});ids.push(String(_id));
+      await db.collection('drafts').updateOne({_id,workspaceId},{$setOnInsert:{...draft,destinations:draft.destinations.map(d=>({...d,key:destinationKey(d),selected:true})),mediaUrl:'',scheduledAt:'',source:'mcp',mcpGrantId:auth.extra.grantId,mcpFingerprint:digest,createdAt:new Date(),updatedAt:new Date()}},{upsert:true});ids.push(String(_id));
     }
     return {success:true,draftIds:ids,count:ids.length,url:publicOrigin+'/scheduler?workspace='+encodeURIComponent(workspaceId)};
   },{idempotent:true});

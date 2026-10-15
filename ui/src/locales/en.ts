@@ -1,4 +1,13 @@
 export default {
+  chatgptConnector: {
+    "title": "ChatGPT plugin (MCP)",
+    "description": "Use ChatGPT conversations to read brand context, create plans and drafts, and optionally publish or schedule confirmed posts.",
+    "urlLabel": "Remote MCP server URL",
+    "instructions": "In ChatGPT on the web, open Plugins, select + then Add custom MCP server, and enter this URL. Choose OAuth and dynamic client registration (DCR); leave static client credentials blank. Create the plugin, sign in with your connector password and approve access, then install it and select it with @ in a conversation. Workspace policies may restrict custom plugins.",
+    "setupRequired": "The server administrator needs to finish connector password setup.",
+    "manageAccess": "Set up or manage connector access",
+    "apiNote": "This uses your ChatGPT conversation without an OpenAI generation API key. Each chat app has a separate access grant. Other Generate buttons use the API or local provider configured below."
+},
   claudeConnector: {
     "title": "Claude app connector",
     "description": "Use Claude conversations to read brand context, create plans and drafts, and optionally publish or schedule confirmed posts.",
@@ -117,15 +126,16 @@ export default {
   },
 
   calendarPlan: {
-    claudeWorkflowHint: "For your Claude account, copy the prompt and continue in Claude. Generate Brief and Generate Plan use the provider in Global Settings.",
+    chatWorkflowHint: "For your ChatGPT or Claude account, copy its prompt and continue in that chat app with the SocialManager plugin enabled. Generate Brief and Generate Plan use the provider in Global Settings.",
     savedPlans: "Saved plans",
     chooseSavedPlan: "Choose a saved plan…",
     copyClaudePrompt: "Copy Claude prompt",
-    claudePromptCopied: "Prompt copied. Paste it into Claude with your SocialManager connector enabled.",
-    claudePromptReady: "Copy this prompt into Claude with your SocialManager connector enabled.",
-    claudePromptLabel: "Prompt for Claude",
-    claudePromptHint: "Claude can save the completed plan back to this workspace. Use Saved plans above to open it afterwards.",
-    openClaude: "Open Claude",
+    copyChatgptPrompt: "Copy ChatGPT prompt",
+    chatPromptCopied: "Prompt copied. Paste it into {app} with your SocialManager connector enabled.",
+    chatPromptReady: "Copy this prompt into {app} with your SocialManager connector enabled.",
+    chatPromptLabel: "Prompt for {app}",
+    chatPromptHint: "{app} can save the completed plan back to this workspace. Use Saved plans above to open it afterwards.",
+    openChatApp: "Open {app}",
     connectorSetup: "Connector setup",
     contextLabel: "Campaign context and source posts (optional)",
     contextPlaceholder: "Next month, highlight the XXXX feature.\n\nCreate an introduction series. Use the following text for the first eight posts:\n1. …\n2. …",
