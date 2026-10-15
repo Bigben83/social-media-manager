@@ -1,3 +1,5 @@
+![SocialManager header](image/header.png)
+
 # SocialManager
 
 Self-hosted social media management for separate brands and workspaces. The UI supports English and Turkish. The application uses Vue 3, Fastify 5 on Node 24, MongoDB 7, Redis/BullMQ, and Nginx.
