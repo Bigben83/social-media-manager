@@ -82,10 +82,45 @@ test('read-only access hides write tools and cannot read an unapproved workspace
   const {tokens}=await grant(['social:read']);const client=await connect(tokens);
   try{const tools=(await client.listTools()).tools.map(t=>t.name);assert.ok(!tools.includes('create_drafts'));assert.ok(!tools.includes('confirm_post'));const workspaces=data(await client.callTool({name:'list_workspaces',arguments:{}}));assert.deepEqual(workspaces.workspaces,[{id:'one',name:'Workspace One'}]);const context=await client.callTool({name:'get_workspace_context',arguments:{workspaceId:'one'}});assert.equal(JSON.stringify(context).includes('must-never-appear'),false);const denied=await client.callTool({name:'get_workspace_context',arguments:{workspaceId:'two'}});assert.equal(denied.isError,true);}finally{await client.close();}
 });
-test('draft saves are idempotent and reject destinations from another workspace',async()=>{
+test('draft saves retain shared images and videos, reject invalid batches and remain idempotent',async()=>{
   const {tokens}=await grant();const client=await connect(tokens);
-  try{const args={workspaceId:'one',requestId:'draft-save-1',drafts:[{content:'An introduction',destinations:[{platform:'facebook',accountId:'page-one'}]}]};const first=data(await client.callTool({name:'create_drafts',arguments:args}));const again=data(await client.callTool({name:'create_drafts',arguments:args}));assert.deepEqual(again.draftIds,first.draftIds);const invalid=await client.callTool({name:'create_drafts',arguments:{...args,requestId:'invalid-destination',drafts:[{content:'Wrong workspace',destinations:[{platform:'facebook',accountId:'page-two'}]}]}});assert.equal(invalid.isError,true);}finally{await client.close();}
+  const destination={platform:'facebook',accountId:'page-one'};
+  await db.collection('media_files').insertOne({filename:'owned.png',workspaceId:'one'});
+  await db.collection('media_files').insertOne({filename:'clip.mp4',workspaceId:'one'});
+  await db.collection('media_files').insertOne({filename:'private.png',workspaceId:'two'});
+  try{
+    const args={workspaceId:'one',requestId:'draft-save-1',drafts:[{content:'An introduction',destinations:[destination]}]};
+    const first=data(await client.callTool({name:'create_drafts',arguments:args}));
+    const again=data(await client.callTool({name:'create_drafts',arguments:args}));
+    assert.deepEqual(again.draftIds,first.draftIds);assert.equal(first.drafts[0].hasMedia,false);
+    for(const [index,attachment,url] of [
+      [0,{destinations:[{...destination,imageUrl:'/media/owned.png'}]},base+'/media/owned.png'],
+      [1,{destinations:[{...destination,videoUrl:'/media/clip.mp4'}]},base+'/media/clip.mp4'],
+      [2,{mediaUrl:'/media/owned.png',destinations:[]},base+'/media/owned.png']
+    ]){
+      const input={workspaceId:'one',requestId:'media-draft-'+index,drafts:[{content:'Attached draft',...attachment}]};
+      const saved=data(await client.callTool({name:'create_drafts',arguments:input}));
+      assert.equal(saved.drafts[0].mediaUrl,url);assert.equal(saved.drafts[0].hasMedia,true);
+      const rows=data(await client.callTool({name:'list_drafts',arguments:{workspaceId:'one'}})).drafts;
+      assert.equal(rows.find(d=>d._id===saved.draftIds[0]).mediaUrl,url);
+      const retry=data(await client.callTool({name:'create_drafts',arguments:input}));assert.deepEqual(retry.draftIds,saved.draftIds);
+    }
+    const initial=await db.collection('drafts').countDocuments({workspaceId:'one'});
+    for(const [index,invalid] of [
+      [0,{destinations:[{platform:'facebook',accountId:'page-two'}]}],
+      [1,{mediaUrl:'/media/private.png'}],
+      [2,{destinations:[{...destination,imageUrl:'/media/private.png'}]}],
+      [3,{mediaUrl:'https://other.example/media/owned.png'}],
+      [4,{mediaUrl:'/media/missing.png'}],
+      [5,{mediaUrl:'/media/owned.png',destinations:[{...destination,videoUrl:'/media/clip.mp4'}]}]
+    ]){
+      const rejected=await client.callTool({name:'create_drafts',arguments:{workspaceId:'one',requestId:'rejected-media-'+index,drafts:[{content:'Valid first draft'},{content:'Invalid attachment',...invalid}]}});
+      assert.equal(rejected.isError,true);assert.equal(await db.collection('drafts').countDocuments({workspaceId:'one'}),initial);
+    }
+    const changed=await client.callTool({name:'create_drafts',arguments:{...args,drafts:[{content:'Changed',destinations:[destination]}]}});assert.equal(changed.isError,true);
+  }finally{await client.close();}
 });
+
 test('plans supplied by ChatGPT preserve campaign context and link to the correct workspace',async()=>{
   const {tokens}=await grant(undefined,'chatgpt');const client=await connect(tokens);
   try{const args={workspaceId:'one',requestId:'plan-save-1',month:'2026-11',campaignContext:'Highlight XXXX',brief:{theme:'Introductions',pillars:['Feature']},posts:[{platform:'facebook',content:'Meet XXXX',week:1,suggestedDay:'Monday',suggestedTime:'09:00'}]};const result=data(await client.callTool({name:'save_content_plan',arguments:args}));assert.equal(result.success,true);assert.match(result.url,/workspace=one/);const plan=data(await client.callTool({name:'get_content_plan',arguments:{workspaceId:'one',planId:result.calendarId}}));assert.equal(plan.plan.campaignContext,args.campaignContext);}finally{await client.close();}

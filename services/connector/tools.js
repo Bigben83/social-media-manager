@@ -37,18 +37,28 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
     }
     return result;
   }
+  async function checkMedia(workspaceId, value) {
+    const url = new URL(value, publicOrigin);
+    const match = /^\/media\/([a-zA-Z0-9_.-]+)$/.exec(url.pathname);
+    if (url.origin !== publicOrigin || !match || !await db.collection('media_files').findOne({ filename: match[1], workspaceId })) throw new Error('Use media uploaded to this workspace Media Library');
+    return url.href;
+  }
   async function checkDestinations(workspaceId, destinations) {
     const available = await accounts(workspaceId);
     for (const destination of destinations) {
       if (!available.some(account => account.key === destinationKey(destination))) throw new Error('Destination is not connected to this workspace: ' + destinationKey(destination));
       for (const field of ['imageUrl','videoUrl']) {
-        if (!destination[field]) continue;
-        const url = new URL(destination[field], publicOrigin);
-        const match = /^\/media\/([a-zA-Z0-9_.-]+)$/.exec(url.pathname);
-        if (url.origin !== publicOrigin || !match || !await db.collection('media_files').findOne({ filename: match[1], workspaceId })) throw new Error('Use media uploaded to this workspace Media Library');
-        destination[field] = url.href;
+        if (destination[field]) destination[field] = await checkMedia(workspaceId, destination[field]);
       }
     }
+  }
+  async function checkDraftMedia(workspaceId, draft) {
+    const media = [...new Set([draft.mediaUrl, ...draft.destinations.flatMap(d => [d.imageUrl, d.videoUrl])].filter(Boolean))];
+    // The draft editor has one shared attachment. Separate drafts retain different account artwork.
+    const normalized = [];
+    for (const value of media) normalized.push(await checkMedia(workspaceId, value));
+    if (new Set(normalized).size > 1) throw new Error('Use one shared image or video per draft. Create separate drafts for different attachments.');
+    return normalized[0] || '';
   }
   function tool(name, description, schema, scope, callback, options = {}) {
     // Hidden tools remain enforced server-side even if a client caches an older listing.
@@ -99,14 +109,20 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
     return {success:true,calendarId:String(_id),postCount:content.posts.length,url:publicOrigin+'/calendar-plan?calendar='+_id+'&workspace='+encodeURIComponent(workspaceId)};
   },{idempotent:true});
   tool('list_drafts','Read saved drafts in this workspace.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({drafts:await db.collection('drafts').find({workspaceId}).sort({updatedAt:-1}).limit(limit).toArray()}),{readOnly:true});
-  tool('create_drafts','Save posts written in this conversation as reviewable drafts. Does not publish or schedule delivery. Reuse requestId on retries.',{workspaceId:workspaceSchema,requestId:requestSchema,drafts:z.array(z.object({content:z.string().trim().min(1).max(20000),firstComment:z.string().max(10000).default(''),destinations:z.array(destinationSchema).max(20).default([])})).min(1).max(100)},'social:drafts',async({workspaceId,requestId,drafts})=>{
-    const ids=[];
+  tool('create_drafts','Save posts written in this conversation as reviewable drafts. Use list_media URLs for one shared image or video per draft, using mediaUrl or destination imageUrl/videoUrl. Does not generate or upload images, publish, or schedule delivery. Only claim an attachment when the result confirms hasMedia. Reuse requestId on retries.',{workspaceId:workspaceSchema,requestId:requestSchema,drafts:z.array(z.object({content:z.string().trim().min(1).max(20000),firstComment:z.string().max(10000).default(''),mediaUrl:z.string().max(2048).optional(),destinations:z.array(destinationSchema).max(20).default([])})).min(1).max(100)},'social:drafts',async({workspaceId,requestId,drafts})=>{
+    const ids=[],savedDrafts=[],prepared=[];
+    // Validate the complete batch before saving, so an invalid attachment leaves no partial batch.
     for(let i=0;i<drafts.length;i++){
       const draft=drafts[i];await checkDestinations(workspaceId,draft.destinations);const _id=objectId(`${auth.extra.grantId}:${workspaceId}:draft:${requestId}:${i}`),digest=fingerprint(draft);
       const old=await db.collection('drafts').findOne({_id,workspaceId});if(old&&old.mcpFingerprint!==digest)throw new Error('requestId already saved different draft text');
-      await db.collection('drafts').updateOne({_id,workspaceId},{$setOnInsert:{...draft,destinations:draft.destinations.map(d=>({...d,key:destinationKey(d),selected:true})),mediaUrl:'',scheduledAt:'',source:'mcp',mcpGrantId:auth.extra.grantId,mcpFingerprint:digest,createdAt:new Date(),updatedAt:new Date()}},{upsert:true});ids.push(String(_id));
+      prepared.push({draft,_id,digest,mediaUrl:await checkDraftMedia(workspaceId,draft)});
     }
-    return {success:true,draftIds:ids,count:ids.length,url:publicOrigin+'/scheduler?workspace='+encodeURIComponent(workspaceId)};
+    for(const {draft,_id,digest,mediaUrl} of prepared){
+      await db.collection('drafts').updateOne({_id,workspaceId},{$setOnInsert:{...draft,destinations:draft.destinations.map(d=>({...d,key:destinationKey(d),selected:true})),mediaUrl,scheduledAt:'',source:'mcp',mcpGrantId:auth.extra.grantId,mcpFingerprint:digest,createdAt:new Date(),updatedAt:new Date()}},{upsert:true});ids.push(String(_id));
+      const saved=await db.collection('drafts').findOne({_id,workspaceId});
+      savedDrafts.push({id:String(_id),mediaUrl:saved.mediaUrl||'',hasMedia:!!saved.mediaUrl});
+    }
+    return {success:true,draftIds:ids,drafts:savedDrafts,count:ids.length,url:publicOrigin+'/scheduler?workspace='+encodeURIComponent(workspaceId)};
   },{idempotent:true});
   tool('list_media','List media uploaded to the workspace for use in draft or publishing previews.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({files:(await db.collection('media_files').find({workspaceId}).sort({uploadedAt:-1}).limit(limit).toArray()).map(f=>({filename:f.filename,name:f.originalName,mimetype:f.mimetype,url:new URL('/media/'+encodeURIComponent(f.filename),publicOrigin).href}))}),{readOnly:true});
   tool('list_scheduled_posts','Read the workspace scheduled posts and their current outcomes.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({jobs:await db.collection('scheduled_jobs').find({workspaceId}).sort({createdAt:-1}).limit(limit).toArray()}),{readOnly:true});

@@ -16,7 +16,7 @@ function load(file) {
     require: name => name === 'axios' ? axios : name.startsWith('.') ? load(path.resolve(path.dirname(file), name) + '.ts') : require(name) });
   return module.exports;
 }
-const { useComposeStore } = load('../src/stores/compose.ts');
+const { useComposeStore, draftMediaUrl } = load('../src/stores/compose.ts');
 let store;
 beforeEach(() => {
   pinia.setActivePinia(pinia.createPinia()); store = useComposeStore(); store.content = 'Keep this post';
@@ -40,4 +40,38 @@ test('videos are sent as videoUrl and retries retain the same request key', asyn
   await store.post(); await store.post();
   assert.equal(calls[0][1].destinations[0].videoUrl, store.mediaUrl); assert.equal(calls[0][1].destinations[0].imageUrl, undefined);
   assert.equal(calls[0][2].headers['Idempotency-Key'], calls[1][2].headers['Idempotency-Key']);
+});
+
+test('legacy MCP images load, survive editing and save, and reach publishing', async () => {
+  const url = 'https://example.com/media/owned.png';
+  store.loadDraft({ _id: 'draft-one', content: 'Image draft', mediaUrl: '', destinations: [{ key: 'facebook:one', selected: true, imageUrl: url }] });
+  assert.equal(store.mediaUrl, url);
+  assert.equal(store.destinations[1].selected, false);
+  let saved, posted;
+  axios.put = async (_, payload) => { saved = payload; return { data: { success: true } }; };
+  store.content = 'Edited image draft';
+  assert.equal(await store.saveDraft(), true); assert.equal(saved.mediaUrl, url);
+  axios.post = async (_, payload) => { posted = payload; return { data: { results: [{ platform: 'facebook', accountId: 'one', success: true }] } }; };
+  assert.equal(await store.post(), true); assert.equal(posted.destinations[0].imageUrl, url);
+});
+
+test('legacy MCP videos reach scheduling and removing an image persists after reload', async () => {
+  const destination = { key: 'facebook:one', selected: true, videoUrl: 'https://example.com/media/clip.mp4' };
+  store.loadDraft({ _id: 'draft-one', content: 'Video draft', mediaUrl: '', destinations: [destination] });
+  store.scheduledAt = '2026-11-01T10:00'; let scheduled;
+  axios.post = async (_, payload) => { scheduled = payload; return { data: { success: true } }; };
+  assert.equal(await store.post('Australia/Sydney'), true);
+  assert.equal(scheduled.destinations[0].videoUrl, destination.videoUrl);
+  store.loadDraft({ _id: 'draft-one', content: 'Remove image', mediaUrl: '', destinations: [{ key: 'facebook:one', selected: true, imageUrl: 'https://example.com/media/owned.png' }] });
+  store.mediaUrl = ''; let saved;
+  axios.put = async (_, payload) => { saved = payload; return { data: { success: true } }; };
+  await store.saveDraft(); store.loadDraft({ _id: 'draft-one', ...saved });
+  assert.equal(store.mediaUrl, '');
+});
+
+test('draft attachment lookup prioritizes the editor field and loading a text-only draft clears old state', () => {
+  assert.equal(draftMediaUrl({ mediaUrl: 'replacement.png', destinations: [{ imageUrl: 'old.png' }] }), 'replacement.png');
+  assert.equal(draftMediaUrl({ mediaUrl: '', destinations: [{ imageUrl: 'one.png' }, { imageUrl: 'two.png' }] }), '');
+  store.mediaUrl = 'old.png'; store.loadDraft({ _id: 'empty', content: 'Text only', mediaUrl: '', destinations: [] });
+  assert.equal(store.mediaUrl, ''); assert.equal(store.selectedDestinations.length, 0);
 });

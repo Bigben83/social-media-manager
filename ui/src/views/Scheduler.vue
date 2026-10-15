@@ -315,11 +315,11 @@
                   <p class="text-sm text-gray-200 line-clamp-2 mb-2">
                     {{ draft.content || '(no content)' }}
                   </p>
-                  <p v-if="draft.mediaUrl" class="text-xs text-blue-400 mb-2 truncate">
+                  <p v-if="draftMediaUrl(draft)" class="text-xs text-blue-400 mb-2 truncate">
                     <svg class="w-3 h-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01" />
                     </svg>
-                    {{ mediaName(draft.mediaUrl) }}
+                    {{ mediaName(draftMediaUrl(draft)) }}
                   </p>
                   <div class="flex flex-wrap gap-1 mb-2">
                     <span
@@ -511,7 +511,7 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import dayjs from 'dayjs'
 import { PLATFORM_META, usePlatformsStore } from '../stores/platforms'
-import { useComposeStore, type Destination } from '../stores/compose'
+import { useComposeStore, draftMediaUrl, type Destination } from '../stores/compose'
 
 const { t, tm } = useI18n()
 const platformsStore = usePlatformsStore()

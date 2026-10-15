@@ -76,3 +76,11 @@ Final validation: 84 automated tests pass, the TypeScript/production UI build an
 ## ChatGPT plugin menu correction
 
 The owner reported that + offers Create plugin / Upload plugin and Create opens Plugin Creator, rather than exposing the documented Add custom MCP server action. Updated setup guidance to distinguish observed workflow creation from MCP registration and to describe the direct URL path conditionally. Added a credential-free portable plugin ZIP at `/connector/chatgpt-plugin.zip` containing `plugin.json`, `mcp.json` and a setup README with the configured public resource URL and OAuth/DCR settings. Global Settings includes its download button. The package follows the documented portable manifest shape; acceptance and actual MCP linking in the owner's ChatGPT account remain unverified and can depend on the surface and workspace policies. No public directory submission or account change was performed.
+
+## MCP draft attachments
+
+The owner subsequently connected ChatGPT and saved image drafts. The connector stored attachment URLs on destinations but left the editor's shared `mediaUrl` empty; opening and saving such a draft could drop the attachment. MCP draft creation now validates and fills the shared field from either `mediaUrl` or destination media, and returns attachment status for each saved draft. Each draft supports one shared image or video; different artwork requires separate drafts. Media must already exist in the authorised workspace's Media Library. The tool does not generate or upload images. Entire batches are checked before saving so invalid attachments do not leave partially saved batches.
+
+Compose and the draft list also recognise the older destination-only format. Regression coverage checks image editing/saving/publishing, video scheduling, intentional removal, idempotency, invalid media, and workspace ownership. The connector includes `repair-draft-media.js`, which defaults to a dry run; run `docker compose exec -T connector node repair-draft-media.js --apply` after backing up MongoDB to restore eligible legacy drafts. It only fills blank fields with a single owned attachment, preserves text and retry metadata, and skips concurrently edited records.
+
+Validation: all 89 automated tests, the TypeScript/production UI build, and 40 JavaScript syntax checks pass. No dependencies or access controls changed.

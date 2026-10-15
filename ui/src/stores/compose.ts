@@ -12,6 +12,8 @@ export interface Destination {
   color: string
   picture?: string
   selected: boolean
+  imageUrl?: string
+  videoUrl?: string
 }
 
 const CHAR_LIMITS: Record<string, number> = {
@@ -33,6 +35,13 @@ export interface Draft {
   firstComment?: string
   createdAt: string
   updatedAt: string
+}
+
+// Older connector drafts stored their shared attachment only on the destinations.
+export function draftMediaUrl(draft: Pick<Draft, 'mediaUrl' | 'destinations'>): string {
+  if (draft.mediaUrl) return draft.mediaUrl
+  const urls = [...new Set((draft.destinations || []).flatMap(d => [d.imageUrl, d.videoUrl]).filter((url): url is string => !!url))]
+  return urls.length === 1 ? urls[0] : ''
 }
 
 export const useComposeStore = defineStore('compose', () => {
@@ -133,15 +142,13 @@ export const useComposeStore = defineStore('compose', () => {
   function loadDraft(draft: Draft) {
     draftId.value = String(draft._id)
     content.value = draft.content || ''
-    mediaUrl.value = draft.mediaUrl || ''
+    mediaUrl.value = draftMediaUrl(draft)
     scheduledAt.value = draft.scheduledAt || ''
     firstComment.value = draft.firstComment || ''
-    if (draft.destinations?.length) {
-      destinations.value.forEach((d) => {
-        const saved = draft.destinations.find((s) => s.key === d.key)
-        d.selected = saved?.selected ?? false
-      })
-    }
+    destinations.value.forEach((d) => {
+      const saved = draft.destinations?.find((s) => s.key === d.key)
+      d.selected = saved?.selected ?? false
+    })
   }
 
   async function saveDraft() {
