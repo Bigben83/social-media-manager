@@ -34,7 +34,7 @@ async function grant(scopes=['social:read','social:drafts','social:publish','soc
   const auth=await request('/authorize?'+params);assert.equal(auth.status,302);
   const consentPath=auth.headers.get('location');
   const cookies=new Map();
-  async function browser(path,options={}){const r=await request(path,{...options,headers:{Cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),...options.headers}});for(const cookie of r.headers.getSetCookie()){const [key,value]=cookie.split(';')[0].split('=');cookies.set(key,value);}return r;}
+  async function browser(path,options={}){const r=await request(path,{...options,headers:{...(options.method==='POST'&&{Origin:base}),Cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),...options.headers}});for(const cookie of r.headers.getSetCookie()){const [key,value]=cookie.split(';')[0].split('=');cookies.set(key,value);}return r;}
   const login=await browser('/connector/login?returnTo='+encodeURIComponent(consentPath));const loginHtml=await login.text();let csrf=/name="csrf" value="([^"]+)"/.exec(loginHtml)[1];
   const signedIn=await browser('/connector/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,password,returnTo:consentPath})});assert.equal(signedIn.status,302);
   const consent=await browser(consentPath);assert.equal(consent.status,200);const html=await consent.text();csrf=/name="csrf" value="([^"]+)"/.exec(html)[1];
@@ -50,6 +50,8 @@ test('OAuth metadata and unauthenticated challenges identify the protected MCP r
   const metadata=await(await request('/.well-known/oauth-protected-resource/mcp')).json();assert.equal(metadata.resource,base+'/mcp');assert.deepEqual(metadata.scopes_supported,['social:read','social:drafts','social:publish','social:schedule']);
   const denied=await request('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(denied.status,401);assert.match(denied.headers.get('www-authenticate'),/resource_metadata=/);
   assert.equal((await request('/connector')).status,302);
+  assert.equal((await request('/connector/login')).headers.get('referrer-policy'),'same-origin');
+  const rootMetadata=await(await request('/.well-known/oauth-protected-resource')).json();const serverMetadata=await(await request('/.well-known/oauth-authorization-server')).json();assert.equal(rootMetadata.authorization_servers[0],serverMetadata.issuer);
 });
 test('PKCE authorization codes cannot be reused and tokens are hashed at rest',async()=>{
   const {tokens,tokenBody}=await grant();

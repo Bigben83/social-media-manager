@@ -17,7 +17,7 @@ async function createApp(options={}){
   if(resourceUrl.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(resourceUrl.hostname))throw new Error('MCP_PUBLIC_URL must use HTTPS');
   const adminPasswordHash=options.adminPasswordHash||process.env.MCP_ADMIN_PASSWORD_HASH||'';
   const app=express();const log=options.log||createLogger('connector');app.disable('x-powered-by');app.set('trust proxy',1);
-  app.use((req,res,next)=>{res.set({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"});next();});
+  app.use((req,res,next)=>{res.set({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"});next();});
   const configured=/^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/.test(adminPasswordHash);
   app.get('/health',(_req,res)=>res.status(configured?200:503).json({status:configured?'ok':'not_configured',service:'connector'}));
   app.get('/connector/info',(_req,res)=>res.json({resourceUrl:resourceUrl.href,configured}));
@@ -39,7 +39,7 @@ async function createApp(options={}){
   // Restrict request sizes before the SDK's JSON parsers run.
   app.use(express.json({limit:'2mb'}));
   app.use(mcpAuthRouter({provider,issuerUrl:new URL(resourceUrl.origin),resourceServerUrl:resourceUrl,scopesSupported:SCOPES,resourceName:'SocialManager',serviceDocumentationUrl:new URL('/connector',resourceUrl)}));
-  app.get('/.well-known/oauth-protected-resource',(_req,res)=>res.json({resource:resourceUrl.href,authorization_servers:[resourceUrl.origin],scopes_supported:SCOPES}));
+  app.get('/.well-known/oauth-protected-resource',(_req,res)=>res.json({resource:resourceUrl.href,authorization_servers:[new URL(resourceUrl.origin).href],scopes_supported:SCOPES}));
   mountAdmin(app,{getDb:dbProvider,provider,adminPasswordHash,resourceUrl,rateLimit});
   const auth=requireBearerAuth({verifier:provider,resourceMetadataUrl:getOAuthProtectedResourceMetadataUrl(resourceUrl),expectedResource:resourceUrl});
   const call=(base)=>async(method,path,data,workspaceId,headers={})=>{
