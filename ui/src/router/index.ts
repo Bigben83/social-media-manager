@@ -9,6 +9,7 @@ const router = createRouter({
     return { top: 0 }
   },
   routes: [
+    { path: '/local-assistant', name: 'localAssistant', component: () => import('../views/LocalAssistant.vue') },
     {
       path: '/',
       redirect: '/dashboard',

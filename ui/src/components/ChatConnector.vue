@@ -10,6 +10,7 @@
       <p class="text-xs text-gray-400">{{ $t(localePrefix + '.instructions') }}</p>
       <p v-if="!configured" class="text-xs text-amber-300">{{ $t(localePrefix + '.setupRequired') }}</p>
       <a href="/connector" target="_blank" rel="noopener" class="inline-block px-4 py-2 bg-violet-700 hover:bg-violet-600 rounded-lg text-sm font-medium text-white">{{ $t(localePrefix + '.manageAccess') }}</a>
+      <a v-if="provider === 'local'" href="/local-assistant" class="ml-3 inline-block text-sm text-violet-200 underline">{{ $t('localConnector.openAssistant') }}</a>
       <p class="text-xs text-gray-500">{{ $t(localePrefix + '.apiNote') }}</p>
     </div>
   </section>
@@ -17,8 +18,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import axios from 'axios'
-const props = defineProps<{ provider: 'claude' | 'chatgpt' }>()
-const localePrefix = computed(() => props.provider === 'chatgpt' ? 'chatgptConnector' : 'claudeConnector')
+const props = defineProps<{ provider: 'claude' | 'chatgpt' | 'local' }>()
+const localePrefix = computed(() => props.provider === 'local' ? 'localConnector' : props.provider === 'chatgpt' ? 'chatgptConnector' : 'claudeConnector')
 const connectorUrl = ref(new URL('/mcp', window.location.origin).href)
 const configured = ref(false)
 onMounted(async () => {

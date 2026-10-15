@@ -8,6 +8,7 @@ const {StreamableHTTPServerTransport}=require('@modelcontextprotocol/sdk/server/
 const {createAuthProvider,SCOPES}=require('./auth');
 const {mountAdmin}=require('./admin');
 const {createToolServer}=require('./tools');
+const {mountLocalAssistant}=require('./local');
 const {getDb}=require('./utils/MongoDBConnector');
 const {createLogger}=require('./utils/logger');
 async function createApp(options={}){
@@ -40,13 +41,14 @@ async function createApp(options={}){
   app.use(express.json({limit:'2mb'}));
   app.use(mcpAuthRouter({provider,issuerUrl:new URL(resourceUrl.origin),resourceServerUrl:resourceUrl,scopesSupported:SCOPES,resourceName:'SocialManager',serviceDocumentationUrl:new URL('/connector',resourceUrl)}));
   app.get('/.well-known/oauth-protected-resource',(_req,res)=>res.json({resource:resourceUrl.href,authorization_servers:[new URL(resourceUrl.origin).href],scopes_supported:SCOPES}));
-  mountAdmin(app,{getDb:dbProvider,provider,adminPasswordHash,resourceUrl,rateLimit});
+  const adminAccess=mountAdmin(app,{getDb:dbProvider,provider,adminPasswordHash,resourceUrl,rateLimit});
   const auth=requireBearerAuth({verifier:provider,resourceMetadataUrl:getOAuthProtectedResourceMetadataUrl(resourceUrl),expectedResource:resourceUrl});
   const call=(base)=>async(method,path,data,workspaceId,headers={})=>{
     const response=await axios.request({method,url:base+path,data,timeout:130000,headers:{'X-Workspace-Id':workspaceId,...headers}});return response.data;
   };
   const callGateway=options.callGateway||call(process.env.GATEWAY_URL||'http://gateway:8084');
   const callScheduler=options.callScheduler||call(process.env.SCHEDULER_URL||'http://scheduler:3011');
+  await mountLocalAssistant(app,{db,provider,adminAccess,callGateway,callScheduler,publicOrigin:resourceUrl.origin,log,requestModel:options.requestLocalModel,inspectModel:options.inspectLocalModel});
   app.post('/mcp',auth,rateLimit({windowMs:60000,limit:120,standardHeaders:'draft-8',legacyHeaders:false}),async(req,res,next)=>{
     const server=createToolServer({db,auth:req.auth,provider,callGateway,callScheduler,publicOrigin:resourceUrl.origin,log});
     const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});

@@ -16,7 +16,7 @@
         </select>
       </div>
 
-      <p class="text-xs text-gray-400 mb-4">{{ $t('calendarPlan.chatWorkflowHint') }}</p>
+      <p class="text-xs text-gray-400 mb-4">{{ $t('calendarPlan.chatWorkflowHint') }} <a href="/local-assistant" class="text-violet-300 underline">{{ $t('localConnector.openAssistant') }}</a></p>
 
       <!-- Configuration card -->
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">

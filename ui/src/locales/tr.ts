@@ -1,4 +1,50 @@
 export default {
+  localAssistant: {
+    "title": "Yerel asistan",
+    "description": "Bağlamı okumak, plan ve taslak kaydetmek ve inceleme için gönderi hazırlamak üzere Ollama modelinizi SocialManager araçlarıyla kullanın.",
+    "signInHint": "Yerel asistan erişimini onaylamak için bağlayıcı sahibi parolasıyla oturum açın. Mevcut SocialManager erişiminiz değişmez.",
+    "signIn": "Yerel asistanda oturum aç",
+    "permissions": "Oturum izinleri",
+    "permissionsHint": "Bu oturum yalnızca seçili çalışma alanını kullanabilir. Yayımlama ve zamanlama isteğe bağlıdır; her zaman önizleme ve düğmeyle onay gerektirir.",
+    "read": "Profilleri, planları, taslakları, medyayı ve geçmişi oku",
+    "write": "İçerik planı ve taslak kaydet",
+    "publish": "Hemen yayımlamayı hazırla ve onayla",
+    "schedule": "Zamanlanmış gönderileri hazırla ve onayla",
+    "checking": "Yerel model denetleniyor…",
+    "start": "Yerel oturum başlat",
+    "settings": "Yerel model ayarları",
+    "newSession": "Yeni oturum",
+    "plans": "Kayıtlı planlar",
+    "drafts": "Taslaklar ve Zamanlayıcı",
+    "manage": "Erişimi yönet veya iptal et",
+    "you": "Siz",
+    "assistant": "Yerel asistan",
+    "toolActivity": "Araç etkinliği",
+    "review": "Gönderi önizlemesini inceleyin",
+    "reviewHint": "Metni, hesapları, medyayı ve zamanı kontrol edin. Bu işlemi yalnızca aşağıdaki düğmeler onaylayabilir.",
+    "firstComment": "İlk yorum",
+    "scheduledTime": "Zamanlanan saat (UTC)",
+    "immediate": "Onaydan sonra hemen yayımla",
+    "expires": "Önizleme bitişi",
+    "confirmSchedule": "Zamanlamayı onayla",
+    "confirmPublish": "Yayımlamayı onayla",
+    "cancel": "Önizlemeyi iptal et",
+    "deliveryResult": "Teslim sonucu",
+    "working": "Yerel model çalışıyor. Sayfadan ayrıldıktan sonra bu oturuma dönebilirsiniz.",
+    "message": "Yerel asistana mesaj",
+    "placeholder": "Bu çalışma alanının marka profilini oku ve XXXX özelliğini vurgulayan sekiz tanıtım gönderisini taslak olarak kaydet.",
+    "send": "Gönder"
+},
+  localConnector: {
+    "title": "Yerel Ollama / Llama bağlayıcısı",
+    "description": "SocialManager yerel asistanını araç destekli Ollama modeliyle ve Claude ile ChatGPT’nin kullandığı MCP araçlarıyla kullanın.",
+    "urlLabel": "Paylaşılan MCP sunucu URL adresi",
+    "instructions": "Yerel asistanı açın, bağlayıcı sahibi parolasıyla oturum açın ve seçili çalışma alanı için izinleri onaylayın. OAuth ve dinamik istemci kaydı ile uzak MCP destekleyen diğer yerel sohbet uygulamaları da bu URL adresini kullanabilir.",
+    "setupRequired": "Sunucu yöneticisinin bağlayıcı parolası kurulumunu tamamlaması gerekiyor.",
+    "manageAccess": "Bağlayıcı erişimini yönet",
+    "apiNote": "Yerleşik asistan yalnızca yapılandırılan Ollama sunucusunu kullanır. Bulut üretim sağlayıcısına geçmez. Yayımlama ve zamanlama açık bir onay düğmesi gerektirir.",
+    "openAssistant": "Yerel asistanı aç"
+},
   chatgptConnector: {
     "title": "ChatGPT eklentisi (MCP)",
     "description": "Marka bağlamını okumak, plan ve taslak oluşturmak, onaylanan gönderileri yayımlamak veya zamanlamak için ChatGPT sohbetlerini kullanın.",
@@ -18,6 +64,7 @@ export default {
     "apiNote": "Bu akış Claude sohbetinizi kullanır. Uygulamadaki diğer Oluştur düğmeleri aşağıda yapılandırılan API veya yerel sağlayıcıyı kullanmaya devam eder."
 },
   nav: {
+    localAssistant: "Yerel asistan",
     feed: 'Akış',
     compose: 'Yeni Gönderi',
     media: 'Medya',
@@ -607,6 +654,15 @@ export default {
   },
 
   globalSettings: {
+    groupsLabel: "Ayar grupları",
+    groups: {
+      "claude": "Claude / Anthropic",
+      "openai": "OpenAI / ChatGPT",
+      "local": "Yerel modeller ve bağlayıcılar",
+      "google": "Google / Gemini",
+      "other": "Diğer AI sağlayıcıları",
+      "social": "Sosyal platform uygulamaları"
+},
     title: 'Genel Ayarlar',
     subtitle: 'Ortak uygulama bilgilerini ve yapay zeka saglayicilarini yonetin.',
     appCredentialsNote: 'Bu bilgiler tum calisma alanlarinda ortaktir.',

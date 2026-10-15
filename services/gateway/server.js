@@ -233,7 +233,7 @@ app.delete('/workspaces/:id', async (request, reply) => {
     if (!file.filename || /[\\/]/.test(file.filename) || file.filename.includes('..')) continue;
     try { await fs.promises.unlink(path.join(UPLOAD_DIR, file.filename)); } catch (err) { if (err.code !== 'ENOENT') log.warn({ action: 'workspace_media_cleanup', workspaceId: id, outcome: 'failure' }); }
   }
-  const collections = ['platform_credentials','competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','media_folders','feeds','scheduled_jobs','post_requests','publish_requests','oauth_states','ai_jobs','mcp_post_previews','mcp_audit'];
+  const collections = ['platform_credentials','competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','media_folders','feeds','scheduled_jobs','post_requests','publish_requests','oauth_states','ai_jobs','mcp_local_sessions', 'mcp_post_previews','mcp_audit'];
   await Promise.all(collections.map(name => db.collection(name).deleteMany({ workspaceId: id })));
   await db.collection('workspaces').deleteOne({ _id: id });
   tokenExpiryCache.delete(id);

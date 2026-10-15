@@ -71,6 +71,18 @@ Each chat app receives its own grant and tokens. Revoking ChatGPT at `/connector
 
 See OpenAI's [custom MCP plugin setup](https://developers.openai.com/api/docs/guides/custom-mcp-server), [OAuth authentication](https://developers.openai.com/plugins/build/auth), and [tool metadata reference](https://developers.openai.com/plugins/reference). UI labels and availability can vary by ChatGPT workspace. This adds a custom plugin for your account/workspace; it does not publish SocialManager to the public plugin directory. Other app Generate buttons continue to use the configured API/local provider.
 
+### Local Ollama assistant
+
+Open **Local assistant** in SocialManager (or Global Settings → Local models and connectors → Open local assistant). Sign in with the existing connector owner password, approve permissions for the selected workspace, and start a session. Read/drafts are selected by default. The selected Ollama model must advertise tool support; the app checks `/api/show` before starting. Configure its endpoint and model in the local group in Global Settings. The local assistant uses that Ollama configuration even when another generation provider is active; it never falls back to cloud inference.
+
+The assistant is an MCP client connected to the same SocialManager tool server using the official SDK's in-process transport. It can read brand context and account destinations, save plans and drafts, and optionally prepare publishing/scheduling previews. The model cannot invoke the execution tool: a real button click in the app is required to dispatch the bound preview. Review the exact text, accounts, media and timestamp before confirming. Delivery results and uncertain outcomes remain visible; retries reuse the preview's stored outcome.
+
+Conversations and tool progress are saved per workspace and connector-owner browser session, and expire within eight hours. Leaving/reopening the page resumes polling an active turn. Restarting the connector marks interrupted turns as failed without silently repeating generation or delivery; check Drafts, Saved plans or Scheduler for any completed actions. A conversation has bounded steps, tool calls and context size. Start a new session when full. Revoking its local grant at `/connector` blocks subsequent actions. Workspace deletion removes its saved conversations.
+
+Other Ollama chat clients can use the shared remote `/mcp` endpoint when they implement MCP Streamable HTTP with OAuth/DCR; Ollama's model API itself is not an MCP client. The built-in assistant supplies that client and tool loop. See [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling) for the underlying model protocol. Model quality still affects whether requests and saved text meet expectations.
+
+Global Settings groups Claude's API/connector, OpenAI's API/ChatGPT plugin/image readiness, local Ollama/assistant/compatible endpoints/local images, Google/Gemini/Places, other AI providers, and social platform apps. Image settings save only fields for their own provider, preserving edits in other groups. Existing connector deep links remain available.
+
 ## AI configuration
 
 Ollama, Anthropic Claude, OpenAI, Groq, Gemini, and OpenAI-compatible endpoints are supported. Image generation supports the configured OpenAI, Gemini, xAI, or local image server. Keys are encrypted in MongoDB. A saved key or installed SDK does not prove that a provider accepts the credential: test with a real request. Provider authentication and stream errors are surfaced to the UI. Each configured cloud provider has a live Test Connection action; a static model list does not count as a successful connection.

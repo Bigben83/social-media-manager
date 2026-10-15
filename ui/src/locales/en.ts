@@ -1,4 +1,50 @@
 export default {
+  localAssistant: {
+    "title": "Local assistant",
+    "description": "Use your Ollama model with SocialManager tools to read context, save plans and drafts, and prepare posts for review.",
+    "signInHint": "Sign in with the connector owner password to approve local assistant access. Your existing SocialManager access is unchanged.",
+    "signIn": "Sign in to local assistant",
+    "permissions": "Session permissions",
+    "permissionsHint": "This session can use only the selected workspace. Publishing and scheduling are optional and always require a preview and a confirmation button.",
+    "read": "Read profiles, plans, drafts, media and history",
+    "write": "Save content plans and drafts",
+    "publish": "Prepare and confirm immediate publishing",
+    "schedule": "Prepare and confirm scheduled posts",
+    "checking": "Checking local model…",
+    "start": "Start local session",
+    "settings": "Local model settings",
+    "newSession": "New session",
+    "plans": "Saved plans",
+    "drafts": "Drafts and Scheduler",
+    "manage": "Manage or revoke access",
+    "you": "You",
+    "assistant": "Local assistant",
+    "toolActivity": "Tool activity",
+    "review": "Review post preview",
+    "reviewHint": "Check the exact text, accounts, media and time. Only the buttons below can confirm this action.",
+    "firstComment": "First comment",
+    "scheduledTime": "Scheduled time (UTC)",
+    "immediate": "Publish immediately after confirmation",
+    "expires": "Preview expires",
+    "confirmSchedule": "Confirm scheduling",
+    "confirmPublish": "Confirm publishing",
+    "cancel": "Cancel preview",
+    "deliveryResult": "Delivery result",
+    "working": "The local model is working. You can return to this session after leaving the page.",
+    "message": "Message to local assistant",
+    "placeholder": "Read this workspace’s brand profile and save eight introduction posts as drafts. Highlight the XXXX feature.",
+    "send": "Send"
+},
+  localConnector: {
+    "title": "Local Ollama / Llama connector",
+    "description": "Use SocialManager’s local assistant with a tool-capable Ollama model and the same MCP tools used by Claude and ChatGPT.",
+    "urlLabel": "Shared MCP server URL",
+    "instructions": "Open Local assistant, sign in with the connector owner password, and approve permissions for the selected workspace. External local chat apps can also use this URL if they support remote MCP with OAuth and dynamic client registration.",
+    "setupRequired": "The server administrator needs to finish connector password setup.",
+    "manageAccess": "Manage connector access",
+    "apiNote": "The built-in assistant uses only your configured Ollama endpoint. It never falls back to a cloud generation provider. Publishing and scheduling require an explicit confirmation button.",
+    "openAssistant": "Open local assistant"
+},
   chatgptConnector: {
     "title": "ChatGPT plugin (MCP)",
     "description": "Use ChatGPT conversations to read brand context, create plans and drafts, and optionally publish or schedule confirmed posts.",
@@ -18,6 +64,7 @@ export default {
     "apiNote": "This workflow uses your Claude conversation. The app’s other Generate buttons continue to use the API or local provider configured below."
 },
   nav: {
+    localAssistant: "Local assistant",
     feed: 'Feed',
     compose: 'New Post',
     media: 'Media',
@@ -607,6 +654,15 @@ export default {
   },
 
   globalSettings: {
+    groupsLabel: "Settings groups",
+    groups: {
+      "claude": "Claude / Anthropic",
+      "openai": "OpenAI / ChatGPT",
+      "local": "Local models and connectors",
+      "google": "Google / Gemini",
+      "other": "Other AI providers",
+      "social": "Social platform apps"
+},
     title: 'Global Settings',
     subtitle: 'Manage shared app credentials and AI providers.',
     appCredentialsNote: 'These credentials are shared across all workspaces.',

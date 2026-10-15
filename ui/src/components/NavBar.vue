@@ -119,6 +119,7 @@ const navLinks = [
   { to: '/scheduler',        label: 'nav.scheduler' },
   { to: '/analytics',        label: 'nav.analytics' },
   { to: '/calendar-plan',    label: 'nav.calendarPlan' },
+  { to: '/local-assistant', label: 'nav.localAssistant' },
   { to: '/competitors',      label: 'nav.competitors' },
   { to: '/settings',         label: 'nav.settings' },
   { to: '/global-settings',  label: 'nav.globalSettings' },

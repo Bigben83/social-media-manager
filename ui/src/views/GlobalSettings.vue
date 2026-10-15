@@ -7,9 +7,306 @@
         <p class="text-sm text-gray-400">{{ $t('globalSettings.subtitle') }}</p>
       </div>
 
-      <ChatConnector provider="chatgpt" />
-      <ChatConnector provider="claude" />
+      <nav :aria-label="$t('globalSettings.groupsLabel')" class="flex flex-wrap gap-2">
+        <a v-for="group in SETTINGS_GROUPS" :key="group.id" :href="'#settings-' + group.id" class="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:border-violet-500">{{ $t('globalSettings.groups.' + group.id) }}</a>
+      </nav>
+      <section v-for="group in SETTINGS_GROUPS" :key="group.id" :id="'settings-' + group.id" class="space-y-4 scroll-mt-5">
+        <h2 class="text-xl font-semibold">{{ $t('globalSettings.groups.' + group.id) }}</h2>
+        <ChatConnector v-if="group.connector" :provider="group.connector" />
+      <!-- ═══ AI INTEGRATION — Ollama ══════════════════════════════════════════ -->
+      <div v-if="group.id === 'local'" class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-violet-700 flex items-center justify-center text-white text-sm font-bold shrink-0">AI</div>
+          <div>
+            <p class="font-semibold">{{ $t('ai.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('ai.sectionSubtitle') }}</p>
+          </div>
+          <div class="ml-auto flex items-center gap-2 shrink-0">
+            <span v-if="aiStore.config.provider === 'ollama'" class="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-900/50 text-violet-300 border border-violet-700">{{ $t('ai.active') }}</span>
+            <span v-if="aiConnected !== null" class="text-xs px-2 py-0.5 rounded-full font-medium" :class="aiConnected ? 'bg-green-900/50 text-green-400 border border-green-700' : 'bg-red-900/40 text-red-400 border border-red-800'">
+              {{ aiConnected ? $t('ai.connected') : $t('ai.connectionFailed') }}
+            </span>
+          </div>
+        </div>
+        <div class="p-5 space-y-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.endpointLabel') }}</label>
+            <div class="flex gap-2">
+              <input v-model="aiEndpoint" type="text" :placeholder="$t('ai.endpointPlaceholder')"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+              <button @click="testAiConnection" :disabled="aiStore.modelsLoading || !aiEndpoint"
+                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 border border-gray-600 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
+                {{ aiStore.modelsLoading ? $t('ai.testing') : $t('ai.testConnection') }}
+              </button>
+            </div>
+            <p class="text-xs text-gray-600 mt-1">{{ $t('ai.endpointHint') }}</p>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
+            <select v-model="aiModel" :disabled="!aiModels.length"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500 disabled:opacity-40">
+              <option value="">{{ $t('ai.modelPlaceholder') }}</option>
+              <option v-for="m in aiModels" :key="m" :value="m">{{ m }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.visionModelLabel') }}</label>
+            <input v-model="aiVisionModel" type="text" :placeholder="$t('ai.visionModelPlaceholder')"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+            <p class="text-xs text-gray-600 mt-1">{{ $t('ai.visionModelHint') }}</p>
+          </div>
+          <div class="flex items-center justify-end gap-3">
+            <span v-if="aiSaved" class="text-xs text-green-400">{{ $t('ai.saved') }}</span>
+            <button @click="saveAiConfig" :disabled="aiStore.saving || !aiEndpoint"
+              class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
+              {{ aiStore.saving ? $t('ai.saving') : $t('ai.saveConfig') }}
+            </button>
+          </div>
+        </div>
+      </div>
 
+      <!-- ═══ AI PROVIDERS — Anthropic, OpenAI, Groq, Gemini, OpenAI-compatible ══ -->
+      <template v-for="providerName in group.providers" :key="providerName">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+              :class="PROVIDER_BADGE[providerName].cls">
+              {{ PROVIDER_BADGE[providerName].abbr }}
+            </div>
+            <div>
+              <p class="font-semibold">{{ $t(`ai.${providerName}.sectionTitle`) }}</p>
+              <p class="text-xs text-gray-500 mt-0.5">{{ $t(`ai.${providerName}.sectionSubtitle`) }}</p>
+            </div>
+            <div class="ml-auto flex items-center gap-2 shrink-0">
+              <span v-if="aiStore.config.provider === providerName" class="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-900/50 text-violet-300 border border-violet-700">{{ $t('ai.active') }}</span>
+              <span v-else-if="getProvider(providerName)?.configured" class="text-xs px-2 py-0.5 rounded-full font-medium bg-green-900/50 text-green-400 border border-green-700">✓ {{ $t('ai.apiKeyConfigured') }}</span>
+            </div>
+          </div>
+          <div class="p-5 space-y-4">
+            <p v-if="getProvider(providerName)?.available === false" role="alert" class="text-sm text-red-400">{{ $t('ai.providerUnavailable') }}</p>
+            <div v-if="getProvider(providerName)?.configured && !providerForms[providerName].editing">
+              <div class="flex items-center justify-between text-sm">
+                <div class="space-y-1">
+                  <p v-if="providerName === 'custom'" class="text-xs text-gray-400">{{ $t('ai.baseUrlLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.baseUrl }}</span></p>
+                  <p class="text-xs text-gray-400">{{ $t('ai.apiKeyLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.apiKeyHint || '—' }}</span></p>
+                  <p v-if="providerForms[providerName].saved" class="text-xs text-green-400">{{ $t('ai.providerSaved') }}</p>
+                </div>
+                <div class="flex gap-2">
+                  <button @click="providerForms[providerName].editing = true" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-gray-400 hover:text-gray-200 transition-colors">Edit</button>
+                  <button v-if="aiStore.config.provider !== providerName" @click="setActiveProvider(providerName)" :disabled="aiStore.saving || getProvider(providerName)?.available === false"
+                    class="text-xs px-2.5 py-1 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-md text-white transition-colors">
+                    {{ $t('ai.setActive') }}
+                  </button>
+                  <button @click="disconnectCloudProvider(providerName)" class="text-xs px-2.5 py-1 bg-red-900/40 hover:bg-red-900/60 border border-red-800 rounded-md text-red-400 hover:text-red-300 transition-colors">{{ $t('ai.disconnect') }}</button>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 mt-3">
+                <button @click="testCloudProvider(providerName)" :disabled="providerTests[providerName]?.loading" class="text-xs px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg disabled:opacity-40">{{ providerTests[providerName]?.loading ? $t('ai.testing') : $t('ai.testConnection') }}</button>
+                <span v-if="providerTests[providerName]?.message" class="text-xs" :class="providerTests[providerName]?.ok ? 'text-green-400' : 'text-red-400'">{{ providerTests[providerName]?.message }}</span>
+              </div>
+              <div class="mt-3">
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
+                <select v-if="modelOptions(providerName).length" v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
+                  <option v-if="providerForms[providerName].model && !modelOptions(providerName).includes(providerForms[providerName].model)" :value="providerForms[providerName].model">{{ providerForms[providerName].model }}</option>
+                  <option v-for="m in modelOptions(providerName)" :key="m" :value="m">{{ m }}</option>
+                </select>
+                <input v-else v-model="providerForms[providerName].model" type="text" :placeholder="$t('ai.modelInputPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                <p class="text-xs text-gray-600 mt-1">{{ liveModels[providerName] ? $t('ai.modelsLive') : $t('ai.modelsStatic') }}</p>
+              </div>
+              <div class="flex justify-end mt-3">
+                <button @click="saveCloudProvider(providerName, aiStore.config.provider === providerName)" :disabled="providerForms[providerName].saving"
+                  class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
+                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.saveProvider') }}
+                </button>
+              </div>
+            </div>
+            <div v-else class="space-y-3">
+              <div v-if="providerName === 'custom'">
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.baseUrlLabel') }}</label>
+                <input v-model="providerForms[providerName].baseUrl" type="text" :placeholder="$t('ai.baseUrlPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ providerName === 'custom' ? $t('ai.apiKeyOptional') : $t('ai.apiKeyLabel') }}</label>
+                <input v-model="providerForms[providerName].apiKey" type="password" :placeholder="$t('ai.apiKeyPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                <p class="text-xs text-gray-600 mt-1">{{ $t(`ai.${providerName}.getKeyHint`) }}</p>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
+                <select v-if="modelOptions(providerName).length" v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
+                  <option v-if="providerForms[providerName].model && !modelOptions(providerName).includes(providerForms[providerName].model)" :value="providerForms[providerName].model">{{ providerForms[providerName].model }}</option>
+                  <option v-for="m in modelOptions(providerName)" :key="m" :value="m">{{ m }}</option>
+                </select>
+                <input v-else v-model="providerForms[providerName].model" type="text" :placeholder="$t('ai.modelInputPlaceholder')"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                <p class="text-xs text-gray-600 mt-1">{{ liveModels[providerName] ? $t('ai.modelsLive') : $t('ai.modelsStatic') }}</p>
+              </div>
+              <div class="flex items-center justify-end gap-2">
+                <button v-if="providerForms[providerName].editing" @click="providerForms[providerName].editing = false" class="text-xs px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 transition-colors">Cancel</button>
+                <button @click="saveCloudProvider(providerName, false)" :disabled="providerForms[providerName].saving || !canSave(providerName)"
+                  class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 border border-gray-600 rounded-lg text-xs font-medium transition-colors">
+                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.saveProvider') }}
+                </button>
+                <button @click="saveCloudProvider(providerName, true)" :disabled="providerForms[providerName].saving || !canSave(providerName)"
+                  class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
+                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.connectAndActivate') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ═══ IMAGE GENERATION ══════════════════════════════════════════════════ -->
+      <div v-if="group.image" class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-emerald-700 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-image text-white text-sm"></i>
+          </div>
+          <div>
+            <p class="font-semibold">{{ $t('settings.imageGen.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.sectionSubtitle') }}</p>
+          </div>
+        </div>
+        <div class="p-5 space-y-6">
+
+          <!-- OpenAI -->
+          <div v-if="group.image === 'openai'" class="flex items-start gap-3">
+            <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageOpenAiReady ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+            <div class="text-sm">
+              <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.openaiTitle') }}</p>
+              <p class="text-xs text-gray-500 mt-0.5">{{ imageOpenAiReady ? $t('settings.imageGen.openaiReady') : $t('settings.imageGen.openaiMissing') }}</p>
+            </div>
+          </div>
+
+          <!-- Gemini -->
+          <div v-if="group.image === 'gemini'" class="space-y-2">
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageGeminiReady ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+              <div class="text-sm flex-1">
+                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.geminiTitle') }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ imageGeminiReady ? $t('settings.imageGen.geminiReady') : $t('settings.imageGen.geminiMissing') }}</p>
+              </div>
+            </div>
+            <div v-if="imageGeminiReady" class="pl-5 flex flex-wrap gap-2 items-center">
+              <label class="text-xs text-gray-400 w-full sm:w-auto">{{ $t('settings.imageGen.geminiModelLabel') }}</label>
+              <input v-model="imageGeminiModel" list="gemini-image-models" :placeholder="$t('settings.imageGen.geminiModelPlaceholder')"
+                class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+              <datalist id="gemini-image-models">
+                <option v-for="m in imageGeminiModels" :key="m" :value="m" />
+              </datalist>
+              <button @click="loadGeminiImageModels" :disabled="imageGeminiModelsLoading"
+                class="text-xs px-3 py-2 border border-gray-700 hover:border-gray-500 text-gray-300 rounded-lg transition-colors disabled:opacity-40">
+                {{ imageGeminiModelsLoading ? $t('settings.imageGen.loadingModels') : $t('settings.imageGen.loadModels') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- xAI Grok Imagine -->
+          <div v-if="group.image === 'grok'" class="space-y-2">
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageXaiConfigured ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+              <div class="text-sm flex-1">
+                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.grokTitle') }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.grokHint') }}</p>
+              </div>
+            </div>
+            <div class="pl-5 space-y-2">
+              <div v-if="imageXaiConfigured" class="flex flex-wrap items-center gap-2">
+                <span class="text-xs text-gray-300">{{ $t('settings.imageGen.grokKeyConfigured', { hint: imageXaiKeyHint }) }}</span>
+                <button @click="removeXaiKey" class="text-xs px-3 py-1.5 border border-red-800/60 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors">{{ $t('settings.imageGen.grokRemoveKey') }}</button>
+              </div>
+              <div v-else class="flex flex-wrap gap-2">
+                <input v-model="imageXaiApiKey" type="password" :placeholder="$t('settings.imageGen.grokKeyPlaceholder')"
+                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+              </div>
+              <div class="flex flex-wrap gap-2 items-center">
+                <label class="text-xs text-gray-400">{{ $t('settings.imageGen.grokModelLabel') }}</label>
+                <input v-model="imageGrokModel" :placeholder="$t('settings.imageGen.grokModelPlaceholder')"
+                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Local Stable Diffusion -->
+          <div v-if="group.image === 'local'" class="space-y-2">
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageLocalEndpoint.trim() ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+              <div class="text-sm flex-1">
+                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.localTitle') }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.localHint') }}</p>
+              </div>
+            </div>
+            <div class="pl-5 space-y-2">
+              <div class="flex flex-wrap gap-2">
+                <input v-model="imageLocalEndpoint" type="url" :placeholder="$t('settings.imageGen.localEndpointPlaceholder')"
+                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
+                <button @click="testLocalImageServer" :disabled="!imageLocalEndpoint.trim() || imageLocalTesting"
+                  class="text-xs px-3 py-2 border border-gray-700 hover:border-gray-500 text-gray-300 rounded-lg transition-colors disabled:opacity-40">
+                  {{ imageLocalTesting ? $t('settings.imageGen.testing') : $t('settings.imageGen.test') }}
+                </button>
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-gray-400">{{ $t('settings.imageGen.localStepsLabel') }}</label>
+                <input v-model.number="imageLocalSteps" type="number" min="1" max="150"
+                  class="w-20 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-emerald-500" />
+              </div>
+              <p v-if="imageLocalTestResult" class="text-xs" :class="imageLocalTestResult.ok ? 'text-emerald-400' : 'text-red-400'">
+                <template v-if="imageLocalTestResult.ok">
+                  {{ $t('settings.imageGen.testOk', { count: imageLocalTestResult.models.length, active: imageLocalTestResult.activeModel || '—' }) }}
+                </template>
+                <template v-else>{{ imageLocalTestResult.error }}</template>
+              </p>
+            </div>
+          </div>
+
+          <!-- Save -->
+          <div v-if="group.image !== 'openai'" class="flex items-center gap-3">
+            <button @click="saveImageConfig(group.image)" :disabled="imageConfigSaving"
+              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors">
+              {{ imageConfigSaving ? $t('settings.imageGen.saving') : $t('settings.imageGen.save') }}
+            </button>
+            <span v-if="imageConfigSaved && imageFeedbackGroup === group.image" class="text-xs text-emerald-400">{{ $t('settings.imageGen.saved') }}</span>
+            <span v-if="imageConfigError && imageFeedbackGroup === group.image" class="text-xs text-red-400">{{ imageConfigError }}</span>
+          </div>
+        </div>
+      </div>
+
+        <template v-if="group.id === 'google'">
+      <!-- ═══ GOOGLE PLACES ═════════════════════════════════════════════════════ -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-location-dot text-white text-sm"></i>
+          </div>
+          <div>
+            <p class="font-semibold">{{ $t('settings.googlePlaces.sectionTitle') }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.googlePlaces.sectionSubtitle') }}</p>
+          </div>
+        </div>
+        <div class="p-5 space-y-4">
+          <div v-if="placesConfigured" class="flex items-center justify-between">
+            <span class="text-sm text-gray-300">{{ $t('settings.googlePlaces.keyConfigured', { hint: placesKeyHint }) }}</span>
+            <button @click="removePlacesKey" class="text-xs px-3 py-1.5 border border-red-800/60 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors">{{ $t('settings.googlePlaces.disconnect') }}</button>
+          </div>
+          <div v-else class="space-y-3">
+            <p class="text-xs text-gray-500">{{ $t('settings.googlePlaces.getKeyHint') }}</p>
+            <div class="flex gap-2">
+              <input v-model="placesApiKey" type="password" :placeholder="$t('settings.googlePlaces.keyPlaceholder')"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-green-500" />
+              <button @click="savePlacesKey" :disabled="!placesApiKey.trim() || placesSaving"
+                class="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors">
+                {{ placesSaving ? $t('settings.googlePlaces.saving') : $t('settings.googlePlaces.save') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+        </template>
+        <template v-if="group.id === 'social'">
       <!-- ═══ FACEBOOK & INSTAGRAM APP CREDENTIALS ═════════════════════════════ -->
       <div id="meta-app" class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
         <div class="p-5 border-b border-gray-800 flex items-center gap-3">
@@ -151,296 +448,8 @@
         </div>
       </div>
 
-      <!-- ═══ AI INTEGRATION — Ollama ══════════════════════════════════════════ -->
-      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
-          <div class="w-9 h-9 rounded-full bg-violet-700 flex items-center justify-center text-white text-sm font-bold shrink-0">AI</div>
-          <div>
-            <p class="font-semibold">{{ $t('ai.sectionTitle') }}</p>
-            <p class="text-xs text-gray-500 mt-0.5">{{ $t('ai.sectionSubtitle') }}</p>
-          </div>
-          <div class="ml-auto flex items-center gap-2 shrink-0">
-            <span v-if="aiStore.config.provider === 'ollama'" class="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-900/50 text-violet-300 border border-violet-700">{{ $t('ai.active') }}</span>
-            <span v-if="aiConnected !== null" class="text-xs px-2 py-0.5 rounded-full font-medium" :class="aiConnected ? 'bg-green-900/50 text-green-400 border border-green-700' : 'bg-red-900/40 text-red-400 border border-red-800'">
-              {{ aiConnected ? $t('ai.connected') : $t('ai.connectionFailed') }}
-            </span>
-          </div>
-        </div>
-        <div class="p-5 space-y-4">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.endpointLabel') }}</label>
-            <div class="flex gap-2">
-              <input v-model="aiEndpoint" type="text" :placeholder="$t('ai.endpointPlaceholder')"
-                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-              <button @click="testAiConnection" :disabled="aiStore.modelsLoading || !aiEndpoint"
-                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 border border-gray-600 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
-                {{ aiStore.modelsLoading ? $t('ai.testing') : $t('ai.testConnection') }}
-              </button>
-            </div>
-            <p class="text-xs text-gray-600 mt-1">{{ $t('ai.endpointHint') }}</p>
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
-            <select v-model="aiModel" :disabled="!aiModels.length"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500 disabled:opacity-40">
-              <option value="">{{ $t('ai.modelPlaceholder') }}</option>
-              <option v-for="m in aiModels" :key="m" :value="m">{{ m }}</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.visionModelLabel') }}</label>
-            <input v-model="aiVisionModel" type="text" :placeholder="$t('ai.visionModelPlaceholder')"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-            <p class="text-xs text-gray-600 mt-1">{{ $t('ai.visionModelHint') }}</p>
-          </div>
-          <div class="flex items-center justify-end gap-3">
-            <span v-if="aiSaved" class="text-xs text-green-400">{{ $t('ai.saved') }}</span>
-            <button @click="saveAiConfig" :disabled="aiStore.saving || !aiEndpoint"
-              class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
-              {{ aiStore.saving ? $t('ai.saving') : $t('ai.saveConfig') }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ AI PROVIDERS — Anthropic, OpenAI, Groq, Gemini, OpenAI-compatible ══ -->
-      <template v-for="providerName in CLOUD_PROVIDER_NAMES" :key="providerName">
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-          <div class="p-5 border-b border-gray-800 flex items-center gap-3">
-            <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-              :class="PROVIDER_BADGE[providerName].cls">
-              {{ PROVIDER_BADGE[providerName].abbr }}
-            </div>
-            <div>
-              <p class="font-semibold">{{ $t(`ai.${providerName}.sectionTitle`) }}</p>
-              <p class="text-xs text-gray-500 mt-0.5">{{ $t(`ai.${providerName}.sectionSubtitle`) }}</p>
-            </div>
-            <div class="ml-auto flex items-center gap-2 shrink-0">
-              <span v-if="aiStore.config.provider === providerName" class="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-900/50 text-violet-300 border border-violet-700">{{ $t('ai.active') }}</span>
-              <span v-else-if="getProvider(providerName)?.configured" class="text-xs px-2 py-0.5 rounded-full font-medium bg-green-900/50 text-green-400 border border-green-700">✓ {{ $t('ai.apiKeyConfigured') }}</span>
-            </div>
-          </div>
-          <div class="p-5 space-y-4">
-            <p v-if="getProvider(providerName)?.available === false" role="alert" class="text-sm text-red-400">{{ $t('ai.providerUnavailable') }}</p>
-            <div v-if="getProvider(providerName)?.configured && !providerForms[providerName].editing">
-              <div class="flex items-center justify-between text-sm">
-                <div class="space-y-1">
-                  <p v-if="providerName === 'custom'" class="text-xs text-gray-400">{{ $t('ai.baseUrlLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.baseUrl }}</span></p>
-                  <p class="text-xs text-gray-400">{{ $t('ai.apiKeyLabel') }}: <span class="font-mono text-gray-300">{{ getProvider(providerName)?.apiKeyHint || '—' }}</span></p>
-                  <p v-if="providerForms[providerName].saved" class="text-xs text-green-400">{{ $t('ai.providerSaved') }}</p>
-                </div>
-                <div class="flex gap-2">
-                  <button @click="providerForms[providerName].editing = true" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-gray-400 hover:text-gray-200 transition-colors">Edit</button>
-                  <button v-if="aiStore.config.provider !== providerName" @click="setActiveProvider(providerName)" :disabled="aiStore.saving || getProvider(providerName)?.available === false"
-                    class="text-xs px-2.5 py-1 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-md text-white transition-colors">
-                    {{ $t('ai.setActive') }}
-                  </button>
-                  <button @click="disconnectCloudProvider(providerName)" class="text-xs px-2.5 py-1 bg-red-900/40 hover:bg-red-900/60 border border-red-800 rounded-md text-red-400 hover:text-red-300 transition-colors">{{ $t('ai.disconnect') }}</button>
-                </div>
-              </div>
-              <div class="flex items-center gap-3 mt-3">
-                <button @click="testCloudProvider(providerName)" :disabled="providerTests[providerName]?.loading" class="text-xs px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg disabled:opacity-40">{{ providerTests[providerName]?.loading ? $t('ai.testing') : $t('ai.testConnection') }}</button>
-                <span v-if="providerTests[providerName]?.message" class="text-xs" :class="providerTests[providerName]?.ok ? 'text-green-400' : 'text-red-400'">{{ providerTests[providerName]?.message }}</span>
-              </div>
-              <div class="mt-3">
-                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
-                <select v-if="modelOptions(providerName).length" v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
-                  <option v-if="providerForms[providerName].model && !modelOptions(providerName).includes(providerForms[providerName].model)" :value="providerForms[providerName].model">{{ providerForms[providerName].model }}</option>
-                  <option v-for="m in modelOptions(providerName)" :key="m" :value="m">{{ m }}</option>
-                </select>
-                <input v-else v-model="providerForms[providerName].model" type="text" :placeholder="$t('ai.modelInputPlaceholder')"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-                <p class="text-xs text-gray-600 mt-1">{{ liveModels[providerName] ? $t('ai.modelsLive') : $t('ai.modelsStatic') }}</p>
-              </div>
-              <div class="flex justify-end mt-3">
-                <button @click="saveCloudProvider(providerName, aiStore.config.provider === providerName)" :disabled="providerForms[providerName].saving"
-                  class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
-                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.saveProvider') }}
-                </button>
-              </div>
-            </div>
-            <div v-else class="space-y-3">
-              <div v-if="providerName === 'custom'">
-                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.baseUrlLabel') }}</label>
-                <input v-model="providerForms[providerName].baseUrl" type="text" :placeholder="$t('ai.baseUrlPlaceholder')"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-              </div>
-              <div>
-                <label class="block text-xs text-gray-500 mb-1">{{ providerName === 'custom' ? $t('ai.apiKeyOptional') : $t('ai.apiKeyLabel') }}</label>
-                <input v-model="providerForms[providerName].apiKey" type="password" :placeholder="$t('ai.apiKeyPlaceholder')"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-                <p class="text-xs text-gray-600 mt-1">{{ $t(`ai.${providerName}.getKeyHint`) }}</p>
-              </div>
-              <div>
-                <label class="block text-xs text-gray-500 mb-1">{{ $t('ai.modelLabel') }}</label>
-                <select v-if="modelOptions(providerName).length" v-model="providerForms[providerName].model" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-violet-500">
-                  <option v-if="providerForms[providerName].model && !modelOptions(providerName).includes(providerForms[providerName].model)" :value="providerForms[providerName].model">{{ providerForms[providerName].model }}</option>
-                  <option v-for="m in modelOptions(providerName)" :key="m" :value="m">{{ m }}</option>
-                </select>
-                <input v-else v-model="providerForms[providerName].model" type="text" :placeholder="$t('ai.modelInputPlaceholder')"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-                <p class="text-xs text-gray-600 mt-1">{{ liveModels[providerName] ? $t('ai.modelsLive') : $t('ai.modelsStatic') }}</p>
-              </div>
-              <div class="flex items-center justify-end gap-2">
-                <button v-if="providerForms[providerName].editing" @click="providerForms[providerName].editing = false" class="text-xs px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 transition-colors">Cancel</button>
-                <button @click="saveCloudProvider(providerName, false)" :disabled="providerForms[providerName].saving || !canSave(providerName)"
-                  class="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 border border-gray-600 rounded-lg text-xs font-medium transition-colors">
-                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.saveProvider') }}
-                </button>
-                <button @click="saveCloudProvider(providerName, true)" :disabled="providerForms[providerName].saving || !canSave(providerName)"
-                  class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
-                  {{ providerForms[providerName].saving ? $t('ai.saving') : $t('ai.connectAndActivate') }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- ═══ GOOGLE PLACES ═════════════════════════════════════════════════════ -->
-      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
-          <div class="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center shrink-0">
-            <i class="fa-solid fa-location-dot text-white text-sm"></i>
-          </div>
-          <div>
-            <p class="font-semibold">{{ $t('settings.googlePlaces.sectionTitle') }}</p>
-            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.googlePlaces.sectionSubtitle') }}</p>
-          </div>
-        </div>
-        <div class="p-5 space-y-4">
-          <div v-if="placesConfigured" class="flex items-center justify-between">
-            <span class="text-sm text-gray-300">{{ $t('settings.googlePlaces.keyConfigured', { hint: placesKeyHint }) }}</span>
-            <button @click="removePlacesKey" class="text-xs px-3 py-1.5 border border-red-800/60 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors">{{ $t('settings.googlePlaces.disconnect') }}</button>
-          </div>
-          <div v-else class="space-y-3">
-            <p class="text-xs text-gray-500">{{ $t('settings.googlePlaces.getKeyHint') }}</p>
-            <div class="flex gap-2">
-              <input v-model="placesApiKey" type="password" :placeholder="$t('settings.googlePlaces.keyPlaceholder')"
-                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-green-500" />
-              <button @click="savePlacesKey" :disabled="!placesApiKey.trim() || placesSaving"
-                class="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors">
-                {{ placesSaving ? $t('settings.googlePlaces.saving') : $t('settings.googlePlaces.save') }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ IMAGE GENERATION ══════════════════════════════════════════════════ -->
-      <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-        <div class="p-5 border-b border-gray-800 flex items-center gap-3">
-          <div class="w-9 h-9 rounded-full bg-emerald-700 flex items-center justify-center shrink-0">
-            <i class="fa-solid fa-image text-white text-sm"></i>
-          </div>
-          <div>
-            <p class="font-semibold">{{ $t('settings.imageGen.sectionTitle') }}</p>
-            <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.sectionSubtitle') }}</p>
-          </div>
-        </div>
-        <div class="p-5 space-y-6">
-
-          <!-- OpenAI -->
-          <div class="flex items-start gap-3">
-            <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageOpenAiReady ? 'bg-emerald-400' : 'bg-gray-600'"></span>
-            <div class="text-sm">
-              <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.openaiTitle') }}</p>
-              <p class="text-xs text-gray-500 mt-0.5">{{ imageOpenAiReady ? $t('settings.imageGen.openaiReady') : $t('settings.imageGen.openaiMissing') }}</p>
-            </div>
-          </div>
-
-          <!-- Gemini -->
-          <div class="space-y-2">
-            <div class="flex items-start gap-3">
-              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageGeminiReady ? 'bg-emerald-400' : 'bg-gray-600'"></span>
-              <div class="text-sm flex-1">
-                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.geminiTitle') }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">{{ imageGeminiReady ? $t('settings.imageGen.geminiReady') : $t('settings.imageGen.geminiMissing') }}</p>
-              </div>
-            </div>
-            <div v-if="imageGeminiReady" class="pl-5 flex flex-wrap gap-2 items-center">
-              <label class="text-xs text-gray-400 w-full sm:w-auto">{{ $t('settings.imageGen.geminiModelLabel') }}</label>
-              <input v-model="imageGeminiModel" list="gemini-image-models" :placeholder="$t('settings.imageGen.geminiModelPlaceholder')"
-                class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
-              <datalist id="gemini-image-models">
-                <option v-for="m in imageGeminiModels" :key="m" :value="m" />
-              </datalist>
-              <button @click="loadGeminiImageModels" :disabled="imageGeminiModelsLoading"
-                class="text-xs px-3 py-2 border border-gray-700 hover:border-gray-500 text-gray-300 rounded-lg transition-colors disabled:opacity-40">
-                {{ imageGeminiModelsLoading ? $t('settings.imageGen.loadingModels') : $t('settings.imageGen.loadModels') }}
-              </button>
-            </div>
-          </div>
-
-          <!-- xAI Grok Imagine -->
-          <div class="space-y-2">
-            <div class="flex items-start gap-3">
-              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageXaiConfigured ? 'bg-emerald-400' : 'bg-gray-600'"></span>
-              <div class="text-sm flex-1">
-                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.grokTitle') }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.grokHint') }}</p>
-              </div>
-            </div>
-            <div class="pl-5 space-y-2">
-              <div v-if="imageXaiConfigured" class="flex flex-wrap items-center gap-2">
-                <span class="text-xs text-gray-300">{{ $t('settings.imageGen.grokKeyConfigured', { hint: imageXaiKeyHint }) }}</span>
-                <button @click="removeXaiKey" class="text-xs px-3 py-1.5 border border-red-800/60 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors">{{ $t('settings.imageGen.grokRemoveKey') }}</button>
-              </div>
-              <div v-else class="flex flex-wrap gap-2">
-                <input v-model="imageXaiApiKey" type="password" :placeholder="$t('settings.imageGen.grokKeyPlaceholder')"
-                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
-              </div>
-              <div class="flex flex-wrap gap-2 items-center">
-                <label class="text-xs text-gray-400">{{ $t('settings.imageGen.grokModelLabel') }}</label>
-                <input v-model="imageGrokModel" :placeholder="$t('settings.imageGen.grokModelPlaceholder')"
-                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
-              </div>
-            </div>
-          </div>
-
-          <!-- Local Stable Diffusion -->
-          <div class="space-y-2">
-            <div class="flex items-start gap-3">
-              <span class="mt-0.5 w-2 h-2 rounded-full shrink-0" :class="imageLocalEndpoint.trim() ? 'bg-emerald-400' : 'bg-gray-600'"></span>
-              <div class="text-sm flex-1">
-                <p class="text-gray-200 font-medium">{{ $t('settings.imageGen.localTitle') }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">{{ $t('settings.imageGen.localHint') }}</p>
-              </div>
-            </div>
-            <div class="pl-5 space-y-2">
-              <div class="flex flex-wrap gap-2">
-                <input v-model="imageLocalEndpoint" type="url" :placeholder="$t('settings.imageGen.localEndpointPlaceholder')"
-                  class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500" />
-                <button @click="testLocalImageServer" :disabled="!imageLocalEndpoint.trim() || imageLocalTesting"
-                  class="text-xs px-3 py-2 border border-gray-700 hover:border-gray-500 text-gray-300 rounded-lg transition-colors disabled:opacity-40">
-                  {{ imageLocalTesting ? $t('settings.imageGen.testing') : $t('settings.imageGen.test') }}
-                </button>
-              </div>
-              <div class="flex items-center gap-2">
-                <label class="text-xs text-gray-400">{{ $t('settings.imageGen.localStepsLabel') }}</label>
-                <input v-model.number="imageLocalSteps" type="number" min="1" max="150"
-                  class="w-20 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-emerald-500" />
-              </div>
-              <p v-if="imageLocalTestResult" class="text-xs" :class="imageLocalTestResult.ok ? 'text-emerald-400' : 'text-red-400'">
-                <template v-if="imageLocalTestResult.ok">
-                  {{ $t('settings.imageGen.testOk', { count: imageLocalTestResult.models.length, active: imageLocalTestResult.activeModel || '—' }) }}
-                </template>
-                <template v-else>{{ imageLocalTestResult.error }}</template>
-              </p>
-            </div>
-          </div>
-
-          <!-- Save -->
-          <div class="flex items-center gap-3">
-            <button @click="saveImageConfig" :disabled="imageConfigSaving"
-              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors">
-              {{ imageConfigSaving ? $t('settings.imageGen.saving') : $t('settings.imageGen.save') }}
-            </button>
-            <span v-if="imageConfigSaved" class="text-xs text-emerald-400">{{ $t('settings.imageGen.saved') }}</span>
-            <span v-if="imageConfigError" class="text-xs text-red-400">{{ imageConfigError }}</span>
-          </div>
-        </div>
-      </div>
+        </template>
+      </section>
 
     </div>
   </div>
@@ -454,6 +463,14 @@ import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore, PROVIDER_MODELS, CLOUD_PROVIDER_NAMES } from '../stores/ai'
 import ChatConnector from '../components/ChatConnector.vue'
 
+const SETTINGS_GROUPS: { id: string; connector?: 'claude' | 'chatgpt' | 'local'; providers: string[]; image?: 'openai' | 'gemini' | 'local' | 'grok' }[] = [
+  { id: 'claude', connector: 'claude', providers: ['anthropic'] },
+  { id: 'openai', connector: 'chatgpt', providers: ['openai'], image: 'openai' },
+  { id: 'local', connector: 'local', providers: ['custom'], image: 'local' },
+  { id: 'google', providers: ['gemini'], image: 'gemini' },
+  { id: 'other', providers: ['groq'], image: 'grok' },
+  { id: 'social', providers: [] },
+]
 const { t } = useI18n()
 const platformsStore = usePlatformsStore()
 const aiStore = useAiStore()
@@ -547,6 +564,7 @@ const imageLocalSteps = ref(25)
 const imageLocalTesting = ref(false)
 const imageLocalTestResult = ref<{ ok: boolean; models: string[]; activeModel: string | null; error?: string } | null>(null)
 const imageConfigSaving = ref(false)
+const imageFeedbackGroup = ref('')
 const imageConfigSaved = ref(false)
 const imageConfigError = ref('')
 
@@ -577,6 +595,7 @@ async function removeXaiKey() {
 }
 
 async function loadGeminiImageModels() {
+  imageFeedbackGroup.value = 'gemini'
   imageGeminiModelsLoading.value = true
   try {
     const res = await axios.post('/api/ai/image-config/gemini-models')
@@ -602,20 +621,19 @@ async function testLocalImageServer() {
   }
 }
 
-async function saveImageConfig() {
+async function saveImageConfig(provider: 'openai' | 'gemini' | 'local' | 'grok' | undefined) {
+  imageFeedbackGroup.value = provider || ''
   imageConfigSaving.value = true
   imageConfigSaved.value = false
   imageConfigError.value = ''
   try {
-    const res = await axios.put('/api/ai/image-config', {
-      geminiModel: imageGeminiModel.value.trim(),
-      localEndpoint: imageLocalEndpoint.value.trim(),
-      localSteps: imageLocalSteps.value,
-      grokModel: imageGrokModel.value.trim(),
-      xaiApiKey: imageXaiApiKey.value.trim() || undefined,
-    })
-    applyImageConfig(res.data)
-    imageXaiApiKey.value = ''
+    const payload = provider === 'local' ? { localEndpoint: imageLocalEndpoint.value.trim(), localSteps: imageLocalSteps.value }
+      : provider === 'gemini' ? { geminiModel: imageGeminiModel.value.trim() }
+      : { grokModel: imageGrokModel.value.trim(), xaiApiKey: imageXaiApiKey.value.trim() || undefined }
+    const res = await axios.put('/api/ai/image-config', payload)
+    if (provider === 'local') { imageLocalEndpoint.value = res.data.localEndpoint; imageLocalSteps.value = res.data.localSteps }
+    if (provider === 'gemini') imageGeminiModel.value = res.data.geminiModel
+    if (provider === 'grok') { imageGrokModel.value = res.data.grokModel; imageXaiConfigured.value = res.data.xaiConfigured; imageXaiKeyHint.value = res.data.xaiKeyHint; imageXaiApiKey.value = '' }
     imageConfigSaved.value = true
     setTimeout(() => { imageConfigSaved.value = false }, 3000)
   } catch (err: any) {

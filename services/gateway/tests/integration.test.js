@@ -117,11 +117,13 @@ test('workspace deletion first cancels its queue and removes scoped data', async
   await db.collection('workspaces').insertOne({ _id: 'delete-me' });
   await db.collection('scheduled_jobs').insertOne({ workspaceId: 'delete-me', bullJobId: 'pending' });
   await db.collection('feeds').insertOne({ workspaceId: 'delete-me' });
+  await db.collection('mcp_local_sessions').insertOne({ workspaceId: 'delete-me', messages: ['Private local conversation'] });
   axios.delete = jest.fn().mockResolvedValue({ data: { success: true } });
   expect((await request('DELETE', '/workspaces/delete-me')).statusCode).toBe(200);
   expect(axios.delete.mock.calls[0][0]).toContain('/workspaces/delete-me/jobs');
   expect(await db.collection('scheduled_jobs').findOne({ workspaceId: 'delete-me' })).toBeNull();
   expect(await db.collection('feeds').findOne({ workspaceId: 'delete-me' })).toBeNull();
+  expect(await db.collection('mcp_local_sessions').findOne({ workspaceId: 'delete-me' })).toBeNull();
 });
 test('workspace deletion retains data when publishing is active', async () => {
   await db.collection('workspaces').insertOne({ _id: 'busy' });
