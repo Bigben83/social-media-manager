@@ -49,10 +49,12 @@ export default {
     "title": "ChatGPT plugin (MCP)",
     "description": "Use ChatGPT conversations to read brand context, create plans and drafts, and optionally publish or schedule confirmed posts.",
     "urlLabel": "Remote MCP server URL",
-    "instructions": "In ChatGPT on the web, open Plugins, select + then Add custom MCP server, and enter this URL. Choose OAuth and dynamic client registration (DCR); leave static client credentials blank. Create the plugin, sign in with your connector password and approve access, then install it and select it with {'@'} in a conversation. Workspace policies may restrict custom plugins.",
+    "instructions": "ChatGPT menus vary. If + includes Add custom MCP server, enter this URL and choose OAuth with DCR. Otherwise use the ZIP below with Upload plugin and inspect its MCP connection. Complete OAuth in your browser with the connector password, approve workspaces/permissions, and select the installed plugin with {'@'} in a new chat.",
     "setupRequired": "The server administrator needs to finish connector password setup.",
     "manageAccess": "Set up or manage connector access",
-    "apiNote": "This uses your ChatGPT conversation without an OpenAI generation API key. Each chat app has a separate access grant. Other Generate buttons use the API or local provider configured below."
+    "apiNote": "This uses your ChatGPT conversation without an OpenAI generation API key. Each chat app has a separate access grant. Other Generate buttons use the API or local provider configured below.",
+    "downloadPlugin": "Download ChatGPT plugin ZIP",
+    "uploadHint": "Plugin Creator builds workflows; a workflow alone does not connect this server. The ZIP includes the MCP URL and OAuth/DCR settings, with no secrets. If upload does not show a SocialManager MCP connection, retain the error and check custom MCP availability with your workspace admin or OpenAI support. Installation in your ChatGPT account still needs verification."
 },
   claudeConnector: {
     "title": "Claude app connector",

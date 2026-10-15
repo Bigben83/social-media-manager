@@ -8,6 +8,10 @@
       <label :for="provider + '-mcp-url'" class="block text-xs text-gray-400">{{ $t(localePrefix + '.urlLabel') }}</label>
       <input :id="provider + '-mcp-url'" :value="connectorUrl" readonly class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100" />
       <p class="text-xs text-gray-400">{{ $t(localePrefix + '.instructions') }}</p>
+      <template v-if="provider === 'chatgpt'">
+        <a href="/connector/chatgpt-plugin.zip" download="socialmanager-chatgpt-plugin.zip" class="inline-block rounded-lg bg-emerald-800 px-4 py-2 text-sm text-white">{{ $t('chatgptConnector.downloadPlugin') }}</a>
+        <p class="text-xs text-gray-400">{{ $t('chatgptConnector.uploadHint') }}</p>
+      </template>
       <p v-if="!configured" class="text-xs text-amber-300">{{ $t(localePrefix + '.setupRequired') }}</p>
       <a href="/connector" target="_blank" rel="noopener" class="inline-block px-4 py-2 bg-violet-700 hover:bg-violet-600 rounded-lg text-sm font-medium text-white">{{ $t(localePrefix + '.manageAccess') }}</a>
       <a v-if="provider === 'local'" href="/local-assistant" class="ml-3 inline-block text-sm text-violet-200 underline">{{ $t('localConnector.openAssistant') }}</a>

@@ -55,6 +55,16 @@ test('OAuth metadata and unauthenticated challenges identify the protected MCP r
   assert.equal((await request('/connector/login')).headers.get('referrer-policy'),'same-origin');
   const rootMetadata=await(await request('/.well-known/oauth-protected-resource')).json();const serverMetadata=await(await request('/.well-known/oauth-authorization-server')).json();assert.equal(rootMetadata.authorization_servers[0],serverMetadata.issuer);
 });
+
+test('ChatGPT download contains portable MCP and OAuth DCR settings without credentials',async()=>{
+  const response=await request('/connector/chatgpt-plugin.zip');assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/application\/zip/);assert.match(response.headers.get('content-disposition'),/socialmanager-chatgpt-plugin.zip/);
+  const zip=Buffer.from(await response.arrayBuffer()),files={};let offset=0;
+  while(zip.readUInt32LE(offset)===0x04034b50){const size=zip.readUInt32LE(offset+18),nameLength=zip.readUInt16LE(offset+26),extraLength=zip.readUInt16LE(offset+28);const name=zip.subarray(offset+30,offset+30+nameLength).toString();const start=offset+30+nameLength+extraLength;files[name]=zip.subarray(start,start+size).toString();offset=start+size;}
+  assert.deepEqual(Object.keys(files).sort(),['README.md','mcp.json','plugin.json']);assert.equal(zip.readUInt32LE(offset),0x02014b50);assert.equal(zip.readUInt32LE(zip.length-22),0x06054b50);
+  const manifest=JSON.parse(files['plugin.json']);assert.equal(manifest.name,'socialmanager');assert.match(manifest.$schema,/plugin.schema.json$/);
+  const config=JSON.parse(files['mcp.json']).mcpServers.socialmanager;assert.equal(config.type,'streamable-http');assert.equal(config.url,base+'/mcp');const auth=config.extensions['com.openai'].auth;assert.equal(auth.type,'oauth');assert.deepEqual(auth.client,{mode:'dcr'});assert.equal(auth.registrationUrl,base+'/register');assert.equal(auth.tokenUrl,base+'/token');assert.equal(auth.authorizationUrl,base+'/authorize');assert.ok(auth.baseScopes.includes('social:publish'));
+  assert.equal(zip.includes(Buffer.from(password)),false);assert.equal(JSON.stringify(config).includes('clientSecret'),false);assert.equal(JSON.stringify(config).includes('clientId'),false);
+});
 test('PKCE authorization codes cannot be reused and tokens are hashed at rest',async()=>{
   const {tokens,tokenBody}=await grant();
   const repeat=await request('/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(tokenBody)});assert.equal(repeat.status,400);

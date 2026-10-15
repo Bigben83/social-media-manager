@@ -9,6 +9,7 @@ const {createAuthProvider,SCOPES}=require('./auth');
 const {mountAdmin}=require('./admin');
 const {createToolServer}=require('./tools');
 const {mountLocalAssistant}=require('./local');
+const {buildChatgptPlugin}=require('./chatgpt-plugin');
 const {getDb}=require('./utils/MongoDBConnector');
 const {createLogger}=require('./utils/logger');
 async function createApp(options={}){
@@ -28,6 +29,7 @@ async function createApp(options={}){
     if(req.headers.origin&&req.headers.origin!==resourceUrl.origin&&!['https://claude.ai','https://claude.com','https://chatgpt.com'].includes(req.headers.origin))return res.status(403).json({error:'Invalid origin'});
     next();
   });
+  app.get('/connector/chatgpt-plugin.zip',(_req,res)=>res.type('application/zip').set('Content-Disposition','attachment; filename="socialmanager-chatgpt-plugin.zip"').send(buildChatgptPlugin(resourceUrl)));
   if(!configured){
     app.use((_req,res)=>res.status(503).type('html').send('<!doctype html><title>Connector setup</title><h1>Connector setup required</h1><p>Your server administrator needs to configure the connector owner password. Existing SocialManager access is unchanged.</p>'));
     return {app,provider:null};

@@ -49,10 +49,12 @@ export default {
     "title": "ChatGPT eklentisi (MCP)",
     "description": "Marka bağlamını okumak, plan ve taslak oluşturmak, onaylanan gönderileri yayımlamak veya zamanlamak için ChatGPT sohbetlerini kullanın.",
     "urlLabel": "Uzak MCP sunucu URL adresi",
-    "instructions": "Web üzerinden ChatGPT Eklentiler bölümünde + ve Özel MCP sunucusu ekle seçeneklerini açıp bu URL adresini girin. OAuth ve dinamik istemci kaydını (DCR) seçin; sabit istemci bilgilerini boş bırakın. Eklentiyi oluşturun, bağlayıcı parolanızla oturum açıp erişimi onaylayın, ardından eklentiyi yükleyin ve sohbette {'@'} ile seçin. Çalışma alanı politikaları özel eklentileri kısıtlayabilir.",
+    "instructions": "ChatGPT menüleri değişebilir. + menüsünde Özel MCP sunucusu ekle varsa bu URL adresini girip OAuth ve DCR seçin. Aksi halde aşağıdaki ZIP dosyasını Eklenti yükle ile yükleyip MCP bağlantısını inceleyin. Tarayıcıda bağlayıcı parolasıyla OAuth onayını tamamlayın, çalışma alanlarını ve izinleri seçin, ardından yeni sohbette {'@'} ile eklentiyi seçin.",
     "setupRequired": "Sunucu yöneticisinin bağlayıcı parolası kurulumunu tamamlaması gerekiyor.",
     "manageAccess": "Bağlayıcı erişimini kur veya yönet",
-    "apiNote": "Bu akış OpenAI üretim API anahtarı olmadan ChatGPT sohbetinizi kullanır. Her sohbet uygulaması ayrı bir erişim onayı alır. Diğer Oluştur düğmeleri aşağıdaki API veya yerel sağlayıcıyı kullanır."
+    "apiNote": "Bu akış OpenAI üretim API anahtarı olmadan ChatGPT sohbetinizi kullanır. Her sohbet uygulaması ayrı bir erişim onayı alır. Diğer Oluştur düğmeleri aşağıdaki API veya yerel sağlayıcıyı kullanır.",
+    "downloadPlugin": "ChatGPT eklenti ZIP dosyasını indir",
+    "uploadHint": "Plugin Creator iş akışları oluşturur; yalnızca iş akışı oluşturmak bu sunucuya bağlantı kurmaz. ZIP, gizli bilgi olmadan MCP URL adresini ve OAuth/DCR ayarlarını içerir. Yükleme SocialManager MCP bağlantısını göstermiyorsa hata metnini saklayıp çalışma alanı yöneticinizden veya OpenAI desteğinden özel MCP erişimini kontrol etmesini isteyin. ChatGPT hesabınızdaki kurulumun ayrıca doğrulanması gerekir."
 },
   claudeConnector: {
     "title": "Claude uygulama bağlayıcısı",
