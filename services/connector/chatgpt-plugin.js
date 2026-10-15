@@ -18,8 +18,8 @@ function buildChatgptPlugin(resourceUrl) {
   const json=value=>JSON.stringify(value,null,2)+'\n';
   return zipFiles({
     'plugin.json':json({
-      $schema:'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',name:'socialmanager',version:'1.0.0',
-      description:'Read workspace brand context, save content plans and drafts, and optionally publish or schedule explicitly confirmed posts through SocialManager.',
+      $schema:'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',name:'socialmanager',version:'1.1.0',
+      description:'Read workspace brand context, save content plans, create and edit drafts, and optionally publish or schedule explicitly confirmed posts through SocialManager.',
       author:{name:'SocialManager'},homepage:resource.origin,repository:'https://github.com/Bigben83/social-media-manager',
       extensions:{'com.openai':{interface:{displayName:'SocialManager',shortDescription:'Plan and manage social content',websiteURL:resource.origin,defaultPrompt:['Read my workspace brand profile and help me plan next month’s content.','Save an introduction series as drafts for review.']}}},
     }),

@@ -1,7 +1,7 @@
 const express = require('express');
 const { randomToken, hash, checkPassword } = require('./auth');
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const permissionNames = { 'social:read':'Read profiles, plans, drafts, media and post history', 'social:drafts':'Create content plans and drafts', 'social:publish':'Publish posts immediately', 'social:schedule':'Schedule posts for future delivery' };
+const permissionNames = { 'social:read':'Read profiles, plans, drafts, media and post history', 'social:drafts':'Create content plans; create and edit drafts', 'social:publish':'Publish posts immediately', 'social:schedule':'Schedule posts for future delivery' };
 function page(title, body) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · SocialManager</title><link rel="stylesheet" href="/connector/style.css"></head><body><main><a href="/global-settings">← SocialManager settings</a><h1>${escape(title)}</h1>${body}</main></body></html>`;
 }

@@ -8,12 +8,24 @@ const workspaceSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
 const idSchema = z.string().regex(/^[a-f0-9]{24}$/);
 const requestSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/).describe('A stable unique identifier for this save operation. Reuse the same identifier on retries.');
 const destinationSchema = z.object({ platform: z.enum(PLATFORMS), accountId: z.string().min(1).max(200).optional(), imageUrl: z.string().max(2048).optional(), videoUrl: z.string().max(2048).optional(), link: z.string().url().max(2048).optional() });
+const draftChangesSchema = z.object({
+  content: z.string().trim().min(1).max(20000).optional(),
+  firstComment: z.string().max(10000).optional().describe('Omit to preserve. Use an empty string to remove the first comment.'),
+  mediaUrl: z.string().max(2048).optional().describe('An existing workspace Media Library URL. Omit to preserve; an empty string removes the attachment.'),
+  scheduledAt: z.string().refine(value => {
+    if (value === '') return true;
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return false;
+    const date = new Date(value + 'Z');
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0,16) === value;
+  }, 'Use a valid local YYYY-MM-DDTHH:mm planned date, or an empty string to clear it.').optional().describe('Draft planning only; never queues delivery. Local wall time as shown in Compose. Omit to preserve; empty clears.'),
+  destinations: z.array(destinationSchema).max(20).optional().describe('Replace the selected accounts. Omit to preserve; an empty array clears the selections.'),
+}).strict().refine(changes => Object.keys(changes).length > 0, 'Supply at least one field to update');
 const postSchema = z.object({ platform: z.enum(PLATFORMS), content: z.string().trim().min(1).max(20000), week: z.number().int().min(1).max(4), suggestedDay: z.enum(['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']), suggestedTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/), hashtags: z.array(z.string().max(100)).max(15).default([]), postType: z.enum(['educational','promotional','engagement','storytelling']).default('educational') });
 const objectId = text => new ObjectId(createHash('sha256').update(text).digest('hex').slice(0,24));
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const publicResult = data => ({ content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data });
 function createToolServer({ db, auth, provider, callGateway, callScheduler, publicOrigin, log }) {
-  const server = new McpServer({ name: 'SocialManager', version: '1.1.0' }, { instructions: 'Use list_workspaces first and explicitly identify the intended workspace. Write content in this conversation; saving plans/drafts does not call a generation API. Before publishing or scheduling, prepare_post, present the exact preview to the user, and call confirm_post only after their explicit confirmation. Never claim a post was published unless the returned delivery results confirm it.' });
+  const server = new McpServer({ name: 'SocialManager', version: '1.2.0' }, { instructions: 'Use list_workspaces first and explicitly identify the intended workspace. Write content in this conversation; saving plans/drafts does not call a generation API. To edit an existing draft, read get_draft and use update_draft with its updatedAt. Omitted fields are preserved. A planned draft date does not queue delivery. Before publishing or scheduling, prepare_post, present the exact preview to the user, and call confirm_post only after their explicit confirmation. Never claim a post was published unless the returned delivery results confirm it.' });
   async function check(workspaceId, scope) {
     const grant = await provider.getGrant(auth.extra.grantId);
     if (!auth.scopes.includes(scope) || !grant.scopes.includes(scope)) throw new Error('Permission not granted: ' + scope);
@@ -109,6 +121,51 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
     return {success:true,calendarId:String(_id),postCount:content.posts.length,url:publicOrigin+'/calendar-plan?calendar='+_id+'&workspace='+encodeURIComponent(workspaceId)};
   },{idempotent:true});
   tool('list_drafts','Read saved drafts in this workspace.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({drafts:await db.collection('drafts').find({workspaceId}).sort({updatedAt:-1}).limit(limit).toArray()}),{readOnly:true});
+  tool('get_draft','Read an existing draft, including its text, attachment, selected accounts, planned date and updatedAt. Read before update_draft; use its exact updatedAt to avoid overwriting newer edits.',{workspaceId:workspaceSchema,draftId:idSchema},'social:read',async({workspaceId,draftId})=>{
+    const draft=await db.collection('drafts').findOne({_id:new ObjectId(draftId),workspaceId});
+    if(!draft)throw new Error('Draft not found');
+    return {draft};
+  },{readOnly:true});
+  tool('update_draft','Edit an existing draft in place, including drafts created in the app or another connector. Read get_draft first and pass its updatedAt as expectedUpdatedAt. Send only changed fields. Omitted fields are preserved; empty mediaUrl/firstComment/scheduledAt or destinations clears that field. One shared workspace-owned attachment per draft. Does not publish, queue delivery, or change already scheduled posts. Reuse requestId and the same arguments on retries; reread on a conflict.',{
+    workspaceId:workspaceSchema,draftId:idSchema,requestId:requestSchema,
+    expectedUpdatedAt:z.string().datetime({offset:true}).describe('The exact updatedAt returned by get_draft or list_drafts.'),
+    changes:draftChangesSchema,
+  },'social:drafts',async({workspaceId,draftId,requestId,expectedUpdatedAt,changes})=>{
+    const col=db.collection('drafts'),query={_id:new ObjectId(draftId),workspaceId};
+    const draft=await col.findOne(query);if(!draft)throw new Error('Draft not found');
+    const digest=fingerprint({expectedUpdatedAt,changes});
+    const last=draft.mcpLastEdit;
+    const editResult=(saved,replayed)=>({success:true,draftId,draft:saved,hasMedia:!!saved.mediaUrl||!!saved.destinations?.some(d=>d.imageUrl||d.videoUrl),replayed,url:publicOrigin+'/compose?draft='+draftId+'&workspace='+encodeURIComponent(workspaceId)});
+    if(last?.grantId===auth.extra.grantId&&last.requestId===requestId){
+      if(last.fingerprint!==digest)throw new Error('requestId already used for different draft changes');
+      if(new Date(draft.updatedAt).getTime()!==new Date(last.updatedAt).getTime())throw new Error('Draft changed since this edit. Read get_draft again before making changes.');
+      return editResult(draft,true);
+    }
+    if(new Date(draft.updatedAt).getTime()!==new Date(expectedUpdatedAt).getTime())throw new Error('Draft changed since it was read. Read get_draft again and review the latest version.');
+    const patch={...changes};
+    if(changes.destinations!==undefined)await checkDestinations(workspaceId,changes.destinations);
+    const destinationMedia=changes.destinations?.some(d=>d.imageUrl||d.videoUrl);
+    if(changes.mediaUrl!==undefined||changes.destinations!==undefined){
+      if(changes.mediaUrl===''&&destinationMedia)throw new Error('To remove the attachment, also omit imageUrl/videoUrl from destinations.');
+      const urls=[...new Set((draft.destinations||[]).flatMap(d=>[d.imageUrl,d.videoUrl]).filter(Boolean))];
+      const existingMedia=draft.mediaUrl||(urls.length===1?urls[0]:'');
+      const mediaUrl=changes.mediaUrl!==undefined||destinationMedia
+        ?await checkDraftMedia(workspaceId,{mediaUrl:changes.mediaUrl,destinations:changes.destinations||[]})
+        :existingMedia;
+      const mediaField=/\.(mp4|mov|avi|webm)(?:[?#]|$)/i.test(mediaUrl)?'videoUrl':'imageUrl';
+      patch.mediaUrl=mediaUrl;
+      patch.destinations=(changes.destinations||draft.destinations||[]).map(({imageUrl,videoUrl,...destination})=>({
+        ...destination,key:destinationKey(destination),selected:destination.selected!==false,
+        ...(mediaUrl&&destination.selected!==false&&{[mediaField]:mediaUrl}),
+      }));
+    }
+    // Compare and update atomically. Advance even for rapid edits within the same millisecond.
+    const updatedAt=new Date(Math.max(Date.now(),new Date(draft.updatedAt).getTime()+1));
+    const mcpLastEdit={grantId:auth.extra.grantId,requestId,fingerprint:digest,updatedAt};
+    const changed=await col.updateOne({...query,updatedAt:draft.updatedAt},{$set:{...patch,updatedAt,mcpLastEdit}});
+    if(!changed.matchedCount)throw new Error('Draft changed while saving. Read get_draft again and review the latest version.');
+    return editResult({...draft,...patch,updatedAt,mcpLastEdit},false);
+  },{idempotent:true,destructive:true});
   tool('create_drafts','Save posts written in this conversation as reviewable drafts. Use list_media URLs for one shared image or video per draft, using mediaUrl or destination imageUrl/videoUrl. Does not generate or upload images, publish, or schedule delivery. Only claim an attachment when the result confirms hasMedia. Reuse requestId on retries.',{workspaceId:workspaceSchema,requestId:requestSchema,drafts:z.array(z.object({content:z.string().trim().min(1).max(20000),firstComment:z.string().max(10000).default(''),mediaUrl:z.string().max(2048).optional(),destinations:z.array(destinationSchema).max(20).default([])})).min(1).max(100)},'social:drafts',async({workspaceId,requestId,drafts})=>{
     const ids=[],savedDrafts=[],prepared=[];
     // Validate the complete batch before saving, so an invalid attachment leaves no partial batch.
