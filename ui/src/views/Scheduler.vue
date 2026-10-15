@@ -292,6 +292,16 @@
         </button>
       </div>
 
+      <div v-if="drafts.length" class="mx-auto w-full px-6 pb-4 flex flex-wrap items-center gap-3" :class="draftView === 'cards' ? 'max-w-6xl' : 'max-w-3xl'">
+        <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+          <input type="checkbox" :checked="allDraftsSelected" :indeterminate="selectedDrafts.length > 0 && !allDraftsSelected" @change="toggleAllDrafts" class="accent-amber-500" />
+          {{ $t('scheduler.bulkSchedule.selectAll') }}
+        </label>
+        <span class="text-xs text-gray-400">{{ $t('scheduler.bulkSchedule.selectedCount', { count: selectedDrafts.length }) }}</span>
+        <button @click="showScheduleDialog = true" :disabled="!selectedDrafts.length || selectedDrafts.length > 500" class="ml-auto px-3 py-2 rounded-lg text-sm bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed">{{ $t('scheduler.bulkSchedule.openButton') }}</button>
+        <p v-if="selectedDrafts.length > 500" class="w-full text-xs text-amber-300">{{ $t('scheduler.bulkSchedule.batchLimit') }}</p>
+      </div>
+
       <div class="flex-1 overflow-y-auto pb-6">
         <div class="mx-auto px-6" :class="draftView === 'cards' ? 'max-w-6xl' : 'max-w-3xl'">
           <div v-if="draftsLoading" class="text-center text-gray-500 mt-20">
@@ -304,10 +314,12 @@
           </div>
 
           <div v-else :class="draftView === 'cards' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch' : 'space-y-3'">
-            <DraftSummary v-for="draft in drafts" :key="draft._id" :draft="draft" :destinations="selectedDests(draft)" :layout="draftView" @delete="deleteDraft" />
+            <DraftSummary v-for="draft in drafts" :key="draft._id" :draft="draft" :destinations="selectedDests(draft)" :layout="draftView" :selected="selectedDraftIds.has(draft._id)" @toggle="toggleDraftSelection" @delete="deleteDraft" />
           </div>
         </div>
       </div>
+
+      <BulkScheduleDialog v-if="showScheduleDialog" :drafts="selectedDrafts" @close="showScheduleDialog = false" @scheduled="onDraftsScheduled" @view-scheduled="viewScheduledDrafts" />
 
       <!-- ── Bulk Draft Modal ── -->
       <Teleport to="body">
@@ -467,6 +479,7 @@ import dayjs from 'dayjs'
 import { PLATFORM_META, usePlatformsStore } from '../stores/platforms'
 import { useComposeStore, type Destination, type Draft } from '../stores/compose'
 import DraftSummary from '../components/scheduler/DraftSummary.vue'
+import BulkScheduleDialog, { type ScheduleResult } from '../components/scheduler/BulkScheduleDialog.vue'
 
 const { t, tm } = useI18n()
 const platformsStore = usePlatformsStore()
@@ -654,12 +667,37 @@ async function cancelCalendarJob(bullJobId: string) {
 
 const drafts = ref<Draft[]>([])
 const draftsLoading = ref(false)
+const selectedDraftIds = ref(new Set<string>())
+const showScheduleDialog = ref(false)
+const selectedDrafts = computed(() => drafts.value.filter(draft => selectedDraftIds.value.has(draft._id)))
+const allDraftsSelected = computed(() => drafts.value.length > 0 && selectedDrafts.value.length === drafts.value.length)
+function toggleDraftSelection(id: string) {
+  const selected = new Set(selectedDraftIds.value)
+  if (selected.has(id)) selected.delete(id)
+  else selected.add(id)
+  selectedDraftIds.value = selected
+}
+function toggleAllDrafts() {
+  selectedDraftIds.value = allDraftsSelected.value ? new Set() : new Set(drafts.value.map(draft => draft._id))
+}
+function onDraftsScheduled(results: ScheduleResult[]) {
+  for (const result of results) if (result.success) selectedDraftIds.value.delete(result.draftId)
+  void Promise.allSettled([fetchDrafts(), fetchJobs(), fetchCalendarJobs()])
+}
+function viewScheduledDrafts() {
+  showScheduleDialog.value = false
+  activeStatus.value = 'pending'
+  mode.value = 'scheduled'
+  fetchJobs()
+}
+
 
 async function fetchDrafts() {
   draftsLoading.value = true
   try {
     const res = await axios.get('/api/drafts')
     drafts.value = res.data.drafts || []
+    selectedDraftIds.value = new Set([...selectedDraftIds.value].filter(id => drafts.value.some(draft => draft._id === id)))
   } catch (err) {
     console.error(err)
   } finally {

@@ -20,6 +20,7 @@ let redis;
 let postWorker;
 let systemWorker;
 let systemQueue;
+require('./drafts').registerDraftScheduling(app, { getDb, getQueue: () => postQueue, log });
 
 // ─── Job Worker ──────────────────────────────────────────────────────────────
 

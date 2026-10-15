@@ -1,5 +1,9 @@
 <template>
   <article class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden min-w-0 flex flex-col" :data-draft-id="draft._id">
+    <label class="px-4 py-2.5 flex items-center gap-2 text-xs text-gray-400 border-b border-gray-800 cursor-pointer">
+      <input type="checkbox" :checked="selected" @change="$emit('toggle', draft._id)" class="accent-amber-500" />
+      {{ $t('scheduler.bulkSchedule.selectDraft') }}
+    </label>
     <div v-if="layout === 'cards'" class="aspect-[4/3] bg-gray-950 flex items-center justify-center overflow-hidden border-b border-gray-800">
       <video v-if="mediaUrl && isVideo && !mediaError" :src="mediaUrl" controls preload="metadata" class="w-full h-full object-contain" :aria-label="$t('scheduler.draftMediaPreview')" @error="mediaError = true" />
       <img v-else-if="mediaUrl && !mediaError" :src="mediaUrl" :alt="$t('scheduler.draftMediaPreview')" loading="lazy" class="w-full h-full object-contain" @error="mediaError = true" />
@@ -44,8 +48,8 @@ import { draftMediaUrl, type Draft, type Destination } from '../../stores/compos
 import { PLATFORM_META } from '../../stores/platforms'
 import { formatDraftDate } from '../../utils/draftDate'
 
-const props = defineProps<{ draft: Draft & { batchId?: string }; destinations: Destination[]; layout: 'list' | 'cards' }>()
-defineEmits<{ (e: 'delete', id: string): void }>()
+const props = defineProps<{ draft: Draft & { batchId?: string }; destinations: Destination[]; layout: 'list' | 'cards'; selected: boolean }>()
+defineEmits<{ (e: 'delete', id: string): void; (e: 'toggle', id: string): void }>()
 const { locale } = useI18n()
 const mediaUrl = computed(() => draftMediaUrl(props.draft))
 const mediaError = ref(false)
