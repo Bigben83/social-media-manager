@@ -49,8 +49,8 @@ async function discoverPage(reference, userToken) {
   try {
     const linked = await graphGet(page.id, page.access_token, { fields: 'instagram_business_account' });
     if (linked.instagram_business_account?.id) {
-      const profile = await graphGet(linked.instagram_business_account.id, userToken, { fields: 'id,username,name,profile_picture_url' });
-      result.igAccounts.push({ id: profile.id, username: profile.username || profile.name, name: profile.name, avatar: profile.profile_picture_url || null, pageId: page.id, accessToken: encryptToken(userToken), selected: false });
+      const profile = await graphGet(linked.instagram_business_account.id, userToken, { fields: 'id,username,name,profile_picture_url,account_type' });
+      result.igAccounts.push({ id: profile.id, username: profile.username || profile.name, name: profile.name, avatar: profile.profile_picture_url || null, accountType: profile.account_type, pageId: page.id, accessToken: encryptToken(userToken), selected: false });
     }
   } catch (err) {
     result.warnings.push({ pageId: page.id, pageName: page.name, error: safeError(err) });

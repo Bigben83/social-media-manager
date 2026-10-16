@@ -1,7 +1,9 @@
 const { createHash } = require('crypto');
+const { instagramValidation } = require('./instagram');
 const PLATFORM_PORTS = { twitter: 3001, mastodon: 3003, bluesky: 3004, instagram: 3005, facebook: 3006, pinterest: 3008, tiktok: 3007 };
 const PLATFORM_SERVICES = Object.fromEntries(Object.entries(PLATFORM_PORTS).map(([platform, port]) => [platform, process.env[`${platform.toUpperCase()}_SERVICE_URL`] || `http://${platform}:${port}`]));
-const destinationKey = dest => dest.accountId ? `${dest.platform}:${dest.accountId}` : dest.platform;
+const accountKey = dest => dest.accountId ? `${dest.platform}:${dest.accountId}` : dest.platform;
+const destinationKey = dest => accountKey(dest) + (dest.platform === 'instagram' && ['story', 'reel'].includes(dest.instagramPlacement) ? `:${dest.instagramPlacement}` : '');
 function deliveryKey(postId, dest) { return createHash('sha256').update(`${postId}:${destinationKey(dest)}`).digest('hex'); }
 function scheduleDelay(value, now = Date.now()) {
   if (typeof value !== 'string' || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) throw new Error('scheduledAt must include its UTC offset');
@@ -19,6 +21,8 @@ function validatePost(content, destinations) {
     if (['facebook', 'instagram', 'pinterest'].includes(dest.platform) && !dest.accountId) return 'Choose a specific Page, account, or board';
     if (['twitter', 'mastodon', 'bluesky'].includes(dest.platform) && (dest.imageUrl || dest.videoUrl)) return 'Media publishing is not yet supported for this platform; publish text or choose a media-capable account';
     if (dest.platform === 'instagram' && !dest.imageUrl && !dest.videoUrl) return 'Instagram requires an image or video';
+    if (dest.platform === 'instagram') { const error = instagramValidation(dest); if (error) return error; }
+    else if (dest.instagramPlacement !== undefined || dest.shareToFeed !== undefined || dest.coverUrl !== undefined) return 'Instagram options require an Instagram destination';
     if (dest.platform === 'pinterest' && !dest.imageUrl) return 'Pinterest requires an image';
     if (dest.platform === 'tiktok' && !dest.videoUrl) return 'TikTok requires a video';
     for (const field of ['imageUrl', 'videoUrl', 'link']) if (dest[field] !== undefined && (typeof dest[field] !== 'string' || !/^(https?:\/\/|\/media\/)/.test(dest[field]))) return 'Invalid media or link URL';
@@ -32,4 +36,4 @@ function failureResult(err) {
   const retryable = !ambiguous && (err.response?.data?.retryable ?? (['ECONNREFUSED', 'EAI_AGAIN'].includes(err.code) || status === 429 || status >= 500));
   return { success: false, retryable: !!retryable, uncertain: ambiguous || !!err.response?.data?.uncertain, error: ambiguous ? 'Publishing outcome is unknown. Check the account before retrying.' : (err.response?.data?.error || err.message || 'Publishing failed') };
 }
-module.exports = { PLATFORM_SERVICES, destinationKey, deliveryKey, validatePost, failureResult, scheduleDelay };
+module.exports = { PLATFORM_SERVICES, accountKey, destinationKey, deliveryKey, validatePost, failureResult, scheduleDelay };

@@ -20,6 +20,16 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { axios.get.mockReset(); axios.post.mockReset(); });
 
+test('Instagram capability checks are live, workspace scoped and redact credentials', async () => {
+  await db.collection('platform_credentials').insertOne({ _id: 'test:instagram', accounts: [{ id: 'ig-cap', selected: true, accessToken: 'cap-secret' }] });
+  axios.get.mockResolvedValueOnce({ data: { id: 'ig-cap', account_type: 'BUSINESS' } }).mockResolvedValueOnce({ data: { data: [{ permission: 'instagram_content_publish', status: 'granted' }] } });
+  const response = await request('GET', '/instagram/capabilities');
+  expect(response.json().accounts[0]).toMatchObject({ id: 'ig-cap', story: true, publishingPermission: true });
+  expect(JSON.stringify(response.json())).not.toContain('cap-secret');
+  expect((await request('GET', '/instagram/capabilities', 'other')).json()).toEqual({ accounts: [] });
+  await db.collection('platform_credentials').deleteOne({ _id: 'test:instagram' });
+});
+
 test('pending discovery survives reload and never exposes tokens', async () => {
   await db.collection('platform_credentials').insertOne({ _id: 'test:meta_discovery', pages: [{ id: 'page', name: 'Page', accessToken: 'private', selected: true }], igAccounts: [] });
   const first = (await request('GET', '/auth/meta/discovered')).json();

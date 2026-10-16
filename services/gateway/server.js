@@ -21,6 +21,7 @@ const { externalGet } = require('./utils/externalFetch');
 const { registerAnalytics, destinationMatch } = require('./analytics');
 const { registerBackgroundJobs } = require('./jobs');
 const { detectUploadType } = require('./media');
+const { instagramCapabilities, INSTAGRAM_FORMATS } = require('./utils/instagram');
 const { campaignContextBlock, MAX_CAMPAIGN_CONTEXT } = require('./calendarContext');
 const { repairScopedData } = require('./migrations');
 const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery, refreshExistingAccounts } = require('./meta');
@@ -1882,7 +1883,26 @@ app.get('/ai/bulk-draft/:batchId', async (request, reply) => {
 // ─── Platform service URLs ────────────────────────────────────────────────────
 
 const { PLATFORM_SERVICES, destinationKey, deliveryKey, validatePost, failureResult } = require('./utils/publishing');
-app.get('/platforms/capabilities', async () => ({ publishing: Object.keys(PLATFORM_SERVICES) }));
+app.get('/platforms/capabilities', async () => ({ publishing: Object.keys(PLATFORM_SERVICES), instagram: { formats: INSTAGRAM_FORMATS } }));
+
+// Live checks use only the active workspace's selected accounts. No credentials
+// or raw Graph request/error objects leave this endpoint.
+app.get('/instagram/capabilities', async request => {
+  const credentials = await getCredentials(request.workspaceId, 'instagram');
+  const accounts = [];
+  for (const account of (credentials?.accounts || []).filter(a => a.selected)) {
+    try {
+      const token = decryptToken(account.accessToken);
+      const profile = await axios.get(`https://graph.facebook.com/v22.0/${account.id}`, { params: { fields: 'id,account_type', access_token: token }, timeout: 15000 });
+      const permissions = await axios.get('https://graph.facebook.com/v22.0/me/permissions', { params: { access_token: token }, timeout: 15000 });
+      const granted = new Set((permissions.data.data || []).filter(p => p.status === 'granted').map(p => p.permission));
+      accounts.push({ id: account.id, ...instagramCapabilities(profile.data.account_type), publishingPermission: granted.has('instagram_content_publish'), checkedAt: new Date().toISOString() });
+    } catch (_) {
+      accounts.push({ id: account.id, ...instagramCapabilities(null), publishingPermission: null, error: 'Could not verify account access. Refresh or reconnect the account.' });
+    }
+  }
+  return { accounts };
+});
 
 // Direct multi-platform post endpoint.
 // Body: { content: string, destinations: Array<{ platform, accountId?, imageUrl?, videoUrl?, link? }> }
@@ -2468,8 +2488,8 @@ app.get('/credentials', async (request) => {
     },
     instagram: {
       connected: igAccounts.length > 0,
-      accounts: igAccounts.map(({ id, username, avatar }) => ({ id, username, avatar })),
-      allAccounts: (ig?.accounts || []).map(({ id, username, avatar, selected }) => ({ id, username, avatar, selected: !!selected })),
+      accounts: igAccounts.map(({ id, username, avatar, accountType }) => ({ id, username, avatar, capabilities: instagramCapabilities(accountType) })),
+      allAccounts: (ig?.accounts || []).map(({ id, username, avatar, selected, accountType }) => ({ id, username, avatar, selected: !!selected, capabilities: instagramCapabilities(accountType) })),
     },
     pinterest: {
       connected: pinterestBoards.length > 0,
