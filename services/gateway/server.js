@@ -1923,22 +1923,23 @@ app.post('/post', async (request, reply) => {
     return reply.code(409).send({ error: 'Publishing outcome is not confirmed. Check your accounts before retrying.', uncertain: true });
   }
   const results = await Promise.allSettled(
-    destinations.map(async ({ platform, accountId, imageUrl, videoUrl, link }) => {
+    destinations.map(async destination => {
+      const { platform, accountId, imageUrl, videoUrl, link, instagramPlacement, shareToFeed, coverUrl } = destination;
       const serviceUrl = PLATFORM_SERVICES[platform];
       if (!serviceUrl) throw new Error(`Unknown platform: ${platform}`);
       const res = await axios.post(
         `${serviceUrl}/post`,
-        { content, accountId, imageUrl, videoUrl, link, firstComment: firstComment?.trim() || undefined },
-        { timeout: 120000, headers: { 'X-Workspace-Id': workspaceId, 'Idempotency-Key': deliveryKey(postId, { platform, accountId }) } }
+        { content, accountId, imageUrl, videoUrl, link, instagramPlacement, shareToFeed, coverUrl, firstComment: firstComment?.trim() || undefined },
+        { timeout: 120000, headers: { 'X-Workspace-Id': workspaceId, 'Idempotency-Key': deliveryKey(postId, destination) } }
       );
-      return { platform, accountId, ...res.data };
+      return { platform, accountId, instagramPlacement, ...res.data };
     })
   );
 
   const output = results.map((r, i) =>
     r.status === 'fulfilled'
       ? r.value
-      : { platform: destinations[i].platform, accountId: destinations[i].accountId, success: false, ...failureResult(r.reason) }
+      : { platform: destinations[i].platform, accountId: destinations[i].accountId, instagramPlacement: destinations[i].instagramPlacement, success: false, ...failureResult(r.reason) }
   );
 
   const anyFailed = output.some((r) => !r.success);
@@ -1956,7 +1957,7 @@ app.post('/post', async (request, reply) => {
       destinations,
       platformResults: Object.fromEntries(
         output.map((r) => [
-          r.accountId ? `${r.platform}:${r.accountId}` : r.platform,
+          destinationKey(r),
           { ...(Array.isArray(r.result) ? r.result[0] : r.result), success: r.success, ...(r.error && { error: r.error }), ...(r.uncertain && { uncertain: true }) },
         ])
       ),

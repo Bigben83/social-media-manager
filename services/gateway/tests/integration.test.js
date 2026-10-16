@@ -20,6 +20,15 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { axios.get.mockReset(); axios.post.mockReset(); });
 
+test('Instagram placement and cover options reach the adapter and distinct receipts', async () => {
+  axios.post.mockResolvedValue({ data: { success: true, result: [{ postId: 'ig-post' }] } });
+  const response = await request('POST', '/post', 'posting', { content: 'Caption', destinations: [{ platform: 'instagram', accountId: 'ig', instagramPlacement: 'reel', videoUrl: '/media/reel.mp4', coverUrl: '/media/cover.jpg', shareToFeed: false }] });
+  expect(response.statusCode).toBe(200);
+  expect(axios.post.mock.calls[0][1]).toMatchObject({ instagramPlacement: 'reel', shareToFeed: false, coverUrl: '/media/cover.jpg' });
+  const post = await db.collection('posts').findOne({ _id: response.json().postId });
+  expect(post.platformResults['instagram:ig:reel'].success).toBe(true);
+});
+
 test('image preparation preserves the original and rejects another workspace attachment', async () => {
   const sharp = require('sharp');
   const filename = 'ratio-original.png';

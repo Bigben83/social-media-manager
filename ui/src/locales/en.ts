@@ -1,4 +1,14 @@
 export default {
+  instagramPublishing: {
+    title: 'Instagram format', check: 'Check account access', feed: 'Feed post', story: 'Story', reel: 'Reel',
+    businessRequired: 'Stories require a verified Instagram Business account. Check account access or reconnect.',
+    permissionRequired: 'Instagram publishing permission is missing. Reconnect this account.',
+    shareToFeed: 'Also share Reel to feed', cover: 'Reel cover from Media Library', videoFrame: 'Use a video frame',
+    storyText: 'Story text must be part of the image or video. Caption and first comment are not sent to Stories.',
+    videoRequired: 'Reels require a video. Create a Reel from images or attach a video.', chooseReel: 'Choose Reel to publish this video.',
+    ratioRequired: 'Prepare the attachment at {ratio}. Use separate drafts for different formats.',
+    durationRequired: 'Use a video between 3 and {seconds} seconds.', safeArea: 'Keep important text and logos inside the guide.',
+  },
   imageFormats: {
     prepare: 'Prepare image dimensions', ratio: 'Aspect ratio', fit: 'Image fitting',
     contain: 'Fit whole image with white padding', cover: 'Crop to fill the frame', preview: 'Prepare preview',

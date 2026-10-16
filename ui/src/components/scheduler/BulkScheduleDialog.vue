@@ -18,6 +18,7 @@
             <p class="text-sm text-gray-200 line-clamp-3 whitespace-pre-wrap break-words">{{ item.content || snapshots.get(item.draftId)?.content || $t('scheduler.emptyDraft') }}</p>
             <template v-if="item.ready">
               <p class="text-xs text-gray-400 mt-2">{{ item.accounts?.map(account => account.name).join(' · ') }}</p>
+              <p v-for="(destination, index) in item.destinations?.filter(d => d.instagramPlacement)" :key="index" class="text-xs text-pink-300">{{ $t('instagramPublishing.' + destination.instagramPlacement) }}</p>
               <p class="text-xs text-amber-300 mt-1">{{ $t('scheduler.draftPlannedFor') }} {{ formatDraftDate(item.scheduledAt || '', locale, timezone) }}</p>
               <p v-if="item.destinations?.some(destination => destination.imageUrl || destination.videoUrl)" class="text-xs text-blue-300 mt-1">{{ $t('scheduler.bulkSchedule.mediaIncluded') }}</p>
               <p v-if="item.firstComment" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap">{{ $t('scheduler.bulkSchedule.firstComment') }} {{ item.firstComment }}</p>
@@ -50,7 +51,7 @@ import { formatDraftDate } from '../../utils/draftDate'
 
 interface PreviewItem {
   draftId: string; ready: boolean; revision?: string; content?: string; firstComment?: string; scheduledAt?: string; reason?: string
-  destinations?: { imageUrl?: string; videoUrl?: string }[]
+  destinations?: { imageUrl?: string; videoUrl?: string; instagramPlacement?: string }[]
   accounts?: { name: string }[]
 }
 export interface ScheduleResult { draftId: string; success: boolean; reason?: string; draftRetained?: boolean }

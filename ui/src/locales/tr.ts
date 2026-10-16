@@ -1,4 +1,14 @@
 export default {
+  instagramPublishing: {
+    title: 'Instagram biçimi', check: 'Hesap erişimini kontrol et', feed: 'Akış gönderisi', story: 'Hikâye', reel: 'Reel',
+    businessRequired: 'Hikâyeler doğrulanmış Instagram İşletme hesabı gerektirir. Hesap erişimini kontrol edin veya yeniden bağlanın.',
+    permissionRequired: 'Instagram yayın izni eksik. Bu hesabı yeniden bağlayın.',
+    shareToFeed: 'Reel videosunu akışta da paylaş', cover: 'Medya Kütüphanesinden Reel kapağı', videoFrame: 'Video karesi kullan',
+    storyText: 'Hikâye metni görselin veya videonun içinde olmalıdır. Açıklama ve ilk yorum Hikâyelere gönderilmez.',
+    videoRequired: 'Reel için video gerekir. Görsellerden Reel oluşturun veya video ekleyin.', chooseReel: 'Bu videoyu yayınlamak için Reel seçin.',
+    ratioRequired: 'Eki {ratio} oranında hazırlayın. Farklı biçimler için ayrı taslaklar kullanın.',
+    durationRequired: '3 ile {seconds} saniye arasında video kullanın.', safeArea: 'Önemli metinleri ve logoları kılavuzun içinde tutun.',
+  },
   imageFormats: {
     prepare: 'Görsel boyutlarını hazırla', ratio: 'En boy oranı', fit: 'Görsel yerleşimi',
     contain: 'Beyaz boşlukla tüm görseli sığdır', cover: 'Çerçeveyi doldurmak için kırp', preview: 'Önizleme hazırla',

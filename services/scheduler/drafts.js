@@ -1,6 +1,6 @@
 const { ObjectId } = require('mongodb');
 const { createHash } = require('crypto');
-const { validatePost, scheduleDelay, destinationKey } = require('./utils/publishing');
+const { validatePost, scheduleDelay, accountKey } = require('./utils/publishing');
 const { getWorkspaceCredential } = require('./utils/credentials');
 const { naiveDatetimeToUtc } = require('./utils/timezone');
 
@@ -45,16 +45,17 @@ async function prepareDraft(db, workspaceId, draftId, timezone, origin, now = Da
   try { scheduledAt = /(?:Z|[+-]\d{2}:\d{2})$/.test(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : naiveDatetimeToUtc(draft.scheduledAt, timezone); }
   catch (err) { fail('invalid_date', err.message); }
   try { scheduleDelay(scheduledAt, now); } catch (err) { fail('past_date', err.message); }
-  if (!draft.content?.trim()) fail('missing_content', 'Add post content before scheduling');
   const selected = (draft.destinations || []).filter(d => d.selected);
+  if (!draft.content?.trim() && !selected.every(d => d.platform === 'instagram' && d.instagramPlacement === 'story')) fail('missing_content', 'Add post content before scheduling');
   if (!selected.length) fail('no_destinations', 'Select at least one publishing account');
   const available = await availableAccounts(db, workspaceId);
   const destinations = [], accounts = [];
   for (const destination of selected) {
-    const account = available.find(a => a.key === destinationKey(destination));
+    const account = available.find(a => a.key === accountKey(destination));
     if (!account) fail('disconnected_account', 'A selected publishing account is no longer connected to this workspace');
-    accounts.push({ platform: destination.platform, accountId: destination.accountId, name: account.name });
-    const output = { platform: destination.platform, ...(destination.accountId && { accountId: destination.accountId }) };
+    accounts.push({ platform: destination.platform, accountId: destination.accountId, name: account.name, instagramPlacement: destination.instagramPlacement });
+    const output = { platform: destination.platform, ...(destination.accountId && { accountId: destination.accountId }), ...(destination.instagramPlacement && { instagramPlacement: destination.instagramPlacement }), ...(destination.shareToFeed !== undefined && { shareToFeed: destination.shareToFeed }) };
+    if (destination.coverUrl) output.coverUrl = await mediaUrl(db, workspaceId, destination.coverUrl, origin);
     if (draft.mediaUrl) {
       const field = /\.(mp4|mov|avi|webm)(?:[?#]|$)/i.test(draft.mediaUrl) ? 'videoUrl' : 'imageUrl';
       output[field] = await mediaUrl(db, workspaceId, draft.mediaUrl, origin);

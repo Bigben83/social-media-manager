@@ -14,6 +14,9 @@ export interface Destination {
   selected: boolean
   imageUrl?: string
   videoUrl?: string
+  instagramPlacement?: 'feed' | 'story' | 'reel'
+  shareToFeed?: boolean
+  coverUrl?: string
 }
 
 const CHAR_LIMITS: Record<string, number> = {
@@ -135,7 +138,7 @@ export const useComposeStore = defineStore('compose', () => {
     scheduledAt.value = ''
     firstComment.value = ''
     draftId.value = null
-    destinations.value.forEach((d) => { d.selected = false })
+    destinations.value.forEach((d) => { d.selected = false; d.instagramPlacement = undefined; d.shareToFeed = undefined; d.coverUrl = undefined })
     if (!keepResult) lastResult.value = null
   }
 
@@ -146,8 +149,11 @@ export const useComposeStore = defineStore('compose', () => {
     scheduledAt.value = draft.scheduledAt || ''
     firstComment.value = draft.firstComment || ''
     destinations.value.forEach((d) => {
-      const saved = draft.destinations?.find((s) => s.key === d.key)
+      const saved = draft.destinations?.find((s) => s.key === d.key || (s.platform === d.platform && s.accountId === d.accountId))
       d.selected = saved?.selected ?? false
+      d.instagramPlacement = saved?.instagramPlacement
+      d.shareToFeed = saved?.shareToFeed
+      d.coverUrl = saved?.coverUrl
     })
   }
 
@@ -159,8 +165,8 @@ export const useComposeStore = defineStore('compose', () => {
         mediaUrl: mediaUrl.value,
         scheduledAt: scheduledAt.value,
         firstComment: firstComment.value || undefined,
-        destinations: destinations.value.map(({ key, platform, accountId, label, color, picture, selected }) => ({
-          key, platform, accountId, label, color, picture, selected,
+        destinations: destinations.value.map(({ key, platform, accountId, label, color, picture, selected, instagramPlacement, shareToFeed, coverUrl }) => ({
+          key, platform, accountId, label, color, picture, selected, instagramPlacement, shareToFeed, coverUrl,
         })),
       }
       if (draftId.value) {
@@ -180,14 +186,15 @@ export const useComposeStore = defineStore('compose', () => {
 
   async function post(timezone?: string) {
     const selected = selectedDestinations.value
-    if (!content.value.trim() || !selected.length || sending.value) return false
+    if ((!content.value.trim() && !selected.every(d => d.platform === 'instagram' && d.instagramPlacement === 'story')) || !selected.length || sending.value) return false
     sending.value = true
     lastResult.value = null
 
     try {
       const isVideo = /\.(mp4|mov|avi|webm)(?:[?#]|$)/i.test(mediaUrl.value.trim())
-      const destPayload = selected.map(({ key, platform, accountId }) => ({
+      const destPayload = selected.map(({ key, platform, accountId, instagramPlacement, shareToFeed, coverUrl }) => ({
         key, platform,
+        ...(platform === 'instagram' && { instagramPlacement: instagramPlacement || (isVideo ? 'reel' : 'feed'), ...(shareToFeed !== undefined && { shareToFeed }), ...(coverUrl && { coverUrl }) }),
         ...(accountId && { accountId }),
         ...(mediaUrl.value.trim() && { [isVideo ? 'videoUrl' : 'imageUrl']: mediaUrl.value.trim() }),
       }))

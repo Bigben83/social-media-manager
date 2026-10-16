@@ -75,3 +75,17 @@ test('draft attachment lookup prioritizes the editor field and loading a text-on
   store.mediaUrl = 'old.png'; store.loadDraft({ _id: 'empty', content: 'Text only', mediaUrl: '', destinations: [] });
   assert.equal(store.mediaUrl, ''); assert.equal(store.selectedDestinations.length, 0);
 });
+
+test('Instagram placement and Reel options survive draft reload, save and dispatch', async () => {
+  store.destinations = [{ key: 'instagram:one', platform: 'instagram', accountId: 'one', selected: false }];
+  store.loadDraft({ _id: 'draft', content: 'Reel', mediaUrl: '/media/reel.mp4', destinations: [{ key: 'instagram:one:reel', platform: 'instagram', accountId: 'one', selected: true, instagramPlacement: 'reel', shareToFeed: false, coverUrl: '/media/cover.jpg' }] });
+  let saved, sent;
+  axios.put = async (_, value) => { saved = value; return { data: {} }; };
+  await store.saveDraft();
+  assert.equal(saved.destinations[0].instagramPlacement, 'reel');
+  assert.equal(saved.destinations[0].shareToFeed, false);
+  axios.post = async (_, value) => { sent = value; return { data: { results: [{ platform: 'instagram', accountId: 'one', instagramPlacement: 'reel', success: true }] } }; };
+  await store.post();
+  assert.equal(sent.destinations[0].coverUrl, '/media/cover.jpg');
+  assert.equal(sent.destinations[0].shareToFeed, false);
+});

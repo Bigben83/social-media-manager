@@ -102,6 +102,8 @@ AI providers and app credentials in Global Settings are shared across workspaces
 
 ## Publishing and analytics
 
+Compose offers explicit Instagram Feed, Story, and Reel formats. Check account access to enable Stories for eligible Business accounts. Stories publish the image/video itself; draft text and first comments are not sent as Story captions. Reels support a Media Library cover and an explicit share-to-feed choice. The preview uses 3:4 for Feed and 9:16 for Stories/Reels, with framing guides. Placement and Reel options persist in drafts, scheduling previews, delivery receipts, and connector previews. Existing drafts without a placement retain automatic image/feed and video/Reel selection.
+
 In **Scheduler → Drafts**, select individual drafts or **Select all**, then choose **Schedule selected**. Review the saved content, accounts and dates, choose the timezone for local draft dates, and confirm the ready posts. Dates with an existing UTC offset retain their instant. Drafts with missing/past dates, disconnected accounts, or unsupported media stay in Drafts with a reason. Successfully queued drafts move to Scheduled; retries reuse their existing jobs. A newer draft edit made during scheduling is preserved for review. Batches support up to 500 drafts.
 
 Background AI briefs, calendars, bulk drafts, and competitor scrapes persist payloads, progress, checkpoints, and results in MongoDB and use BullMQ for execution and restart recovery. Completed job records expire after two days. No decrypted provider key is stored in a job. Completed calendar stages and inserted bulk drafts are reused after interruption; a crash during an unfinished provider request may repeat that generation request.

@@ -1,4 +1,5 @@
 'use strict';
+const { destinationKey } = require('./utils/publishing');
 function accountFilter(account) {
   if (!account) return null;
   if (typeof account !== 'string' || account.length > 200) throw new Error('Invalid account filter');
@@ -26,7 +27,7 @@ function historyPipeline(ws, filter, month) {
 function normalizePost(doc, filter) {
   const destinations = (doc.destinations || []).filter(d => !filter || (d.platform === filter.platform && (!filter.accountId || d.accountId === filter.accountId)));
   const results = Object.fromEntries(destinations.map(d => {
-    const key = d.accountId ? `${d.platform}:${d.accountId}` : d.platform;
+    const key = destinationKey(d);
     return [key, doc.platformResults?.[key] || { success: ['completed','published'].includes(doc.status) }];
   }));
   const values = Object.values(results);

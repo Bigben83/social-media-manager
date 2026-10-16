@@ -19,6 +19,7 @@
           <span v-for="dest in destinations" :key="dest.key" class="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full max-w-full" :style="{ backgroundColor: dest.color + '22', color: dest.color }">
             <img v-if="dest.picture" :src="dest.picture" alt="" loading="lazy" class="w-4 h-4 rounded-full object-cover" />
             <span class="truncate">{{ dest.label }}</span>
+            <span v-if="dest.instagramPlacement">· {{ $t('instagramPublishing.' + dest.instagramPlacement) }}</span>
             <span class="opacity-75">· {{ platformLabel(dest.platform) }}</span>
           </span>
           <span v-if="!destinations.length" class="text-xs text-gray-500">{{ $t('scheduler.noDraftDestinations') }}</span>

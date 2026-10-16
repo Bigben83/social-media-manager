@@ -12,8 +12,9 @@ function scheduleDelay(value, now = Date.now()) {
   return delay;
 }
 function validatePost(content, destinations) {
-  if (typeof content !== 'string' || !content.trim()) return 'content is required';
+  if (typeof content !== 'string') return 'content is required';
   if (!Array.isArray(destinations) || !destinations.length || destinations.length > 100) return 'Choose between 1 and 100 destinations';
+  if (!content.trim() && !destinations.every(d => d?.platform === 'instagram' && d.instagramPlacement === 'story')) return 'content is required';
   const seen = new Set();
   for (const dest of destinations) {
     if (!dest || !PLATFORM_SERVICES[dest.platform]) return 'Unsupported publishing platform';
@@ -25,7 +26,7 @@ function validatePost(content, destinations) {
     else if (dest.instagramPlacement !== undefined || dest.shareToFeed !== undefined || dest.coverUrl !== undefined) return 'Instagram options require an Instagram destination';
     if (dest.platform === 'pinterest' && !dest.imageUrl) return 'Pinterest requires an image';
     if (dest.platform === 'tiktok' && !dest.videoUrl) return 'TikTok requires a video';
-    for (const field of ['imageUrl', 'videoUrl', 'link']) if (dest[field] !== undefined && (typeof dest[field] !== 'string' || !/^(https?:\/\/|\/media\/)/.test(dest[field]))) return 'Invalid media or link URL';
+    for (const field of ['imageUrl', 'videoUrl', 'link', 'coverUrl']) if (dest[field] !== undefined && (typeof dest[field] !== 'string' || !/^(https?:\/\/|\/media\/)/.test(dest[field]))) return 'Invalid media or link URL';
     const key = destinationKey(dest); if (seen.has(key)) return 'Duplicate destination'; seen.add(key);
   }
   return null;

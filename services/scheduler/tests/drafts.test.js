@@ -43,6 +43,16 @@ test('bulk preview validates dates/accounts/media without queueing and preserves
   assert.throws(() => naiveDatetimeToUtc('2026-10-04T02:30','Australia/Sydney'), /does not exist/);
 }));
 
+test('Story placement and Reel cover options survive bulk scheduling', () => fixture(async ({ db, draft, preview, schedule, calls }) => {
+  await db.collection('platform_credentials').updateOne({ _id: 'one:instagram' }, { $set: { accounts: [{ id: 'ig', selected: true, accountType: 'BUSINESS' }] } }, { upsert: true });
+  await db.collection('drafts').updateOne({ _id: draft._id }, { $set: { destinations: [{ platform: 'instagram', accountId: 'ig', selected: true, instagramPlacement: 'story' }], content: '' } });
+  const items = (await preview()).items;
+  assert.equal(items[0].ready, true);
+  assert.equal(items[0].destinations[0].instagramPlacement, 'story');
+  await schedule(items);
+  assert.equal(calls[0].data.destinations[0].instagramPlacement, 'story');
+}));
+
 test('scheduling moves drafts to a single durable delayed job and retries cannot duplicate it', () => fixture(async ({ db, preview, schedule, jobs, calls }) => {
   const items = (await preview()).items; const first = await schedule(items); assert.equal(first.scheduled, 1);
   assert.equal(await db.collection('drafts').findOne({ _id: new ObjectId(id) }), null); assert.equal(jobs.size, 1);

@@ -2,12 +2,12 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { z } = require('zod');
 const { ObjectId } = require('mongodb');
 const { createHash, randomUUID } = require('crypto');
-const { validatePost, scheduleDelay, destinationKey } = require('./utils/publishing');
+const { validatePost, scheduleDelay, destinationKey, accountKey } = require('./utils/publishing');
 const PLATFORMS = ['facebook','instagram','twitter','mastodon','bluesky','pinterest','tiktok'];
 const workspaceSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
 const idSchema = z.string().regex(/^[a-f0-9]{24}$/);
 const requestSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/).describe('A stable unique identifier for this save operation. Reuse the same identifier on retries.');
-const destinationSchema = z.object({ platform: z.enum(PLATFORMS), accountId: z.string().min(1).max(200).optional(), imageUrl: z.string().max(2048).optional(), videoUrl: z.string().max(2048).optional(), link: z.string().url().max(2048).optional() });
+const destinationSchema = z.object({ platform: z.enum(PLATFORMS), accountId: z.string().min(1).max(200).optional(), imageUrl: z.string().max(2048).optional(), videoUrl: z.string().max(2048).optional(), link: z.string().url().max(2048).optional(), instagramPlacement: z.enum(['feed','story','reel']).optional(), shareToFeed: z.boolean().optional(), coverUrl: z.string().max(2048).optional() });
 const draftChangesSchema = z.object({
   content: z.string().trim().min(1).max(20000).optional(),
   firstComment: z.string().max(10000).optional().describe('Omit to preserve. Use an empty string to remove the first comment.'),
@@ -58,8 +58,8 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
   async function checkDestinations(workspaceId, destinations) {
     const available = await accounts(workspaceId);
     for (const destination of destinations) {
-      if (!available.some(account => account.key === destinationKey(destination))) throw new Error('Destination is not connected to this workspace: ' + destinationKey(destination));
-      for (const field of ['imageUrl','videoUrl']) {
+      if (!available.some(account => account.key === accountKey(destination))) throw new Error('Destination is not connected to this workspace: ' + accountKey(destination));
+      for (const field of ['imageUrl','videoUrl','coverUrl']) {
         if (destination[field]) destination[field] = await checkMedia(workspaceId, destination[field]);
       }
     }
@@ -181,15 +181,15 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
     }
     return {success:true,draftIds:ids,drafts:savedDrafts,count:ids.length,url:publicOrigin+'/scheduler?workspace='+encodeURIComponent(workspaceId)};
   },{idempotent:true});
-  tool('list_media','List media uploaded to the workspace for use in draft or publishing previews.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({files:(await db.collection('media_files').find({workspaceId}).sort({uploadedAt:-1}).limit(limit).toArray()).map(f=>({filename:f.filename,name:f.originalName,mimetype:f.mimetype,url:new URL('/media/'+encodeURIComponent(f.filename),publicOrigin).href}))}),{readOnly:true});
+  tool('list_media','List media uploaded to the workspace for use in draft or publishing previews.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({files:(await db.collection('media_files').find({workspaceId}).sort({uploadedAt:-1}).limit(limit).toArray()).map(f=>({filename:f.filename,name:f.originalName,mimetype:f.mimetype,width:f.width,height:f.height,aspect:f.aspect,url:new URL('/media/'+encodeURIComponent(f.filename),publicOrigin).href}))}),{readOnly:true});
   tool('list_scheduled_posts','Read the workspace scheduled posts and their current outcomes.',{workspaceId:workspaceSchema,limit:z.number().int().min(1).max(50).default(20)},'social:read',async({workspaceId,limit})=>({jobs:await db.collection('scheduled_jobs').find({workspaceId}).sort({createdAt:-1}).limit(limit).toArray()}),{readOnly:true});
-  tool('prepare_post','Prepare a publishing or scheduling preview, without posting. Present its exact content, accounts, media and time to the user. Only use confirm_post after explicit user confirmation.',{workspaceId:workspaceSchema,content:z.string().trim().min(1).max(20000),destinations:z.array(destinationSchema).min(1).max(20),firstComment:z.string().max(10000).default(''),scheduledAt:z.string().max(100).optional()},null,async({workspaceId,content,destinations,firstComment,scheduledAt})=>{
+  tool('prepare_post','Prepare a publishing or scheduling preview, without posting. Present its exact content, accounts, media and time to the user. Only use confirm_post after explicit user confirmation.',{workspaceId:workspaceSchema,content:z.string().max(20000),destinations:z.array(destinationSchema).min(1).max(20),firstComment:z.string().max(10000).default(''),scheduledAt:z.string().max(100).optional()},null,async({workspaceId,content,destinations,firstComment,scheduledAt})=>{
     const mode=scheduledAt?'schedule':'publish';await check(workspaceId,'social:'+mode);const error=validatePost(content,destinations);if(error)throw new Error(error);if(scheduledAt)scheduleDelay(scheduledAt);
     await checkDestinations(workspaceId,destinations);
     const preview={_id:randomUUID(),workspaceId,grantId:auth.extra.grantId,mode,payload:{content,destinations,firstComment,...(scheduledAt&&{scheduledAt:new Date(scheduledAt).toISOString()})},state:'prepared',createdAt:new Date(),expiresAt:new Date(Date.now()+600000)};
     await db.collection('mcp_post_previews').insertOne(preview);
     const available=await accounts(workspaceId);
-    return {previewId:preview._id,mode,...preview.payload,accounts:destinations.map(d=>available.find(a=>a.key===destinationKey(d))),expiresAt:preview.expiresAt,requiresUserConfirmation:true};
+    return {previewId:preview._id,mode,...preview.payload,accounts:destinations.map(d=>({...available.find(a=>a.key===accountKey(d)),instagramPlacement:d.instagramPlacement})),warnings:destinations.some(d=>d.instagramPlacement==='story')?['Story captions and first comments are not published; text must be rendered into the media.']:[],expiresAt:preview.expiresAt,requiresUserConfirmation:true};
   },{dispatch:true});
   tool('confirm_post','Execute an immutable preview only after the user explicitly confirms its exact content, destinations and time. Publishes immediately or schedules delivery. Reuse the same previewId on retries; an uncertain outcome requires account review.',{workspaceId:workspaceSchema,previewId:z.string().uuid(),confirmation:z.literal('CONFIRM')},null,async({workspaceId,previewId})=>{
     const col=db.collection('mcp_post_previews');const query={_id:previewId,workspaceId,grantId:auth.extra.grantId};const preview=await col.findOne(query);if(!preview)throw new Error('Preview not found');await check(workspaceId,'social:'+preview.mode);

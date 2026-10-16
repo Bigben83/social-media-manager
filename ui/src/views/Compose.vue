@@ -57,6 +57,35 @@
           </p>
         </div>
 
+        <div v-if="instagramDestinations.length" class="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div class="flex justify-between gap-2 text-xs">
+            <span>{{ $t('instagramPublishing.title') }}</span>
+            <button :disabled="checkingInstagram" @click="refreshInstagramCapabilities" class="text-blue-400 disabled:opacity-50">{{ $t('instagramPublishing.check') }}</button>
+          </div>
+          <div v-for="dest in instagramDestinations" :key="dest.key" class="space-y-2 text-xs">
+            <label class="flex items-center justify-between gap-3">
+              <span>{{ dest.label }}</span>
+              <select :value="placementFor(dest)" @change="changePlacement(dest, ($event.target as HTMLSelectElement).value)" class="bg-gray-800 rounded p-2">
+                <option value="feed">{{ $t('instagramPublishing.feed') }} · 3:4</option>
+                <option value="story" :disabled="!instagramCapabilities[dest.accountId || '']?.story">{{ $t('instagramPublishing.story') }} · 9:16</option>
+                <option value="reel">{{ $t('instagramPublishing.reel') }} · 9:16</option>
+              </select>
+            </label>
+            <p v-if="!instagramCapabilities[dest.accountId || '']?.story" class="text-gray-400">{{ $t('instagramPublishing.businessRequired') }}</p>
+            <template v-if="placementFor(dest) === 'reel'">
+              <label class="flex gap-2"><input type="checkbox" v-model="dest.shareToFeed" />{{ $t('instagramPublishing.shareToFeed') }}</label>
+              <label class="block">{{ $t('instagramPublishing.cover') }}
+                <select v-model="dest.coverUrl" class="block mt-1 bg-gray-800 rounded p-2 w-full">
+                  <option value="">{{ $t('instagramPublishing.videoFrame') }}</option>
+                  <option v-for="image in coverImages" :key="image.url" :value="image.url">{{ image.originalName }}</option>
+                </select>
+              </label>
+            </template>
+            <p v-if="placementFor(dest) === 'story'" class="text-gray-400">{{ $t('instagramPublishing.storyText') }}</p>
+          </div>
+          <p v-if="instagramIssue" class="text-amber-400 text-xs" role="status">{{ instagramIssue }}</p>
+        </div>
+
         <!-- Textarea -->
         <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" :class="{ 'border-red-700': overLimit }">
           <textarea
@@ -75,10 +104,12 @@
                 :src="composeStore.mediaUrl"
                 class="rounded-lg max-h-48 max-w-full object-cover border border-gray-700"
                 @error="mediaLoadError = true"
+                @load="inspectImage"
               />
               <!-- Video preview -->
+              <video v-if="!isImage(composeStore.mediaUrl)" :src="composeStore.mediaUrl" controls preload="metadata" class="max-h-64 max-w-full rounded-lg" @loadedmetadata="inspectVideo" />
               <div
-                v-else
+                v-if="!isImage(composeStore.mediaUrl)"
                 class="flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5"
               >
                 <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -374,6 +405,7 @@
                 <button
                   v-for="s in IMAGE_SIZES" :key="s.value"
                   @click="imageSize = s.value"
+                  :disabled="instagramDestinations.length > 0 && s.value !== instagramImageAspect"
                   class="px-2.5 py-1 text-xs transition-colors"
                   :class="imageSize === s.value ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-gray-300 bg-gray-800'"
                 >{{ s.label }}</button>
@@ -628,7 +660,7 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
-import { useComposeStore } from '../stores/compose'
+import { useComposeStore, type Destination } from '../stores/compose'
 import { usePlatformsStore } from '../stores/platforms'
 import { useAiStore, type ImageProvider, type ImageProviderName } from '../stores/ai'
 import { useHashtagStore } from '../stores/hashtags'
@@ -667,6 +699,8 @@ onMounted(async () => {
     competitorStore.fetchCompetitors(),
   ])
   composeStore.initDestinations()
+  void refreshInstagramCapabilities()
+  void axios.get('/api/media-library').then(res => { coverImages.value = (res.data.files || []).filter((f: { mimetype: string }) => f.mimetype.startsWith('image/')) }).catch(() => {})
 
   // Check whether an image generation provider is configured
   try {
@@ -862,10 +896,10 @@ const charNearLimit = computed(() =>
 )
 
 const canPost = computed(() =>
-  !!composeStore.content.trim() &&
+  (!!composeStore.content.trim() || (instagramDestinations.value.length > 0 && composeStore.selectedDestinations.every(d => d.platform === 'instagram' && placementFor(d) === 'story'))) &&
   composeStore.selectedDestinations.length > 0 &&
   !overLimit.value &&
-  !igSelectedWithoutMedia.value
+  !igSelectedWithoutMedia.value && !instagramIssue.value
 )
 
 const postButtonLabel = computed(() =>
@@ -1054,6 +1088,56 @@ watch(imageProvider, (v) => {
 const imagePanelOpen = ref(false)
 const imagePrompt = ref('')
 const imageSize = ref<ImageAspect>('3:4')
+const instagramDestinations = computed(() => composeStore.selectedDestinations.filter(d => d.platform === 'instagram'))
+const instagramCapabilities = ref<Record<string, { story: boolean; publishingPermission?: boolean | null; error?: string }>>({})
+const checkingInstagram = ref(false)
+const coverImages = ref<{ url: string; originalName: string }[]>([])
+const dimensions = ref<{ width: number; height: number; duration?: number } | null>(null)
+const placementFor = (dest: Destination) => dest.instagramPlacement || (/\.(mp4|mov|avi|webm)(?:[?#]|$)/i.test(composeStore.mediaUrl) ? 'reel' : 'feed')
+const instagramImageAspect = computed(() => {
+  const dest = instagramDestinations.value.find(d => d.key === activePreviewKey.value) || instagramDestinations.value[0]
+  return dest && placementFor(dest) !== 'feed' ? '9:16' : '3:4'
+})
+watch(instagramImageAspect, aspect => { if (instagramDestinations.value.length) imageSize.value = aspect })
+watch(() => instagramDestinations.value.length, count => { if (count) imageSize.value = instagramImageAspect.value })
+watch(() => composeStore.mediaUrl, () => { dimensions.value = null })
+function inspectImage(event: Event) {
+  const image = event.target as HTMLImageElement
+  dimensions.value = { width: image.naturalWidth, height: image.naturalHeight }
+}
+function inspectVideo(event: Event) {
+  const video = event.target as HTMLVideoElement
+  dimensions.value = { width: video.videoWidth, height: video.videoHeight, duration: video.duration }
+}
+function changePlacement(dest: Destination, value: string) {
+  dest.instagramPlacement = value as 'feed' | 'story' | 'reel'
+  if (value !== 'reel') { dest.shareToFeed = undefined; dest.coverUrl = undefined }
+}
+async function refreshInstagramCapabilities() {
+  checkingInstagram.value = true
+  try {
+    const result = await axios.get('/api/instagram/capabilities')
+    instagramCapabilities.value = Object.fromEntries(result.data.accounts.map((account: { id: string }) => [account.id, account]))
+  } catch { instagramCapabilities.value = {} }
+  finally { checkingInstagram.value = false }
+}
+const instagramIssue = computed(() => {
+  for (const dest of instagramDestinations.value) {
+    const placement = placementFor(dest), capability = instagramCapabilities.value[dest.accountId || '']
+    if (capability?.publishingPermission === false) return t('instagramPublishing.permissionRequired')
+    if (placement === 'story' && !capability?.story) return t('instagramPublishing.businessRequired')
+    if (!composeStore.mediaUrl) continue
+    const video = !isImage(composeStore.mediaUrl)
+    if (placement === 'reel' && !video) return t('instagramPublishing.videoRequired')
+    if (placement === 'feed' && video) return t('instagramPublishing.chooseReel')
+    if (!dimensions.value) continue
+    const { width, height, duration } = dimensions.value
+    const validRatio = placement === 'feed' ? width * 4 === height * 3 || width * 5 === height * 4 : width * 16 === height * 9
+    if (!validRatio) return t('instagramPublishing.ratioRequired', { ratio: placement === 'feed' ? '3:4' : '9:16' })
+    if (video && duration !== undefined && (duration < 3 || duration > (placement === 'story' ? 60 : 900))) return t('instagramPublishing.durationRequired', { seconds: placement === 'story' ? 60 : 900 })
+  }
+  return ''
+})
 const imageFit = ref<'contain' | 'cover'>('contain')
 const generatedImage = ref<{ mediaUrl: string; width: number; height: number; aspect: string } | null>(null)
 const imageQuality = ref<'standard' | 'hd'>('standard')

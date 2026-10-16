@@ -4,6 +4,7 @@ const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
 const { decryptToken, warnIfNoKey } = require('./utils/crypto');
 const { getWorkspaceCredential } = require('./utils/credentials');
+const { instagramPlacement, instagramValidation, instagramContainerParams } = require('./utils/instagram');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 // Instagram's Container API requires a publicly accessible image URL.
@@ -163,7 +164,11 @@ class InstagramService extends BasePlatformService {
   }
 
   // Instagram requires media (image_url or video_url) — text-only posts are not supported.
-  async publishPost({ content, imageUrl, videoUrl, accountId, firstComment, workspaceId = 'default' } = {}) {
+  async publishPost(post = {}) {
+    const { content, imageUrl, videoUrl, accountId, firstComment, workspaceId = 'default' } = post;
+    const invalid = instagramValidation(post);
+    if (invalid) throw Object.assign(new Error(invalid), { code: 'VALIDATION' });
+    const placement = instagramPlacement(post);
     const allAccounts = await this._getAccounts(workspaceId);
     if (allAccounts.length === 0) throw new Error('No Instagram accounts connected');
 
@@ -177,16 +182,11 @@ class InstagramService extends BasePlatformService {
 
     const results = [];
     for (const account of accounts) {
-      const containerParams = {
-        caption: content,
-        access_token: account.accessToken,
-      };
-      if (videoUrl) {
-        containerParams.media_type = 'REELS';
-        containerParams.video_url = resolveInstagramMediaUrl(videoUrl);
-      } else {
-        containerParams.image_url = resolveInstagramMediaUrl(imageUrl);
+      if (placement === 'story') {
+        const profile = await axios.get(`${GRAPH_API}/${account.id}`, { params: { fields: 'account_type', access_token: account.accessToken }, timeout: 15000 });
+        if (profile.data.account_type !== 'BUSINESS') throw Object.assign(new Error('Instagram Stories publishing requires a Business account'), { code: 'VALIDATION' });
       }
+      const containerParams = { ...instagramContainerParams(post, resolveInstagramMediaUrl), access_token: account.accessToken };
 
       const containerRes = await axios.post(
         `${GRAPH_API}/${account.id}/media`,
@@ -205,7 +205,7 @@ class InstagramService extends BasePlatformService {
       );
       const postId = publishRes.data.id;
 
-      if (firstComment?.trim()) {
+      if (placement !== 'story' && firstComment?.trim()) {
         try {
           await axios.post(`${GRAPH_API}/${postId}/comments`, null, {
             params: { message: firstComment.trim(), access_token: account.accessToken },
@@ -217,13 +217,16 @@ class InstagramService extends BasePlatformService {
         }
       }
 
-      results.push({ accountId: account.id, username: account.username, postId });
+      results.push({ accountId: account.id, username: account.username, postId, instagramPlacement: post.instagramPlacement, placement });
     }
 
     return results;
   }
 }
 
-const service = new InstagramService();
-warnIfNoKey('instagram');
-service.start(process.env.PORT || 3005);
+if (require.main === module) {
+  const service = new InstagramService();
+  warnIfNoKey('instagram');
+  service.start(process.env.PORT || 3005);
+}
+module.exports = { InstagramService, resolveInstagramMediaUrl, waitForContainerReady };

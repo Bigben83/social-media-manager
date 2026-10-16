@@ -24,6 +24,7 @@ export interface MetaIgAccount {
   username: string
   avatar?: string
   pageId: string
+  capabilities?: { story: boolean; accountType: string; storyEligibility: string; publishingPermission?: boolean | null; error?: string }
 }
 
 export interface MetaDiscovery {

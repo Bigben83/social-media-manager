@@ -20,4 +20,17 @@ function instagramValidation(destination) {
 function instagramCapabilities(accountType) {
   return { accountType: accountType || 'UNKNOWN', feed: true, reel: true, story: accountType === 'BUSINESS', storyEligibility: accountType ? (accountType === 'BUSINESS' ? 'eligible' : 'business_required') : 'check_required', formats: INSTAGRAM_FORMATS };
 }
-module.exports = { INSTAGRAM_PLACEMENTS, INSTAGRAM_FORMATS, instagramPlacement, instagramValidation, instagramCapabilities };
+function instagramContainerParams(post, resolve = value => value) {
+  const placement = instagramPlacement(post);
+  const params = {};
+  if (placement !== 'story') params.caption = post.content || '';
+  if (placement === 'story') params.media_type = 'STORIES';
+  if (post.videoUrl) { params.video_url = resolve(post.videoUrl); params.media_type = placement === 'story' ? 'STORIES' : 'REELS'; }
+  else params.image_url = resolve(post.imageUrl);
+  if (placement === 'reel') {
+    if (post.shareToFeed !== undefined) params.share_to_feed = post.shareToFeed;
+    if (post.coverUrl) params.cover_url = resolve(post.coverUrl);
+  }
+  return params;
+}
+module.exports = { INSTAGRAM_PLACEMENTS, INSTAGRAM_FORMATS, instagramPlacement, instagramValidation, instagramCapabilities, instagramContainerParams };
