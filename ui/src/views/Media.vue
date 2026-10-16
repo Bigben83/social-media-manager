@@ -244,6 +244,7 @@
                   <div class="truncate">
                     <p class="text-xs text-white font-medium truncate">{{ file.originalName }}</p>
                     <p class="text-xs text-gray-400">{{ formatSize(file.size) }}</p>
+                    <p v-if="file.width && file.height" class="text-xs text-gray-400">{{ file.width }} × {{ file.height }} <span v-if="file.aspect">· {{ file.aspect }}</span></p>
                     <p v-if="file.folder" class="text-xs text-blue-400 truncate mt-0.5">{{ folderLabel(file.folder) }}</p>
                   </div>
 
@@ -319,6 +320,9 @@ interface MediaFile {
   url: string
   mimetype: string
   size: number
+  width?: number
+  height?: number
+  aspect?: string
   uploadedAt: string
   folder?: string | null
 }

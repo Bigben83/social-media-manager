@@ -21,6 +21,7 @@ const { externalGet } = require('./utils/externalFetch');
 const { registerAnalytics, destinationMatch } = require('./analytics');
 const { registerBackgroundJobs } = require('./jobs');
 const { detectUploadType } = require('./media');
+const { imageMetadata, normalizeImage, saveImageAsset } = require('./imageAssets');
 const { instagramCapabilities, INSTAGRAM_FORMATS } = require('./utils/instagram');
 const { campaignContextBlock, MAX_CAMPAIGN_CONTEXT } = require('./calendarContext');
 const { repairScopedData } = require('./migrations');
@@ -334,7 +335,13 @@ app.post('/upload', async (request, reply) => {
   const mimetype = await detectUploadType(filepath, ext);
   if (data.file.truncated || !mimetype) { await fs.promises.unlink(filepath).catch(() => {}); return reply.code(data.file.truncated ? 413 : 400).send({ error: data.file.truncated ? 'File is too large' : 'File contents do not match the selected media type' }); }
   const stat = fs.statSync(filepath);
+  let dimensions = {};
+  if (mimetype.startsWith('image/')) {
+    try { dimensions = await imageMetadata(await fs.promises.readFile(filepath)); }
+    catch { /* Legacy uploads remain usable; preparation validates full decoding. */ }
+  }
   const record = {
+    ...dimensions,
     filename,
     originalName: data.filename,
     url: process.env.APP_BASE_URL ? `${process.env.APP_BASE_URL.replace(/\/$/, '')}/media/${filename}` : `/media/${filename}`,
@@ -354,7 +361,7 @@ app.post('/upload', async (request, reply) => {
     return reply.code(503).send({ error: 'Media could not be registered; upload again when the database is available' });
   }
 
-  return { url: record.url, filename, originalName: data.filename, mimetype, size: stat.size, folder: record.folder };
+  return { url: record.url, filename, originalName: data.filename, mimetype, size: stat.size, folder: record.folder, ...dimensions };
 });
 
 // List uploaded media files, newest first; optionally filter by folder
@@ -793,7 +800,7 @@ const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 // Every provider accepts the same normalised request from POST /ai/image
 // ({ prompt, aspect: '1:1'|'16:9'|'9:16', quality: 'standard'|'hd', style, referenceImage? })
 // and returns { buffer, mime, model }. Add new providers here (Flux, Midjourney, …).
-const IMAGE_ASPECTS = ['1:1', '16:9', '9:16'];
+const IMAGE_ASPECTS = ['1:1', '16:9', '9:16', '3:4'];
 
 // Legacy DALL-E 3 / gpt-image pixel sizes still sent by older clients → aspect ratio
 const IMAGE_SIZE_TO_ASPECT = {
@@ -811,7 +818,7 @@ const IMAGE_GENERATION_PROVIDERS = {
     name: 'OpenAI gpt-image',
     textToImage: { model: 'gpt-image-1' },
     imageVariations: { model: 'gpt-image-1' },
-    sizes: { '1:1': '1024x1024', '16:9': '1536x1024', '9:16': '1024x1536' },
+    sizes: { '1:1': '1024x1024', '16:9': '1536x1024', '9:16': '1024x1536', '3:4': '1024x1536' },
     qualities: { standard: 'medium', hd: 'high' },
   },
   gemini: {
@@ -822,7 +829,7 @@ const IMAGE_GENERATION_PROVIDERS = {
   local: {
     name: 'Local Stable Diffusion',
     // AUTOMATIC1111 / Forge / SD.Next compatible REST API (/sdapi/v1/*)
-    sizes: { '1:1': [1024, 1024], '16:9': [1344, 768], '9:16': [768, 1344] },
+    sizes: { '1:1': [1024, 1024], '16:9': [1024, 576], '9:16': [576, 1024], '3:4': [768, 1024] },
     steps: { standard: 25, hd: 40 },
     defaultSteps: 25,
     imageVariations: true,
@@ -845,12 +852,6 @@ const DEFAULT_IMAGE_CONFIG = {
 async function getImageConfig(ws) {
   const doc = await getCredentials(ws, 'image_config');
   return { ...DEFAULT_IMAGE_CONFIG, ...(doc || {}) };
-}
-
-function mimeExtension(mime) {
-  if (/jpe?g/.test(mime)) return 'jpg';
-  if (/webp/.test(mime)) return 'webp';
-  return 'png';
 }
 
 // Load a reference image for variations (supports local /media/ paths and external URLs)
@@ -1518,7 +1519,8 @@ app.get('/ai/image-providers', async (request) => {
 //   style             — 'vivid' | 'natural' (folded into the prompt on every provider)
 //   referenceImageUrl — local /media/ path or external URL; triggers an image variation
 app.post('/ai/image', async (request, reply) => {
-  const { prompt, provider: requestedProvider, size = '1:1', quality = 'standard', style = 'vivid', referenceImageUrl } = request.body || {};
+  const { prompt, provider: requestedProvider, size = '3:4', quality = 'standard', style = 'vivid', referenceImageUrl, fit = 'contain' } = request.body || {};
+  if (!['contain', 'cover'].includes(fit) || (!IMAGE_ASPECTS.includes(size) && !IMAGE_SIZE_TO_ASPECT[size])) return reply.code(400).send({ error: 'Choose a supported image ratio and fit method' });
   if (!prompt?.trim() && !referenceImageUrl) {
     return reply.code(400).send({ error: 'prompt is required' });
   }
@@ -1574,34 +1576,30 @@ app.post('/ai/image', async (request, reply) => {
     }
 
     const { buffer: imgBuffer, mime, model } = result;
-    const ext = mimeExtension(mime);
-    const filename = `${crypto.randomUUID()}.${ext}`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, filename), imgBuffer);
-
-    const appBase = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
-    const mediaUrl = appBase ? `${appBase}/media/${filename}` : `/media/${filename}`;
-
-    const db = await getDb();
-    await db.collection('media_files').insertOne({
-      filename,
-      originalName: `ai-image-${provider}-${Date.now()}.${ext}`,
-      url: mediaUrl,
-      mimetype: mime,
-      size: imgBuffer.length,
-      folder: null,
-      tags: ['ai-generated', provider],
-      workspaceId: ws,
-      uploadedAt: new Date(),
-    });
+    const normalized = await normalizeImage(imgBuffer, aspect, fit);
+    const save = (buffer, mime, metadata) => saveImageAsset({ buffer, mime, metadata, getDb, workspaceId: ws, uploadDir: UPLOAD_DIR, origin: APP_BASE_URL });
+    const original = await save(imgBuffer, mime, { ...normalized.original, tags: ['ai-generated', provider, 'original'], model });
+    const asset = await save(normalized.buffer, normalized.mime, { width: normalized.width, height: normalized.height, aspect, fit, sourceUrl: original.url, tags: ['ai-generated', provider], model });
 
     log.info({ action: 'image_generate', provider, model, aspect, quality: normalisedQuality, variation: !!referenceImageUrl, outcome: 'success' });
-    return { mediaUrl, provider, model };
+    return { mediaUrl: asset.url, originalUrl: original.url, provider, model, width: normalized.width, height: normalized.height, aspect, fit, adjusted: normalized.adjusted };
 
   } catch (err) {
     const detail = err.response?.data?.error?.message || err.response?.data?.detail || err.message;
     log.error({ action: 'image_generate', provider, outcome: 'failure', err: detail });
     return reply.code(502).send({ error: 'Image generation failed', detail });
   }
+});
+
+app.post('/media/prepare-image', async (request, reply) => {
+  const { mediaUrl, aspect = '3:4', fit = 'contain' } = request.body || {};
+  if (typeof mediaUrl !== 'string') return reply.code(400).send({ error: 'Choose an image from this workspace' });
+  try {
+    const buffer = await loadReferenceImage(mediaUrl, request.workspaceId);
+    const normalized = await normalizeImage(buffer, aspect, fit);
+    const asset = await saveImageAsset({ buffer: normalized.buffer, mime: normalized.mime, metadata: { width: normalized.width, height: normalized.height, aspect, fit, sourceUrl: mediaUrl }, getDb, workspaceId: request.workspaceId, uploadDir: UPLOAD_DIR, origin: APP_BASE_URL });
+    return { mediaUrl: asset.url, originalUrl: mediaUrl, width: normalized.width, height: normalized.height, aspect, fit, adjusted: normalized.adjusted };
+  } catch (err) { return reply.code(400).send({ error: 'Could not prepare image', detail: err.message }); }
 });
 
 // ─── Monthly Content Calendar ─────────────────────────────────────────────────

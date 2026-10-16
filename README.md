@@ -94,6 +94,8 @@ Global Settings groups Claude's API/connector, OpenAI's API/ChatGPT plugin/image
 
 ## AI configuration
 
+Image creation exports exact dimensions: static Instagram artwork defaults to 3:4 (1080 × 1440), while Stories and Reel artwork use 9:16 (1080 × 1920). Generated originals stay in the workspace Media Library. Review the prepared image before attaching it; choose whole-image fitting with white padding or an explicit crop. Attached images also have a dimension preparation tool. A separately selected 4:5 export is available for API compatibility; the 3:4 original is preserved.
+
 Ollama, Anthropic Claude, OpenAI, Groq, Gemini, and OpenAI-compatible endpoints are supported. Image generation supports the configured OpenAI, Gemini, xAI, or local image server. Keys are encrypted in MongoDB. A saved key or installed SDK does not prove that a provider accepts the credential: test with a real request. Provider authentication and stream errors are surfaced to the UI. Each configured cloud provider has a live Test Connection action; a static model list does not count as a successful connection.
 
 AI providers and app credentials in Global Settings are shared across workspaces; social account tokens are workspace-specific. Account profiles, drafts, calendars, media ownership, competitor data, feeds, analytics, and publishing receipts are isolated by workspace. This is data separation within the existing self-hosted access model, not a new authentication or user permission system. Network exposure and access controls are unchanged.

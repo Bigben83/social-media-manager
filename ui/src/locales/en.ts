@@ -1,4 +1,9 @@
 export default {
+  imageFormats: {
+    prepare: 'Prepare image dimensions', ratio: 'Aspect ratio', fit: 'Image fitting',
+    contain: 'Fit whole image with white padding', cover: 'Crop to fill the frame', preview: 'Prepare preview',
+    apply: 'Use this image', originalKept: 'The original is kept in the Media Library. Review the final framing before using it.',
+  },
   localAssistant: {
     "title": "Local assistant",
     "description": "Use your Ollama model with SocialManager tools to read context, save plans and drafts, and prepare posts for review.",

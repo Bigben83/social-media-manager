@@ -1,4 +1,9 @@
 export default {
+  imageFormats: {
+    prepare: 'Görsel boyutlarını hazırla', ratio: 'En boy oranı', fit: 'Görsel yerleşimi',
+    contain: 'Beyaz boşlukla tüm görseli sığdır', cover: 'Çerçeveyi doldurmak için kırp', preview: 'Önizleme hazırla',
+    apply: 'Bu görseli kullan', originalKept: 'Orijinal görsel Medya Kütüphanesinde saklanır. Kullanmadan önce son kadrajı inceleyin.',
+  },
   localAssistant: {
     "title": "Yerel asistan",
     "description": "Bağlamı okumak, plan ve taslak kaydetmek ve inceleme için gönderi hazırlamak üzere Ollama modelinizi SocialManager araçlarıyla kullanın.",

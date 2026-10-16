@@ -177,11 +177,12 @@ export const useAiStore = defineStore('ai', () => {
   async function generateImage(options: {
     prompt: string
     provider?: ImageProviderName
-    size?: '1:1' | '16:9' | '9:16'
+    size?: '1:1' | '16:9' | '9:16' | '3:4'
+    fit?: 'contain' | 'cover'
     quality?: 'standard' | 'hd'
     style?: 'vivid' | 'natural'
     referenceImageUrl?: string
-  }): Promise<{ mediaUrl: string; provider: string; model: string }> {
+  }): Promise<{ mediaUrl: string; provider: string; model: string; width: number; height: number; aspect: string }> {
     const res = await axios.post('/api/ai/image', options)
     return res.data
   }

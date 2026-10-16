@@ -93,6 +93,7 @@
               >✕</button>
             </div>
             <p v-if="mediaLoadError" class="text-xs text-red-400 mt-1">{{ $t('compose.mediaLoadError') }}</p>
+            <ImageFormatEditor v-if="isImage(composeStore.mediaUrl)" :media-url="composeStore.mediaUrl" :aspect="imageSize" @apply="composeStore.mediaUrl = $event" />
 
             <!-- Caption generation button — only for images when AI is configured -->
             <div v-if="isImage(composeStore.mediaUrl) && aiConfigured && !mediaLoadError" class="mt-2">
@@ -379,6 +380,10 @@
               </div>
 
               <!-- HD quality toggle -->
+              <select v-model="imageFit" :aria-label="$t('imageFormats.fit')" class="bg-gray-800 rounded p-1 text-xs">
+                <option value="contain">{{ $t('imageFormats.contain') }}</option>
+                <option value="cover">{{ $t('imageFormats.cover') }}</option>
+              </select>
               <button
                 @click="imageQuality = imageQuality === 'hd' ? 'standard' : 'hd'"
                 class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors shrink-0"
@@ -427,6 +432,12 @@
               </button>
               <span v-if="imageError" class="text-xs text-red-400">{{ imageError }}</span>
               <span v-if="imageGenerating" class="text-xs text-gray-500">{{ $t('compose.imageGeneratingHint') }}</span>
+            </div>
+            <div v-if="generatedImage" class="space-y-2 text-xs">
+              <img :src="generatedImage.mediaUrl" class="max-h-80 max-w-full object-contain rounded-lg" />
+              <p>{{ generatedImage.width }} × {{ generatedImage.height }} · {{ generatedImage.aspect }}</p>
+              <p class="text-gray-400">{{ $t('imageFormats.originalKept') }}</p>
+              <button @click="composeStore.mediaUrl = generatedImage.mediaUrl; generatedImage = null; imagePanelOpen = false; mediaLoadError = false" class="bg-emerald-700 rounded px-3 py-2">{{ $t('imageFormats.apply') }}</button>
             </div>
           </div>
         </div>
@@ -623,8 +634,9 @@ import { useAiStore, type ImageProvider, type ImageProviderName } from '../store
 import { useHashtagStore } from '../stores/hashtags'
 import { useCompetitorStore } from '../stores/competitors'
 import PostPreview from '../components/compose/PostPreview.vue'
+import ImageFormatEditor from '../components/compose/ImageFormatEditor.vue'
 import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr, utcToNaiveDatetimeString } from '../utils/timezone'
-type ImageAspect = '1:1' | '16:9' | '9:16'
+type ImageAspect = '1:1' | '16:9' | '9:16' | '3:4'
 
 const { t } = useI18n()
 const composeStore = useComposeStore()
@@ -1025,6 +1037,7 @@ async function generateCaption() {
 // ─── Image Generation ────────────────────────────────────────────────────────
 
 const IMAGE_SIZES: { value: ImageAspect; label: string }[] = [
+  { value: '3:4', label: '3:4' },
   { value: '1:1', label: '1:1' },
   { value: '16:9', label: '16:9' },
   { value: '9:16', label: '9:16' },
@@ -1040,7 +1053,9 @@ watch(imageProvider, (v) => {
 })
 const imagePanelOpen = ref(false)
 const imagePrompt = ref('')
-const imageSize = ref<ImageAspect>('1:1')
+const imageSize = ref<ImageAspect>('3:4')
+const imageFit = ref<'contain' | 'cover'>('contain')
+const generatedImage = ref<{ mediaUrl: string; width: number; height: number; aspect: string } | null>(null)
 const imageQuality = ref<'standard' | 'hd'>('standard')
 const imageStyle = ref<'vivid' | 'natural'>('vivid')
 const useImageVariation = ref(false)
@@ -1062,13 +1077,12 @@ async function generateImage() {
       prompt: imagePrompt.value,
       provider: imageProvider.value,
       size: imageSize.value,
+      fit: imageFit.value,
       quality: imageQuality.value,
       style: imageStyle.value,
       referenceImageUrl: useImageVariation.value && composeStore.mediaUrl ? composeStore.mediaUrl : undefined,
     })
-    composeStore.mediaUrl = result.mediaUrl
-    mediaLoadError.value = false
-    imagePanelOpen.value = false
+    generatedImage.value = result
   } catch (err: any) {
     imageError.value = err.response?.data?.detail || err.response?.data?.error || t('compose.imageGenerateFailed')
   } finally {

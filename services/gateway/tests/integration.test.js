@@ -20,6 +20,20 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { axios.get.mockReset(); axios.post.mockReset(); });
 
+test('image preparation preserves the original and rejects another workspace attachment', async () => {
+  const sharp = require('sharp');
+  const filename = 'ratio-original.png';
+  const bytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'red' } }).png().toBuffer();
+  fs.writeFileSync(path.join(process.env.UPLOAD_DIR, filename), bytes);
+  await db.collection('media_files').insertOne({ filename, workspaceId: 'test' });
+  const result = await request('POST', '/media/prepare-image', 'test', { mediaUrl: '/media/' + filename, aspect: '9:16' });
+  expect(result.statusCode).toBe(200);
+  expect(result.json()).toMatchObject({ width: 1080, height: 1920, originalUrl: '/media/' + filename });
+  expect(fs.readFileSync(path.join(process.env.UPLOAD_DIR, filename))).toEqual(bytes);
+  const denied = await request('POST', '/media/prepare-image', 'other', { mediaUrl: '/media/' + filename, aspect: '3:4' });
+  expect(denied.statusCode).toBe(400);
+});
+
 test('Instagram capability checks are live, workspace scoped and redact credentials', async () => {
   await db.collection('platform_credentials').insertOne({ _id: 'test:instagram', accounts: [{ id: 'ig-cap', selected: true, accessToken: 'cap-secret' }] });
   axios.get.mockResolvedValueOnce({ data: { id: 'ig-cap', account_type: 'BUSINESS' } }).mockResolvedValueOnce({ data: { data: [{ permission: 'instagram_content_publish', status: 'granted' }] } });
