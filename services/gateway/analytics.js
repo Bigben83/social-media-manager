@@ -65,12 +65,34 @@ function normalizePost(doc, filter) {
   const status = values.length ? values.every(r=>r.success) ? 'published' : values.some(r=>r.success) ? 'partial' : 'failed' : doc.status;
   return { _id: String(doc._id), type: doc.type, content: doc.content || '', destinations, platformResults: results, status, publishedAt: doc.publishedAt, ...(doc.permalink && { permalink: doc.permalink }), ...(doc.metrics && { metrics: doc.metrics }), ...(doc.mediaType && { mediaType: doc.mediaType }) };
 }
-async function loadAuditHistory(db, ws, filter, since) {
+async function loadAuditHistory(db, ws, filter, since, minimum = 3) {
   const rows = await db.collection('scheduled_jobs').aggregate([...historyPipeline(ws, filter), { $match: { publishedAt: { $gte: since } } }]).toArray();
-  const posts = rows.map(row => normalizePost(row, filter));
-  const summary = summaryAccumulator(); posts.forEach(post => summary.add(post));
+  const recent = rows.map(row => normalizePost(row, filter));
+  const published = posts => posts.filter(post => ['published', 'partial'].includes(post.status));
+  const recentPosts = published(recent);
+  const summary = summaryAccumulator(); recent.forEach(post => summary.add(post));
   const totals = summary.result();
-  return { posts: posts.filter(post => ['published', 'partial'].includes(post.status)), imported: totals.imported, appSuccessRate: totals.deliveries ? totals.successRate : null };
+  let posts = recentPosts;
+  const historical = recentPosts.length < minimum;
+  if (historical) {
+    // Read older evidence without presenting it as activity in the last 30 days.
+    // Stop once the sample is full; failures never consume a sample slot.
+    posts = [...recentPosts];
+    const cursor = db.collection('scheduled_jobs').aggregate([...historyPipeline(ws, filter), { $match: { publishedAt: { $lt: since } } }, { $sort: { publishedAt: -1, _id: -1 } }]);
+    for await (const row of cursor) {
+      const post = normalizePost(row, filter);
+      if (['published', 'partial'].includes(post.status)) posts.push(post);
+      if (posts.length >= 100) break;
+    }
+  }
+  posts.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  const dates = posts.map(p => new Date(p.publishedAt)).filter(date => Number.isFinite(date.getTime()));
+  return { posts, imported: posts.filter(post => post.type === 'imported').length, appSuccessRate: totals.deliveries ? totals.successRate : null,
+    period: { mode: historical ? 'historical' : 'recent', sampleSize: posts.length, recentCount: recentPosts.length,
+      recent7Count: recentPosts.filter(p => new Date(p.publishedAt).getTime() >= Date.now() - 7 * 86400000).length,
+      start: dates.length ? new Date(Math.min(...dates)).toISOString() : null, end: dates.length ? new Date(Math.max(...dates)).toISOString() : null,
+      limited: posts.length < minimum },
+  };
 }
 function summaryAccumulator(now = Date.now()) {
   const data = { total: 0, imported: 0, published: 0, partial: 0, failed: 0, recentCount: 0 };

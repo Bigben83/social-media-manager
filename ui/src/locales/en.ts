@@ -174,7 +174,10 @@ export default {
     auditMix: 'Content Mix',
     auditRecommendations: 'Recommendations',
     auditStats: '{count} posts · {freq}x/week · app delivery: {rate}',
-    auditError: 'Audit failed. Sync account history or publish at least 3 posts in the last 30 days, then try again.',
+    auditError: 'Could not complete the brand audit. Check the connection and AI provider settings, then retry.',
+    historicalEvidence: 'Historical sample: {count} posts, {start} – {end}. Recent activity still uses the last 30 days.',
+    recentEvidence: 'Evidence: {count} posts, {start} – {end}.',
+    limitedEvidence: 'Limited history: conclusions are provisional.',
 
     runChannelAudit: 'Channel Audit',
     runningChannelAudit: 'Auditing…',
@@ -183,7 +186,7 @@ export default {
     channelAuditDismiss: 'Dismiss',
     channelAuditTopActions: 'Top Actions',
     channelAuditRecommendations: 'Recommendations',
-    channelAuditError: 'Channel audit failed. Sync account history or publish at least 2 posts in the last 30 days, then try again.',
+    channelAuditError: 'Could not complete the channel audit. Check the connection and AI provider settings, then retry.',
     channelAuditGeneratedAt: 'Generated',
 
     insightsTitle: 'Advanced Insights',

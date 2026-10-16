@@ -93,15 +93,15 @@
 
       <!-- Audit error -->
       <div v-if="auditError" class="mb-6 p-3 bg-red-900/40 border border-red-700 rounded-xl text-red-300 text-sm flex items-center justify-between gap-3">
-        {{ $t('analytics.auditError') }}
-        <button @click="auditError = false" class="text-red-400 hover:text-red-200 shrink-0">✕</button>
+        {{ auditError }}
+        <button @click="auditError = ''" class="text-red-400 hover:text-red-200 shrink-0">✕</button>
       </div>
 
       <!-- Audit results card -->
       <div v-if="audit" class="mb-8 bg-gray-900 border border-violet-800/50 rounded-2xl overflow-hidden">
         <!-- Card header -->
-        <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
-          <div class="flex items-center gap-3">
+        <div class="px-6 py-4 border-b border-gray-800 flex flex-wrap items-center justify-between gap-4">
+          <div class="flex flex-wrap items-center gap-3">
             <div class="flex items-center gap-2">
               <i class="fa-solid fa-clipboard-check text-violet-400"></i>
               <span class="font-semibold text-white">{{ $t('analytics.auditTitle') }}</span>
@@ -123,11 +123,12 @@
           </div>
         </div>
 
+        <p v-if="audit.historyPeriod" class="px-6 py-3 text-xs text-amber-200">{{ evidenceLabel(audit.historyPeriod) }}</p>
         <!-- Summary -->
         <div class="px-6 py-4 border-b border-gray-800 text-sm text-gray-300">{{ audit.summary }}</div>
 
         <!-- Score breakdown -->
-        <div class="grid grid-cols-3 divide-x divide-gray-800 border-b border-gray-800">
+        <div class="grid grid-cols-1 sm:grid-cols-3 divide-x divide-gray-800 border-b border-gray-800">
           <div v-for="section in auditSections" :key="section.key" class="px-5 py-4">
             <div class="flex items-center justify-between mb-1">
               <span class="text-xs text-gray-400">{{ section.label }}</span>
@@ -154,18 +155,18 @@
 
       <!-- Channel audit error -->
       <div v-if="channelAuditError" class="mb-6 p-3 bg-red-900/40 border border-red-700 rounded-xl text-red-300 text-sm flex items-center justify-between gap-3">
-        {{ $t('analytics.channelAuditError') }}
-        <button @click="channelAuditError = false" class="text-red-400 hover:text-red-200 shrink-0">✕</button>
+        {{ channelAuditError }}
+        <button @click="channelAuditError = ''" class="text-red-400 hover:text-red-200 shrink-0">✕</button>
       </div>
 
       <!-- Channel audit results card -->
       <div v-if="channelAudit" class="mb-8 bg-gray-900 border border-sky-800/50 rounded-2xl overflow-hidden">
         <!-- Header -->
-        <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
-          <div class="flex items-center gap-3">
+        <div class="px-6 py-4 border-b border-gray-800 flex flex-wrap items-center justify-between gap-4">
+          <div class="flex flex-wrap items-center gap-3 min-w-0">
             <i class="fa-solid fa-chart-bar text-sky-400"></i>
             <span class="font-semibold text-white">{{ $t('analytics.channelAuditTitle') }}</span>
-            <span v-if="selectedAccount" class="text-xs text-gray-500">{{ selectedAccount }}</span>
+            <span v-if="selectedAccount" class="text-xs text-gray-500 break-all">{{ selectedAccount }}</span>
           </div>
           <div class="flex items-center gap-3 shrink-0">
             <div class="flex items-center gap-2">
@@ -179,8 +180,9 @@
           </div>
         </div>
 
+        <p v-if="channelAudit.historyPeriod" class="px-6 py-3 text-xs text-amber-200">{{ evidenceLabel(channelAudit.historyPeriod) }}</p>
         <!-- Section grid -->
-        <div class="grid grid-cols-2 lg:grid-cols-3 divide-x divide-y divide-gray-800 border-b border-gray-800">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 divide-x divide-y divide-gray-800 border-b border-gray-800">
           <div v-for="section in channelAudit.sections" :key="section.name" class="px-5 py-4">
             <div class="flex items-center justify-between mb-1">
               <span class="text-xs text-gray-400 font-medium">{{ section.name }}</span>
@@ -590,6 +592,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useWorkspaceStore } from '../stores/workspace'
+import { auditErrorMessage } from '../utils/analytics'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
@@ -673,8 +676,10 @@ const canSync = computed(() => !selectedAccount.value || /^(facebook|instagram)(
 let syncTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 
+interface AuditPeriod { mode: string; sampleSize: number; start: string | null; end: string | null; limited: boolean }
 interface AuditSection { score: number; assessment: string; benchmark?: string }
 interface Audit {
+  historyPeriod?: AuditPeriod
   score: number
   summary: string
   postingFrequency: AuditSection
@@ -685,7 +690,7 @@ interface Audit {
 }
 const audit        = ref<Audit | null>(null)
 const auditLoading = ref(false)
-const auditError   = ref(false)
+const auditError   = ref('')
 
 interface ChannelAuditSection {
   name: string
@@ -694,6 +699,7 @@ interface ChannelAuditSection {
   recommendations: string[]
 }
 interface ChannelAudit {
+  historyPeriod?: AuditPeriod
   score: number
   sections: ChannelAuditSection[]
   topActions: string[]
@@ -701,7 +707,7 @@ interface ChannelAudit {
 }
 const channelAudit        = ref<ChannelAudit | null>(null)
 const channelAuditLoading = ref(false)
-const channelAuditError   = ref(false)
+const channelAuditError   = ref('')
 
 // ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -764,29 +770,38 @@ function exportCsv() {
   a.click()
 }
 
+function evidenceLabel(period: AuditPeriod) {
+  const label = t(period.mode === 'historical' ? 'analytics.historicalEvidence' : 'analytics.recentEvidence', { count: period.sampleSize, start: period.start ? new Date(period.start).toLocaleDateString() : '—', end: period.end ? new Date(period.end).toLocaleDateString() : '—' })
+  return period.limited ? `${label} ${t('analytics.limitedEvidence')}` : label
+}
+
 async function runAudit() {
+  const scope = scopeKey()
   auditLoading.value = true
-  auditError.value = false
+  auditError.value = ''
+  audit.value = null
   try {
     const res = await axios.post('/api/analytics/audit', {}, { params: accountParams() })
-    audit.value = res.data
-  } catch {
-    auditError.value = true
+    if (scope === scopeKey() && !disposed) audit.value = res.data
+  } catch (error) {
+    if (scope === scopeKey() && !disposed) auditError.value = auditErrorMessage(error, t('analytics.auditError'))
   } finally {
-    auditLoading.value = false
+    if (scope === scopeKey()) auditLoading.value = false
   }
 }
 
 async function runChannelAudit() {
+  const scope = scopeKey()
   channelAuditLoading.value = true
-  channelAuditError.value = false
+  channelAuditError.value = ''
+  channelAudit.value = null
   try {
     const res = await axios.post('/api/ai/channel-audit', { accountKey: selectedAccount.value || undefined })
-    channelAudit.value = res.data
-  } catch {
-    channelAuditError.value = true
+    if (scope === scopeKey() && !disposed) channelAudit.value = res.data
+  } catch (error) {
+    if (scope === scopeKey() && !disposed) channelAuditError.value = auditErrorMessage(error, t('analytics.channelAuditError'))
   } finally {
-    channelAuditLoading.value = false
+    if (scope === scopeKey()) channelAuditLoading.value = false
   }
 }
 
@@ -849,13 +864,18 @@ onMounted(() => {
 onUnmounted(() => { disposed = true; clearTimeout(syncTimer) })
 
 // Re-fetch everything when the account filter changes
-watch(selectedAccount, () => { load(); loadInsights() })
+watch(selectedAccount, () => {
+  audit.value = null; channelAudit.value = null; auditError.value = ''; channelAuditError.value = ''
+  auditLoading.value = false; channelAuditLoading.value = false
+  load(); loadInsights()
+})
 watch(() => workspaceStore.activeWorkspaceId, () => {
   clearTimeout(syncTimer)
   selectedAccount.value = null
   summary.value = null; posts.value = []; postsTotal.value = 0; insights.value = null
   syncJob.value = null; syncError.value = ''; syncSubmitting.value = false
   audit.value = null; channelAudit.value = null
+  auditError.value = ''; channelAuditError.value = ''; auditLoading.value = false; channelAuditLoading.value = false
   platformsStore.fetchMetaConnections()
   load(); loadInsights(); resumeSync()
 })

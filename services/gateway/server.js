@@ -2760,19 +2760,17 @@ app.post('/analytics/audit', async (request, reply) => {
   const db = await getDb();
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
-
-  const history = await loadAuditHistory(db, ws, filter, thirtyDaysAgo);
+  const history = await loadAuditHistory(db, ws, filter, thirtyDaysAgo, 3);
   const recentPosts = history.posts;
 
-  if (recentPosts.length < 3) {
-    return reply.code(400).send({ error: 'Not enough recent history. Sync account history or publish at least 3 posts in the last 30 days.' });
+  if (!recentPosts.length) {
+    return reply.code(400).send({ code: 'NO_AUDIT_HISTORY', error: 'No published posts are available for this account filter. Sync account history or choose an account with published posts.' });
   }
 
   // Posting frequency
-  const postsLast30 = recentPosts.length;
-  const postsLast7  = recentPosts.filter((p) => new Date(p.publishedAt) >= sevenDaysAgo).length;
-  const postsPerWeek = Math.round((postsLast30 / 4) * 10) / 10;
+  const postsLast30 = history.period.recentCount;
+  const postsLast7 = history.period.recent7Count;
+  const postsPerWeek = Math.round(postsLast30 / 30 * 7 * 10) / 10;
 
   // Platforms used
   const platforms = [...new Set(recentPosts.flatMap((p) => (p.destinations || []).map((d) => d.platform)).filter(Boolean))];
@@ -2816,7 +2814,7 @@ app.post('/analytics/audit', async (request, reply) => {
     ? { workspaceId: ws, platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }
     : { workspaceId: ws };
   const metrics = await db.collection('post_metrics')
-    .find({ ...metricsFilter, publishedAt: { $gte: thirtyDaysAgo } })
+    .find({ ...metricsFilter, publishedAt: { $gte: new Date(history.period.start) } })
     .toArray();
 
   const avgEngagement = metrics.length > 0
@@ -2824,8 +2822,11 @@ app.post('/analytics/audit', async (request, reply) => {
     : 0;
 
   const statsBlock = [
+    `Evidence: ${history.period.sampleSize} published posts from ${history.period.start} to ${history.period.end}.`,
+    `Evidence mode: ${history.period.mode}. Limited sample: ${history.period.limited}.`,
+    'Older posts describe historical content only. Do not report them as recent activity or their engagement as current performance. A limited sample cannot support confident performance conclusions.',
     `Publishing stats (last 30 days):`,
-    `- Total posts: ${postsLast30}`,
+    `- Posts in last 30 days: ${postsLast30}`,
     `- Posts this week: ${postsLast7}`,
     `- Posts per week (avg): ${postsPerWeek}`,
     `- Platforms used: ${platforms.join(', ') || 'unknown'}`,
@@ -2876,6 +2877,7 @@ Return ONLY the JSON object.`;
       success: true,
       ...audit,
       stats: { postsLast30, postsLast7, postsPerWeek, platforms, successRate, avgEngagement },
+      historyPeriod: history.period,
       generatedAt: new Date(),
     };
   } catch (err) {
@@ -4235,10 +4237,11 @@ app.post('/ai/channel-audit', async (request, reply) => {
   }
 
   // Use the same deduplicated native and app history as the analytics page.
-  const recentPosts = (await loadAuditHistory(db, ws, parseAccountFilter(accountKey), thirtyDaysAgo)).posts;
+  const history = await loadAuditHistory(db, ws, parseAccountFilter(accountKey), thirtyDaysAgo, 2);
+  const recentPosts = history.posts;
 
-  if (recentPosts.length < 2) {
-    return reply.code(400).send({ error: 'Not enough recent history. Sync account history or publish at least 2 posts in the last 30 days.' });
+  if (!recentPosts.length) {
+    return reply.code(400).send({ code: 'NO_AUDIT_HISTORY', error: 'No published posts are available for this account filter. Sync account history or choose an account with published posts.' });
   }
 
   // ── Local stats computation ──────────────────────────────────────────────
@@ -4267,15 +4270,15 @@ app.post('/ai/channel-audit', async (request, reply) => {
   // Posting consistency: days between posts
   const dates = recentPosts.map((p) => new Date(p.publishedAt).getTime()).sort((a, b) => a - b);
   const gaps = dates.slice(1).map((d, i) => (d - dates[i]) / (1000 * 60 * 60 * 24));
-  const avgGap = gaps.length > 0 ? Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length * 10) / 10 : 30;
-  const maxGap = gaps.length > 0 ? Math.round(Math.max(...gaps) * 10) / 10 : 30;
+  const avgGap = gaps.length > 0 ? Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length * 10) / 10 : null;
+  const maxGap = gaps.length > 0 ? Math.round(Math.max(...gaps) * 10) / 10 : null;
 
   // Engagement from post_metrics
   const metricsFilter = accountKey
     ? { workspaceId: ws, platform: parseAccountFilter(accountKey).platform, ...(parseAccountFilter(accountKey).accountId && { accountId: parseAccountFilter(accountKey).accountId }) }
     : { workspaceId: ws };
   const metrics = await db.collection('post_metrics')
-    .find({ ...metricsFilter, publishedAt: { $gte: thirtyDaysAgo } })
+    .find({ ...metricsFilter, publishedAt: { $gte: new Date(history.period.start) } })
     .toArray();
   const avgEngagement = metrics.length > 0
     ? Math.round((metrics.reduce((s, m) => s + (m.metrics?.engagementTotal || 0), 0) / metrics.length) * 10) / 10
@@ -4292,12 +4295,15 @@ app.post('/ai/channel-audit', async (request, reply) => {
   }
 
   const statsBlock = [
-    `Total posts (last 30 days): ${totalPosts}`,
+    `Evidence: ${totalPosts} published posts from ${history.period.start} to ${history.period.end}.`,
+    `Evidence mode: ${history.period.mode}. Limited sample: ${history.period.limited}.`,
+    `Posts in last 30 days: ${history.period.recentCount}; last 7 days: ${history.period.recent7Count}.`,
+    'Older posts describe historical content only. Do not report them as recent activity or their engagement as current performance. Score unavailable data neutrally and state limited sample limitations.',
     `Posts with media (images/video): ${mediaRatio === null ? 'unknown' : mediaRatio + '%'} (${knownFormatPosts.length}/${totalPosts} posts have known format). Score unavailable format data neutrally.`,
     `Posts with a CTA (click, shop, follow, etc.): ${ctaRatio}%`,
     `Average hashtags per post: ${avgHashtags}`,
     `Average caption length: ${avgCaptionLength} characters`,
-    `Average days between posts: ${avgGap} (max gap: ${maxGap} days)`,
+    `Average days between posts: ${avgGap === null ? 'unknown (only one post)' : avgGap} (max gap: ${maxGap === null ? 'unknown' : maxGap} days)`,
     `Average engagement per post: ${avgEngagement !== null ? avgEngagement : 'no data'}`,
     `Account profile completeness: ${profileScore}% — ${profileNote}`,
     profile?.description ? `Bio/description: "${profile.description.slice(0, 200)}"` : 'No bio/description set.',
@@ -4350,7 +4356,7 @@ Return ONLY valid JSON.`;
     }
 
     log.info({ action: 'channel_audit', account: accountKey || 'all', outcome: 'success' });
-    return { success: true, ...result, generatedAt: new Date() };
+    return { success: true, ...result, historyPeriod: history.period, generatedAt: new Date() };
   } catch (err) {
     return reply.code(503).send({ error: 'Channel audit failed', detail: err.message });
   }

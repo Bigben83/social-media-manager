@@ -174,7 +174,10 @@ export default {
     auditMix: 'İçerik Karması',
     auditRecommendations: 'Öneriler',
     auditStats: '{count} gönderi · haftada {freq}x · uygulama gönderimi: {rate}',
-    auditError: 'Denetim başarısız. Hesap geçmişini eşitleyin veya son 30 gün içinde en az 3 gönderi yayınlayıp yeniden deneyin.',
+    auditError: 'Marka denetimi tamamlanamadı. Bağlantıyı ve yapay zeka sağlayıcı ayarlarını kontrol edip yeniden deneyin.',
+    historicalEvidence: 'Geçmiş örneklem: {count} gönderi, {start} – {end}. Güncel etkinlik son 30 günü kapsar.',
+    recentEvidence: 'Veriler: {count} gönderi, {start} – {end}.',
+    limitedEvidence: 'Geçmiş sınırlı: sonuçlar kesin değildir.',
 
     runChannelAudit: 'Kanal Denetimi',
     runningChannelAudit: 'Denetleniyor…',
@@ -183,7 +186,7 @@ export default {
     channelAuditDismiss: 'Kapat',
     channelAuditTopActions: 'Öncelikli Eylemler',
     channelAuditRecommendations: 'Öneriler',
-    channelAuditError: 'Kanal denetimi başarısız. Hesap geçmişini eşitleyin veya son 30 gün içinde en az 2 gönderi yayınlayıp yeniden deneyin.',
+    channelAuditError: 'Kanal denetimi tamamlanamadı. Bağlantıyı ve yapay zeka sağlayıcı ayarlarını kontrol edip yeniden deneyin.',
     channelAuditGeneratedAt: 'Oluşturuldu',
 
     insightsTitle: 'Gelişmiş İçgörüler',

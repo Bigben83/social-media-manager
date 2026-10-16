@@ -90,3 +90,26 @@ test('history sync uses one active job per workspace and resumes its persisted c
     assert.equal(audit.appSuccessRate, null);
   } finally { await app.close(); await db.dropDatabase(); await client.close(); }
 });
+
+test('audits use older native posts with honest recent counts and bounded isolated samples', { skip: !process.env.MONGO_TEST_URI }, async () => {
+  const client = await MongoClient.connect(process.env.MONGO_TEST_URI);
+  const db = client.db(`audit_history_${require('crypto').randomUUID().replaceAll('-', '')}`);
+  try {
+    await db.collection('post_metrics').insertMany(Array.from({ length: 105 }, (_, i) => ({ workspaceId: 'a', platform: 'instagram', accountId: 'old', postId: String(i), content: 'Old native post', publishedAt: new Date(Date.UTC(2020, 0, i + 1)) })));
+    await db.collection('post_metrics').insertOne({ workspaceId: 'b', platform: 'instagram', accountId: 'old', postId: 'private', content: 'Private other workspace', publishedAt: new Date() });
+    await db.collection('post_metrics').insertOne({ workspaceId: 'a', platform: 'facebook', accountId: 'sparse', postId: 'one', publishedAt: new Date('2021-01-01') });
+    const since = new Date(Date.now() - 30 * 86400000);
+    const history = await loadAuditHistory(db, 'a', { platform: 'instagram', accountId: 'old' }, since);
+    assert.equal(history.posts.length, 100);
+    assert.equal(history.appSuccessRate, null);
+    assert.equal(history.imported, 100);
+    assert.deepEqual([history.period.mode, history.period.recentCount, history.period.recent7Count, history.period.limited], ['historical', 0, 0, false]);
+    assert.ok(history.posts.every(p => p.content === 'Old native post'));
+    const sparse = await loadAuditHistory(db, 'a', { platform: 'facebook', accountId: 'sparse' }, since, 2);
+    assert.equal(sparse.posts.length, 1);
+    assert.equal(sparse.period.limited, true);
+    assert.equal(sparse.period.start, '2021-01-01T00:00:00.000Z');
+    const empty = await loadAuditHistory(db, 'a', { platform: 'instagram', accountId: 'missing' }, since);
+    assert.equal(empty.posts.length, 0);
+  } finally { await db.dropDatabase(); await client.close(); }
+});

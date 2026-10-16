@@ -13,12 +13,13 @@ const db = fakeDb(); getDb.mockResolvedValue(db);
 const app = require('../server');
 const request = (url, payload = {}) => app.inject({ method: 'POST', url, headers: { 'x-workspace-id': 'a' }, payload });
 const nativePosts = platform => [1, 2, 3].map(i => ({ _id: `native-${i}`, type: 'imported', content: 'Follow us #news', status: 'published', publishedAt: new Date(), destinations: [{ platform, accountId: 'account' }] }));
+const historyFor = (posts, mode = 'recent') => ({ posts, imported: posts.length, appSuccessRate: null, period: { mode, sampleSize: posts.length, recentCount: mode === 'recent' ? posts.length : 0, recent7Count: mode === 'recent' ? posts.length : 0, start: posts[0]?.publishedAt.toISOString() || null, end: posts[0]?.publishedAt.toISOString() || null, limited: posts.length < 3 } });
 beforeAll(async () => { await app.ready(); await db.collection('workspaces').insertOne({ _id: 'a' }); });
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { generateText.mockReset(); loadAuditHistory.mockReset(); });
 
 test('brand audit accepts native history and does not claim an app delivery success rate', async () => {
-  loadAuditHistory.mockResolvedValue({ posts: nativePosts('instagram'), imported: 3, appSuccessRate: null });
+  loadAuditHistory.mockResolvedValue(historyFor(nativePosts('instagram')));
   generateText.mockResolvedValue(JSON.stringify({ score: 80, summary: 'Imported history included' }));
   const response = await request('/analytics/audit?account=instagram:account');
   expect(response.statusCode).toBe(200);
@@ -30,7 +31,7 @@ test('brand audit accepts native history and does not claim an app delivery succ
 });
 
 test.each(['instagram', 'facebook'])('channel audit uses native %s history and distinguishes missing format metadata', async platform => {
-  loadAuditHistory.mockResolvedValue({ posts: nativePosts(platform), imported: 3, appSuccessRate: null });
+  loadAuditHistory.mockResolvedValue(historyFor(nativePosts(platform)));
   generateText.mockResolvedValue(JSON.stringify({ score: 70, sections: [], topActions: [] }));
   await db.collection('post_metrics').insertOne({ workspaceId: 'a', platform, accountId: 'account', publishedAt: new Date(), metrics: { engagementTotal: 10 } });
   const response = await request('/ai/channel-audit', { accountKey: `${platform}:account` });
@@ -42,9 +43,31 @@ test.each(['instagram', 'facebook'])('channel audit uses native %s history and d
   expect(prompt).toContain('Average engagement per post: 10');
 });
 
-test('audit requires enough recent posts and rejects malformed account filters before generation', async () => {
-  loadAuditHistory.mockResolvedValue({ posts: [], imported: 0, appSuccessRate: null });
+test('audit explains missing history and rejects malformed account filters before generation', async () => {
+  loadAuditHistory.mockResolvedValue(historyFor([]));
   expect((await request('/analytics/audit')).statusCode).toBe(400);
   expect((await request('/ai/channel-audit', { accountKey: { platform: 'instagram' } })).statusCode).toBe(400);
   expect(generateText).not.toHaveBeenCalled();
+});
+
+test.each(['/analytics/audit', '/ai/channel-audit'])('%s accepts sparse historical evidence with an explicit period', async url => {
+  const posts = nativePosts('instagram').slice(0, 1);
+  posts[0].publishedAt = new Date('2024-01-01');
+  loadAuditHistory.mockResolvedValue(historyFor(posts, 'historical'));
+  generateText.mockResolvedValue(JSON.stringify({ score: 50, sections: [], topActions: [] }));
+  const response = await request(url);
+  expect(response.statusCode).toBe(200);
+  expect(response.json().historyPeriod).toMatchObject({ mode: 'historical', sampleSize: 1, limited: true, recentCount: 0 });
+  expect(generateText.mock.calls[0][1].prompt).toContain('Older posts describe historical content only');
+  if (url === '/analytics/audit') expect(response.json().stats).toMatchObject({ postsLast30: 0, postsLast7: 0, postsPerWeek: 0 });
+  else expect(generateText.mock.calls[0][1].prompt).toContain('unknown (only one post)');
+});
+
+test.each(['/analytics/audit', '/ai/channel-audit'])('%s reports provider failure separately from missing posts', async url => {
+  loadAuditHistory.mockResolvedValue(historyFor(nativePosts('instagram')));
+  generateText.mockRejectedValue(new Error('Provider authentication failed'));
+  const response = await request(url);
+  expect(response.statusCode).toBe(503);
+  expect(response.json().detail).toBe('Provider authentication failed');
+  expect(response.json().error).not.toContain('posts');
 });
