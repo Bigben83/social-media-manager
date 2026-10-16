@@ -20,7 +20,7 @@ function importedPipeline(ws, filter) {
   } }] };
   const lookups = ['posts', 'scheduled_jobs'].flatMap((from, i) => [
     { $lookup: { from, let: { platform: '$platform', key: { $concat: ['$platform', ':', '$accountId'] }, postId: '$postId' }, pipeline: [
-      { $match: { workspaceId: ws, $expr: receiptMatch } }, { $limit: 1 }, { $project: { _id: 1 } },
+      { $match: { workspaceId: ws, status: { $in: ['completed', 'published', 'partial', 'failed'] }, $expr: receiptMatch } }, { $limit: 1 }, { $project: { _id: 1 } },
     ], as: `receipt${i}` } },
     { $match: { [`receipt${i}.0`]: { $exists: false } } },
   ]);

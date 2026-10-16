@@ -3,12 +3,12 @@
     <div class="max-w-6xl mx-auto px-6 py-8">
 
       <!-- Header -->
-      <div class="flex items-center justify-between mb-8">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div>
           <h1 class="text-2xl font-bold text-white">{{ $t('analytics.title') }}</h1>
           <p class="text-sm text-gray-500 mt-1">{{ $t('analytics.subtitle') }}</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <button
             @click="runAudit"
             :disabled="auditLoading"
@@ -33,15 +33,7 @@
             {{ $t('analytics.exportCsv') }}
           </button>
           <button
-            @click="crawlMetrics"
-            :disabled="crawling"
-            class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
-          >
-            <span :class="{ 'animate-spin': crawling }">⟳</span>
-            {{ crawling ? $t('analytics.crawling') : (crawlResult !== null ? $t('analytics.crawlDone', { count: crawlResult }) : $t('analytics.crawlMetrics')) }}
-          </button>
-          <button
-            @click="load"
+            @click="refreshAnalytics"
             :disabled="loading"
             class="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 rounded-xl text-sm font-medium transition-colors"
           >
@@ -49,6 +41,29 @@
             {{ $t('analytics.refresh') }}
           </button>
         </div>
+      </div>
+
+      <div class="mb-6 p-4 rounded-xl bg-gray-900 border border-gray-800 text-sm space-y-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="text-gray-400" for="history-scope">{{ $t('analytics.historyScope') }}</label>
+          <select id="history-scope" v-model="historyScope" :disabled="crawling" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
+            <option value="all">{{ $t('analytics.allHistory') }}</option>
+            <option value="recent">{{ $t('analytics.recentHistory') }}</option>
+          </select>
+          <button @click="crawlMetrics" :disabled="crawling || !canSync" class="px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 rounded-lg">
+            {{ crawling ? $t('analytics.crawling') : $t('analytics.crawlMetrics') }}
+          </button>
+          <button v-if="syncJob?.status === 'failed'" @click="retrySync" :disabled="crawling" class="px-3 py-2 border border-gray-700 rounded-lg">{{ $t('analytics.retrySync') }}</button>
+        </div>
+        <p class="text-xs text-gray-500">{{ $t('analytics.historyHelp') }}</p>
+        <p v-if="syncJob" aria-live="polite" class="text-gray-300">
+          {{ $t(`analytics.syncStatus_${syncJob.status}`) }} · {{ $t('analytics.syncProgress', { count: syncJob.progress?.count || 0, completed: syncJob.progress?.completed || 0, total: syncJob.progress?.total || 0 }) }}
+          <span v-if="crawling && syncJob.progress?.step"> · {{ syncJob.progress.step }}</span>
+        </p>
+        <p v-if="syncError" role="alert" class="text-red-300">{{ syncError }}</p>
+        <p v-if="syncJob?.error" class="text-red-300">{{ syncJob.error }}</p>
+        <p v-for="(issue, index) in syncJob?.progress?.errors || []" :key="index" class="text-amber-300">{{ issue.account }}: {{ issue.error }}</p>
+        <p v-if="syncJob?.progress?.insightsUnavailable" class="text-xs text-amber-300">{{ $t('analytics.insightsUnavailable', { count: syncJob.progress.insightsUnavailable }) }}</p>
       </div>
 
       <!-- Account filter chips -->
@@ -223,7 +238,7 @@
           </div>
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
             <p class="text-xs text-gray-500 mb-1">{{ $t('analytics.successRate') }}</p>
-            <p class="text-3xl font-bold" :class="summary.successRate >= 80 ? 'text-green-400' : summary.successRate >= 50 ? 'text-yellow-400' : 'text-red-400'">
+            <p class="text-3xl font-bold" :class="!summary.deliveries ? 'text-gray-400' : summary.successRate >= 80 ? 'text-green-400' : summary.successRate >= 50 ? 'text-yellow-400' : 'text-red-400'">
               {{ summary.deliveries ? `${summary.successRate}%` : '—' }}
             </p>
           </div>
@@ -558,7 +573,7 @@
                 <div class="shrink-0 text-right space-y-0.5">
                   <p class="text-sm font-semibold text-blue-400">{{ post.metrics.engagementTotal }}</p>
                   <p class="text-xs text-gray-600">
-                    ❤ {{ post.metrics.likes }} · 💬 {{ post.metrics.comments }}<template v-if="post.metrics.shares"> · ↗ {{ post.metrics.shares }}</template>
+                    ❤ {{ post.metrics.likes ?? '—' }} · 💬 {{ post.metrics.comments ?? '—' }}<template v-if="post.metrics.shares"> · ↗ {{ post.metrics.shares }}</template>
                   </p>
                 </div>
               </div>
@@ -573,7 +588,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useWorkspaceStore } from '../stores/workspace'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { usePlatformsStore, PLATFORM_META } from '../stores/platforms'
@@ -610,7 +626,7 @@ interface HeatCell  { day: number; hour: number; avg: number; count: number }
 interface TopPost {
   platform: string; accountName: string; postId: string
   content: string | null; publishedAt: string
-  metrics: { likes: number; comments: number; shares: number; views: number; saves: number; engagementTotal: number }
+  metrics: { likes: number | null; comments: number | null; shares: number | null; views: number | null; reach?: number | null; saves: number | null; engagementTotal: number }
 }
 interface PlatformComp {
   platform: string; avgEngagement: number; avgLikes: number; avgComments: number; avgShares: number; totalPosts: number
@@ -634,6 +650,8 @@ const DAY_COUNT = 30
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const platformsStore = usePlatformsStore()
+const workspaceStore = useWorkspaceStore()
+const scopeKey = () => `${workspaceStore.activeWorkspaceId}|${selectedAccount.value || ''}`
 
 const loading     = ref(false)
 const loadingMore = ref(false)
@@ -645,8 +663,15 @@ const selectedAccount = ref<string | null>(null)
 
 const insightsLoading = ref(false)
 const insights        = ref<Insights | null>(null)
-const crawling        = ref(false)
-const crawlResult     = ref<number | null>(null)
+interface SyncJob { jobId: string; status: string; error?: string; progress?: { count?: number; step?: string; completed?: number; total?: number; errors?: Array<{ account: string; error: string }>; insightsUnavailable?: number } }
+const syncJob = ref<SyncJob | null>(null)
+const syncError = ref('')
+const syncSubmitting = ref(false)
+const historyScope = ref('all')
+const crawling = computed(() => syncSubmitting.value || ['queued', 'running'].includes(syncJob.value?.status || ''))
+const canSync = computed(() => !selectedAccount.value || /^(facebook|instagram)(:|$)/.test(selectedAccount.value))
+let syncTimer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
 
 interface AuditSection { score: number; assessment: string; benchmark?: string }
 interface Audit {
@@ -685,45 +710,52 @@ function accountParams(extra: Record<string, unknown> = {}) {
 }
 
 async function load() {
+  const scope = scopeKey()
   loading.value = true
   try {
     const [sRes, pRes] = await Promise.all([
       axios.get('/api/analytics/summary', { params: accountParams() }),
       axios.get('/api/analytics/posts', { params: accountParams({ limit: 20 }) }),
     ])
+    if (scope !== scopeKey() || disposed) return
     summary.value = sRes.data
     posts.value = pRes.data.posts
     postsTotal.value = pRes.data.total
   } finally {
-    loading.value = false
+    if (scope === scopeKey()) loading.value = false
   }
 }
 
 async function loadMorePosts() {
+  const scope = scopeKey()
   loadingMore.value = true
   try {
     const res = await axios.get('/api/analytics/posts', { params: accountParams({ limit: 20, skip: posts.value.length }) })
-    posts.value.push(...res.data.posts)
+    if (scope === scopeKey() && !disposed) posts.value.push(...res.data.posts)
   } finally {
     loadingMore.value = false
   }
 }
 
 async function loadInsights() {
+  const scope = scopeKey()
   insightsLoading.value = true
   try {
     const res = await axios.get('/api/analytics/insights', { params: accountParams() })
-    insights.value = res.data
+    if (scope === scopeKey() && !disposed) insights.value = res.data
   } finally {
-    insightsLoading.value = false
+    if (scope === scopeKey()) insightsLoading.value = false
   }
+}
+
+async function refreshAnalytics() {
+  await Promise.all([load(), loadInsights(), resumeSync()])
 }
 
 function exportCsv() {
   const params = new URLSearchParams()
   if (selectedAccount.value) params.set('account', selectedAccount.value)
-  // Export current month by default
-  params.set('month', new Date().toISOString().slice(0, 7))
+  // Export the complete filtered history, including imported account posts.
   params.set('workspace', String(axios.defaults.headers.common['X-Workspace-Id'] || 'default'))
   const url = `/api/analytics/export?${params.toString()}`
   const a = document.createElement('a')
@@ -759,25 +791,74 @@ async function runChannelAudit() {
 }
 
 async function crawlMetrics() {
-  crawling.value = true
-  crawlResult.value = null
+  const ws = workspaceStore.activeWorkspaceId
+  syncSubmitting.value = true
+  syncError.value = ''
   try {
-    const res = await axios.post('/api/analytics/crawl')
-    crawlResult.value = res.data.total
-    await loadInsights()
+    const res = await axios.post('/api/analytics/crawl', { history: historyScope.value, ...(selectedAccount.value && { account: selectedAccount.value }) })
+    if (ws !== workspaceStore.activeWorkspaceId || disposed) return
+    syncJob.value = res.data
+    scheduleSyncPoll()
+  } catch {
+    if (ws === workspaceStore.activeWorkspaceId) syncError.value = t('analytics.syncRequestError')
   } finally {
-    crawling.value = false
+    if (ws === workspaceStore.activeWorkspaceId) syncSubmitting.value = false
   }
+}
+
+function scheduleSyncPoll() {
+  clearTimeout(syncTimer)
+  if (!disposed && ['queued', 'running'].includes(syncJob.value?.status || '')) syncTimer = setTimeout(resumeSync, 2000)
+}
+async function resumeSync() {
+  const ws = workspaceStore.activeWorkspaceId
+  try {
+    const res = await axios.get('/api/analytics/sync')
+    if (ws !== workspaceStore.activeWorkspaceId || disposed) return
+    const previous = syncJob.value?.status
+    syncJob.value = res.data.job
+    syncError.value = ''
+    if (previous && ['queued', 'running'].includes(previous) && ['done', 'failed'].includes(syncJob.value?.status || '')) await Promise.all([load(), loadInsights()])
+  } catch {
+    if (ws === workspaceStore.activeWorkspaceId && !disposed) syncError.value = t('analytics.syncRequestError')
+  } finally {
+    if (ws === workspaceStore.activeWorkspaceId) scheduleSyncPoll()
+  }
+}
+async function retrySync() {
+  if (!syncJob.value) return
+  const ws = workspaceStore.activeWorkspaceId
+  syncSubmitting.value = true
+  syncError.value = ''
+  try {
+    const res = await axios.post(`/api/analytics/sync/${encodeURIComponent(syncJob.value.jobId)}/retry`)
+    if (ws !== workspaceStore.activeWorkspaceId || disposed) return
+    syncJob.value = res.data
+    scheduleSyncPoll()
+  } catch {
+    if (ws === workspaceStore.activeWorkspaceId) syncError.value = t('analytics.syncRequestError')
+  } finally { if (ws === workspaceStore.activeWorkspaceId) syncSubmitting.value = false }
 }
 
 onMounted(() => {
   platformsStore.fetchMetaConnections()
   load()
   loadInsights()
+  resumeSync()
 })
+onUnmounted(() => { disposed = true; clearTimeout(syncTimer) })
 
 // Re-fetch everything when the account filter changes
 watch(selectedAccount, () => { load(); loadInsights() })
+watch(() => workspaceStore.activeWorkspaceId, () => {
+  clearTimeout(syncTimer)
+  selectedAccount.value = null
+  summary.value = null; posts.value = []; postsTotal.value = 0; insights.value = null
+  syncJob.value = null; syncError.value = ''; syncSubmitting.value = false
+  audit.value = null; channelAudit.value = null
+  platformsStore.fetchMetaConnections()
+  load(); loadInsights(); resumeSync()
+})
 
 // ── Account filter ────────────────────────────────────────────────────────────
 
