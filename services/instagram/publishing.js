@@ -91,6 +91,11 @@ function createInstagramPublisher({ getDb, queue, request, getAccounts, resolveM
       throw Object.assign(new Error('Instagram is still processing this container'), { processing: true });
     } catch (err) {
       if (row.stage === 'publishing') {
+        if (err.response?.status >= 400 && err.response.status < 500) {
+          if (err.response.status === 429) { await save({ stage: 'processing' }); throw err; }
+          await save({ status: 'failed', error: err.response?.data?.error?.message || 'Instagram rejected the publishing request' });
+          return;
+        }
         // Read the same container on a retry; the public mutation is never replayed.
         throw err;
       }

@@ -1,10 +1,10 @@
 <template>
-  <nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+  <nav class="bg-gray-900 border-b border-gray-800 px-3 sm:px-6 py-3 flex flex-wrap lg:flex-nowrap gap-2 items-center justify-between">
     <router-link to="/dashboard" class="text-white font-bold text-lg tracking-tight shrink-0">
       📡 SocialManager
     </router-link>
 
-    <div class="flex items-center gap-1 overflow-x-auto">
+    <div class="flex items-center gap-1 overflow-x-auto order-3 w-full lg:order-none lg:w-auto min-w-0">
       <router-link
         v-for="link in navLinks"
         :key="link.to"

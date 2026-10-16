@@ -23,7 +23,7 @@
       <input
         ref="fileInputRef"
         type="file"
-        accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo"
+        accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,audio/mpeg,audio/mp4,audio/wav"
         multiple
         class="hidden"
         @change="handleFiles"
@@ -183,6 +183,9 @@
               />
 
               <!-- Video thumbnail -->
+              <div v-else-if="file.mimetype.startsWith('audio/')" class="w-full h-full flex items-center justify-center bg-gray-800 p-2">
+                <audio :src="file.url" controls preload="metadata" class="max-w-full" />
+              </div>
               <div v-else class="relative w-full h-full bg-gray-800">
                 <video
                   :src="file.url"
@@ -250,6 +253,7 @@
 
                   <div class="flex flex-col gap-1.5">
                     <button
+                      v-if="!file.mimetype.startsWith('audio/')"
                       @click="useInPost(file.url)"
                       class="w-full py-1 bg-blue-600 hover:bg-blue-500 rounded-md text-xs font-medium text-white transition-colors"
                     >{{ $t('media.useInPost') }}</button>

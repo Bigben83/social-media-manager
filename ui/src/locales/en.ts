@@ -1,4 +1,11 @@
 export default {
+  reelBuilder: {
+    title: 'Create a Reel from images', description: 'Arrange images, review scene text and timing, then render a video. Rendering saves a Media Library asset for review before publishing.',
+    image: 'Choose a Media Library image', add: 'Add scene', refresh: 'Refresh', scene: 'Scene {number}', up: 'Move scene up', down: 'Move scene down', remove: 'Remove',
+    text: 'On-screen text (up to six short lines)', seconds: 'Seconds', transition: 'Transition', cut: 'Cut', fade: 'Fade through black',
+    audio: 'Soundtrack from Media Library (MP3, M4A, WAV or a video with audio)', noAudio: 'No soundtrack', audioRights: 'I have permission to use this soundtrack.',
+    total: '{seconds} seconds', render: 'Render preview', cancel: 'Cancel render', retry: 'Retry saved render', progress: 'Rendering: {completed}/{total}. You can leave and return.', use: 'Attach this Reel',
+  },
   instagramPublishing: {
     processing: 'Instagram is processing this delivery. You can leave this page; it will continue in the background.', checkStatus: 'Check delivery status',
     title: 'Instagram format', check: 'Check account access', feed: 'Feed post', story: 'Story', reel: 'Reel',

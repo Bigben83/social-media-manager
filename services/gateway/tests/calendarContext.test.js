@@ -57,3 +57,13 @@ test('malformed or oversized campaign context is rejected before queueing', asyn
   }
   expect(generateText).not.toHaveBeenCalled();
 });
+
+test('Instagram Story plans retain placement and supply on-screen writing guidance', async () => {
+  generateText.mockResolvedValueOnce(JSON.stringify({ posts: [{ content: 'Meet the team', week: 1 }] }));
+  const response = await request('/ai/content-calendar', { platforms: ['instagram'], month: '2026-11', approvedBrief: brief, instagramPlacement: 'story' });
+  await mockJobs.process({ data: { id: response.json().jobId } });
+  const result = (await mockJobs.get(response.json().jobId, 'campaign')).result;
+  expect(result.instagramPlacement).toBe('story');
+  expect(result.posts[0].instagramPlacement).toBe('story');
+  expect(generateText.mock.calls[0][1].prompt).toContain('Stories have no API caption');
+});

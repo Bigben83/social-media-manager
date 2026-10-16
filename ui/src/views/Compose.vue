@@ -1,8 +1,8 @@
 <template>
-  <div class="flex h-screen overflow-hidden bg-gray-950 text-gray-100">
+  <div class="flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden bg-gray-950 text-gray-100">
 
     <!-- ── Left panel: editor ── -->
-    <div class="flex-1 flex flex-col min-w-0 overflow-y-auto p-6">
+    <div class="flex-1 flex flex-col min-w-0 lg:overflow-y-auto p-4 sm:p-6">
 
       <div class="max-w-2xl w-full mx-auto flex flex-col gap-4">
 
@@ -85,6 +85,8 @@
           </div>
           <p v-if="instagramIssue" class="text-amber-400 text-xs" role="status">{{ instagramIssue }}</p>
         </div>
+
+        <ReelBuilder @apply="applyRenderedReel" />
 
         <!-- Textarea -->
         <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" :class="{ 'border-red-700': overLimit }">
@@ -622,7 +624,7 @@
         </div>
 
         <!-- Success message -->
-        <div v-if="composeStore.lastResult" role="status" class="border rounded-xl px-4 py-3 text-sm" :class="composeStore.lastResult.ok ? 'bg-green-900/30 border-green-700 text-green-300' : 'bg-red-900/30 border-red-700 text-red-300'">
+        <div v-if="composeStore.lastResult" role="status" class="border rounded-xl px-4 py-3 text-sm" :class="composeStore.lastResult.processing ? 'bg-blue-900/30 border-blue-700 text-blue-300' : composeStore.lastResult.ok ? 'bg-green-900/30 border-green-700 text-green-300' : 'bg-red-900/30 border-red-700 text-red-300'">
           <p>{{ composeStore.lastResult.processing ? $t('instagramPublishing.processing') : composeStore.lastResult.ok ? $t('compose.successMessage') : $t('compose.publishFailed') }}</p>
           <button v-if="composeStore.lastResult.processing" @click="composeStore.refreshPostStatus" class="underline">{{ $t('instagramPublishing.checkStatus') }}</button>
           <p v-if="composeStore.lastResult.error">{{ composeStore.lastResult.error }}</p>
@@ -638,7 +640,7 @@
     </div>
 
     <!-- ── Right panel: preview ── -->
-    <div class="w-80 flex-shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
+    <div class="w-full lg:w-80 flex-shrink-0 bg-gray-900 border-t lg:border-t-0 lg:border-l border-gray-800 flex flex-col overflow-hidden max-h-[90vh] lg:max-h-none">
       <div class="px-4 py-3 border-b border-gray-800 flex-shrink-0">
         <p class="text-xs font-semibold text-gray-500 uppercase tracking-widest">{{ $t('compose.preview') }}</p>
       </div>
@@ -668,6 +670,7 @@ import { useHashtagStore } from '../stores/hashtags'
 import { useCompetitorStore } from '../stores/competitors'
 import PostPreview from '../components/compose/PostPreview.vue'
 import ImageFormatEditor from '../components/compose/ImageFormatEditor.vue'
+import ReelBuilder from '../components/compose/ReelBuilder.vue'
 import { COMMON_TIMEZONES, getBrowserTimezone, getTimezoneAbbr, utcToNaiveDatetimeString } from '../utils/timezone'
 type ImageAspect = '1:1' | '16:9' | '9:16' | '3:4'
 
@@ -703,6 +706,7 @@ onMounted(async () => {
     competitorStore.fetchCompetitors(),
   ])
   composeStore.initDestinations()
+  if (['feed','story','reel'].includes(String(route.query.instagramPlacement))) for (const dest of composeStore.destinations) if (dest.platform === 'instagram') dest.instagramPlacement = route.query.instagramPlacement as 'feed' | 'story' | 'reel'
   void refreshInstagramCapabilities()
   void axios.get('/api/media-library').then(res => { coverImages.value = (res.data.files || []).filter((f: { mimetype: string }) => f.mimetype.startsWith('image/')) }).catch(() => {})
 
@@ -1117,6 +1121,11 @@ function inspectVideo(event: Event) {
 function changePlacement(dest: Destination, value: string) {
   dest.instagramPlacement = value as 'feed' | 'story' | 'reel'
   if (value !== 'reel') { dest.shareToFeed = undefined; dest.coverUrl = undefined }
+}
+function applyRenderedReel(url: string) {
+  composeStore.mediaUrl = url
+  mediaLoadError.value = false
+  for (const destination of instagramDestinations.value) { destination.instagramPlacement = 'reel'; destination.shareToFeed ??= false }
 }
 async function refreshInstagramCapabilities() {
   checkingInstagram.value = true

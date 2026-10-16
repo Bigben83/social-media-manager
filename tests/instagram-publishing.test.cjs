@@ -6,7 +6,7 @@ const { validateMetadata } = require('../services/instagram/media');
 async function fixture() {
   const db = fakeDb(), jobs = [], calls = [];
   await db.collection('workspaces').insertOne({ _id: 'one' });
-  const state = { status: 'FINISHED', failPoll: false, failPublish: false, business: true };
+  const state = { status: 'FINISHED', failPoll: false, failPublish: false, rejectPublish: false, business: true };
   const request = {
     get: async (url) => {
       if (url.endsWith('/ig')) return { data: { account_type: state.business ? 'BUSINESS' : 'MEDIA_CREATOR' } };
@@ -15,6 +15,7 @@ async function fixture() {
     },
     post: async (url, _, options) => {
       calls.push({ url, params: options.params });
+      if (url.endsWith('/media_publish') && state.rejectPublish) throw { response: { status: 400, data: { error: { message: 'Publishing permission denied' } } } };
       if (url.endsWith('/media_publish') && state.failPublish) { state.failPublish = false; throw Object.assign(new Error('lost publish'), { code: 'ETIMEDOUT' }); }
       return { data: { id: url.endsWith('/media') ? 'container' : 'post' } };
     },
@@ -57,6 +58,13 @@ test('an unconfirmed publish remains uncertain and never repeats the mutation', 
   await f.publisher.process(f.jobs[0]); await f.publisher.process(f.jobs[0]);
   assert.equal((await f.row()).status, 'uncertain');
   assert.equal(f.calls.filter(c => c.url.endsWith('/media_publish')).length, 1);
+});
+
+test('an explicit Instagram rejection is a known failure, distinct from a lost response', async () => {
+  const f = await fixture(); await f.publisher.submit('one', 'key', f.body);
+  f.state.rejectPublish = true; await f.publisher.process(f.jobs[0]);
+  assert.equal((await f.row()).status, 'failed');
+  assert.equal((await f.row()).error, 'Publishing permission denied');
 });
 test('Stories verify Business eligibility and omit caption/comment publishing', async () => {
   const f = await fixture(), body = { accountId: 'ig', instagramPlacement: 'story', imageUrl: '/media/story.jpg', content: 'Internal text', firstComment: 'Do not send' };

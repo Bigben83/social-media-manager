@@ -41,7 +41,7 @@ In Settings, **Refresh available accounts** and reconnecting also update picture
 
 Content Plan includes an optional campaign context box (up to 20,000 characters). Add the feature to highlight, campaign goals, or numbered text for an introduction series. This context accompanies both brief generation and every platform’s post generation, remains in the recoverable background job, and is saved with the calendar. Changing campaign inputs clears a previously reviewed brief so the next approval uses the current context. Model output should still be reviewed before publishing.
 
-Video shorts for Instagram and Facebook are planned in [the product roadmap](ROADMAP.md). The future workflow will separate script writing from video generation, with provider/model selection, captions, preview, and publishing review.
+Compose includes **Create a Reel from images**: arrange up to 12 workspace images, edit scene text and timing, choose padding or cropping and cut/fade transitions, and optionally add an uploaded soundtrack you have permission to use. Rendering runs as a recoverable background job, exports 1080 × 1920 H.264/AAC video, and saves the result in the Media Library. Preview the finished video before attaching it; rendering never publishes. Failed renders can retry saved scene checkpoints, and active renders can be cancelled. Content Plan also carries the selected Instagram format into generated posts and drafts. Generative video providers and Facebook-specific shorts remain in [the product roadmap](ROADMAP.md).
 
 ## Claude and ChatGPT connectors (MCP)
 
@@ -118,7 +118,7 @@ Live feed notifications use Socket.IO rooms per workspace. The aggregator sends 
 
 ## Development and verification
 
-Install Node 24 or later, then run:
+Install Node 24 or later and FFmpeg/FFprobe with H.264 encoding support, then run the commands below. Docker images install their media tools and fonts automatically.
 
 ```sh
 npm ci

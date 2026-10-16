@@ -2,7 +2,9 @@
 
 Roadmap items describe future work; they are not available features. Implementation and release dates are not committed.
 
-## Instagram and Facebook video shorts
+## Generative Instagram and Facebook video shorts
+
+Instagram image-to-Reel composition is available in Compose: ordered image scenes, on-screen text, timing, cut/fade transitions, optional uploaded audio, durable rendering, and a reviewed 9:16 video asset. The items below concern future generative video and Facebook-specific workflows.
 
 Create short vertical videos/Reels from campaign context, supplied introduction posts, and uploaded brand assets. A writing model can produce the script and storyboard; rendering requires a separate video-generation or video-composition provider with its own capabilities, credentials, pricing, and limits.
 

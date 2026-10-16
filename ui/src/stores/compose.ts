@@ -30,6 +30,7 @@ const CHAR_LIMITS: Record<string, number> = {
 const STANDARD_PLATFORMS = ['twitter', 'mastodon', 'bluesky']
 
 export interface Draft {
+  instagramPlacement?: 'feed' | 'story' | 'reel'
   _id: string
   content: string
   mediaUrl: string
@@ -170,7 +171,7 @@ export const useComposeStore = defineStore('compose', () => {
     destinations.value.forEach((d) => {
       const saved = draft.destinations?.find((s) => s.key === d.key || (s.platform === d.platform && s.accountId === d.accountId))
       d.selected = saved?.selected ?? false
-      d.instagramPlacement = saved?.instagramPlacement
+      d.instagramPlacement = saved?.instagramPlacement || (d.platform === 'instagram' ? draft.instagramPlacement : undefined)
       d.shareToFeed = saved?.shareToFeed
       d.coverUrl = saved?.coverUrl
     })
@@ -181,6 +182,7 @@ export const useComposeStore = defineStore('compose', () => {
     try {
       const payload = {
         content: content.value,
+        instagramPlacement: destinations.value.find(d => d.platform === 'instagram')?.instagramPlacement,
         mediaUrl: mediaUrl.value,
         scheduledAt: scheduledAt.value,
         firstComment: firstComment.value || undefined,
@@ -213,7 +215,7 @@ export const useComposeStore = defineStore('compose', () => {
       const isVideo = /\.(mp4|mov|avi|webm)(?:[?#]|$)/i.test(mediaUrl.value.trim())
       const destPayload = selected.map(({ key, platform, accountId, instagramPlacement, shareToFeed, coverUrl }) => ({
         key, platform,
-        ...(platform === 'instagram' && { instagramPlacement: instagramPlacement || (isVideo ? 'reel' : 'feed'), ...(shareToFeed !== undefined && { shareToFeed }), ...(coverUrl && { coverUrl }) }),
+        ...(platform === 'instagram' && { instagramPlacement: instagramPlacement || (isVideo ? 'reel' : 'feed'), ...((instagramPlacement === 'reel' || (!instagramPlacement && isVideo)) && { shareToFeed: shareToFeed ?? false }), ...(coverUrl && { coverUrl }) }),
         ...(accountId && { accountId }),
         ...(mediaUrl.value.trim() && { [isVideo ? 'videoUrl' : 'imageUrl']: mediaUrl.value.trim() }),
       }))

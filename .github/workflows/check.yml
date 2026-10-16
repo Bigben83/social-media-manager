@@ -10,6 +10,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --no-fund
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
       - run: npm run check
       - run: npm audit --omit=dev --audit-level=high
       - run: cp .env.example .env && docker compose config --quiet

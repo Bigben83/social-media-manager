@@ -23,7 +23,8 @@ function createBackgroundJobs({ getDb, queue, handlers = {}, log = { error() {} 
     const scope = { _id: doc._id, workspaceId: doc.workspaceId };
     async function assertWorkspace() {
       const workspace = await (await getDb()).collection('workspaces').findOne({ _id: doc.workspaceId });
-      if (!workspace || workspace.deleting || !await col.findOne(scope)) throw new Error('Workspace or job no longer available');
+      const current = await col.findOne(scope);
+      if (!workspace || workspace.deleting || !current || current.status === 'cancelled') throw new Error('Workspace or job no longer available');
     }
     const save = async fields => { await assertWorkspace(); await col.updateOne(scope, { $set: { ...fields, updatedAt: new Date() } }); };
     try {
@@ -38,6 +39,7 @@ function createBackgroundJobs({ getDb, queue, handlers = {}, log = { error() {} 
       await save({ status: 'done', result, expiresAt: new Date(Date.now() + 172800000) });
       return result;
     } catch (err) {
+      if ((await col.findOne(scope))?.status === 'cancelled') return;
       await col.updateOne(scope, { $set: { status: 'failed', error: err.message, updatedAt: new Date(), expiresAt: new Date(Date.now() + 172800000) } });
       log.error({ action: 'background_job', jobId: doc._id, type: doc.type, err: err.message });
       throw err;
@@ -56,7 +58,21 @@ function createBackgroundJobs({ getDb, queue, handlers = {}, log = { error() {} 
       }
     }
   }
-  return { submit, get, process, recover };
+  async function cancel(id, workspaceId) {
+    const result = await (await collection()).updateOne({ _id: id, workspaceId, status: { $in: ['queued', 'running'] } }, { $set: { status: 'cancelled', updatedAt: new Date(), expiresAt: new Date(Date.now() + 172800000) } });
+    return !!result.matchedCount;
+  }
+  async function retry(id, workspaceId) {
+    const col = await collection(), doc = await col.findOne({ _id: id, workspaceId, status: 'failed' });
+    if (!doc) return false;
+    const old = await queue.getJob(id);
+    if (old) { if (!['failed', 'completed'].includes(await old.getState())) return false; await old.remove(); }
+    const claimed = await col.updateOne({ _id: id, workspaceId, status: 'failed' }, { $set: { status: 'queued', error: null, expiresAt: null } });
+    if (!claimed.matchedCount) return false;
+    await enqueue(doc);
+    return true;
+  }
+  return { submit, get, process, recover, cancel, retry };
 }
 
 function registerBackgroundJobs(app, getDb, handlers, log) {

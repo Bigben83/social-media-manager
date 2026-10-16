@@ -7,7 +7,7 @@
         <option value="9:16">9:16 · 1080 × 1920</option>
         <option value="4:5">4:5 · 1080 × 1350</option>
       </select>
-      <select v-model="fit" :aria-label="$t('imageFormats.fit')" class="bg-gray-800 rounded p-2">
+      <select v-model="fit" :aria-label="$t('imageFormats.fit')" class="bg-gray-800 rounded p-2 max-w-full">
         <option value="contain">{{ $t('imageFormats.contain') }}</option>
         <option value="cover">{{ $t('imageFormats.cover') }}</option>
       </select>

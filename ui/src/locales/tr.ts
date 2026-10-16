@@ -1,4 +1,11 @@
 export default {
+  reelBuilder: {
+    title: 'Görsellerden Reel oluştur', description: 'Görselleri sıralayın, sahne metinlerini ve sürelerini inceleyin, ardından videoyu oluşturun. Video, yayınlamadan önce incelemek üzere Medya Kütüphanesine kaydedilir.',
+    image: 'Medya Kütüphanesinden görsel seç', add: 'Sahne ekle', refresh: 'Yenile', scene: 'Sahne {number}', up: 'Sahneyi yukarı taşı', down: 'Sahneyi aşağı taşı', remove: 'Kaldır',
+    text: 'Ekran metni (en fazla altı kısa satır)', seconds: 'Saniye', transition: 'Geçiş', cut: 'Kesme', fade: 'Siyaha geçiş',
+    audio: 'Medya Kütüphanesinden ses (MP3, M4A, WAV veya sesli video)', noAudio: 'Ses yok', audioRights: 'Bu sesi kullanma iznim var.',
+    total: '{seconds} saniye', render: 'Önizleme videosu oluştur', cancel: 'Oluşturmayı iptal et', retry: 'Kayıtlı işlemi yeniden dene', progress: 'Oluşturuluyor: {completed}/{total}. Sayfadan ayrılıp geri dönebilirsiniz.', use: 'Bu Reel videosunu ekle',
+  },
   instagramPublishing: {
     processing: 'Instagram bu gönderiyi işliyor. Sayfadan ayrılabilirsiniz; işlem arka planda devam eder.', checkStatus: 'Gönderi durumunu kontrol et',
     title: 'Instagram biçimi', check: 'Hesap erişimini kontrol et', feed: 'Akış gönderisi', story: 'Hikâye', reel: 'Reel',

@@ -82,6 +82,13 @@
           </div>
         </div>
 
+        <label v-if="selectedPlatforms.includes('instagram')" class="block text-xs text-gray-400 mb-4">{{ $t('instagramPublishing.title') }}
+          <select v-model="instagramPlacement" class="ml-2 bg-gray-800 rounded p-2">
+            <option value="feed">{{ $t('instagramPublishing.feed') }} · 3:4</option>
+            <option value="story">{{ $t('instagramPublishing.story') }} · 9:16</option>
+            <option value="reel">{{ $t('instagramPublishing.reel') }} · 9:16</option>
+          </select>
+        </label>
         <!-- Platform checkboxes + action buttons row -->
         <div class="flex flex-wrap items-end gap-4">
           <div class="flex-1 min-w-0">
@@ -341,6 +348,7 @@ const selectedMonth   = ref(new Date().toISOString().slice(0, 7))
 const selectedAccount = ref('')
 const selectedPlatforms = ref<string[]>(['facebook', 'instagram'])
 const postsPerWeek = ref(3)
+const instagramPlacement = ref('feed')
 const campaignContext = ref('')
 const savedPlans = ref<any[]>([])
 const selectedSavedPlan = ref('')
@@ -356,6 +364,7 @@ const chatPrompt = computed(() => [
   'Campaign context and source posts: ' + JSON.stringify(campaignContext.value.trim()),
   'Use numbered source posts for the corresponding opening posts in order. Preserve facts and explicit wording requirements and adapt to each platform. Do not invent product claims.',
   'Write a narrative brief and platform-specific posts, then use save_content_plan with a stable requestId, the exact campaignContext, and this workspaceId. Include week, suggestedDay, suggestedTime, hashtags and postType for each post.',
+  'Instagram format: ' + instagramPlacement.value + '. Include instagramPlacement on each Instagram post. Feed images are 3:4; Story/Reel scenes are 9:16.',
   'Return the saved plan link. Do not publish or schedule anything unless I separately request it and confirm its preview.',
 ].join('\n\n'))
 async function copyChatPrompt(provider: 'claude' | 'chatgpt') {
@@ -375,6 +384,7 @@ async function loadSavedPlan(id: string) {
     selectedMonth.value = saved.month
     selectedPlatforms.value = saved.platforms || []
     selectedAccount.value = saved.accountKey || ''
+    instagramPlacement.value = saved.instagramPlacement || saved.posts?.find((p: any) => p.platform === 'instagram')?.instagramPlacement || 'feed'
     postsPerWeek.value = saved.postsPerWeek || 3
     campaignContext.value = saved.campaignContext || ''
     error.value = ''
@@ -390,7 +400,7 @@ const pendingBrief       = ref<any>(null)
 const pendingBriefMonthName = ref('')
 
 // A reviewed brief belongs to these exact campaign inputs.
-watch([campaignContext, selectedMonth, selectedAccount, () => selectedPlatforms.value.join(',')], () => {
+watch([campaignContext, selectedMonth, selectedAccount, instagramPlacement, () => selectedPlatforms.value.join(',')], () => {
   pendingBrief.value = null
   pendingBriefMonthName.value = ''
   chatPromptCopied.value = false
@@ -471,6 +481,7 @@ async function generateBrief() {
     const result = await runAiJob('/api/ai/content-brief', {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
+      instagramPlacement: instagramPlacement.value,
       month: selectedMonth.value,
       campaignContext: campaignContext.value.trim(),
     })
@@ -493,6 +504,7 @@ async function approveAndGenerate() {
     calendar.value = await runAiJob('/api/ai/content-calendar', {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
+      instagramPlacement: instagramPlacement.value,
       month: selectedMonth.value,
       campaignContext: campaignContext.value.trim(),
       approvedBrief: pendingBrief.value,
@@ -517,6 +529,7 @@ async function generate() {
     calendar.value = await runAiJob('/api/ai/content-calendar', {
       accountKey: selectedAccount.value || undefined,
       platforms: selectedPlatforms.value,
+      instagramPlacement: instagramPlacement.value,
       month: selectedMonth.value,
       campaignContext: campaignContext.value.trim(),
       postsPerWeek: postsPerWeek.value,
@@ -563,7 +576,7 @@ function draftPost(post: any) {
   if (post.week && post.suggestedDay) {
     composeStore.scheduledAt = computeScheduledDate(selectedMonth.value, post.week, post.suggestedDay, post.suggestedTime || '09:00')
   }
-  router.push('/compose')
+  router.push({ path: '/compose', query: post.instagramPlacement ? { instagramPlacement: post.instagramPlacement } : {} })
 }
 
 async function saveAllDrafts() {
@@ -576,6 +589,7 @@ async function saveAllDrafts() {
         : ''
       await axios.post('/api/drafts', {
         content: post.content,
+        instagramPlacement: post.instagramPlacement,
         mediaUrl: '',
         scheduledAt,
         destinations: [],

@@ -43,3 +43,14 @@ test('enqueue failure keeps a durable record for later recovery', async () => {
   expect(db.tables.get('ai_jobs')[0].status).toBe('queued');
   await jobs.recover(); expect(queue.add).toHaveBeenCalledTimes(2);
 });
+
+test('cancelled rendering cannot be overwritten by worker completion', async () => {
+  const db = fakeDb(); await db.collection('workspaces').insertOne({ _id: 'one' });
+  let jobs;
+  const instance = setup(db, { render: async job => { await jobs.cancel(job._id, 'one'); return { published: false }; } });
+  jobs = instance.jobs;
+  const doc = await jobs.submit('one', 'render', {});
+  expect(await jobs.cancel(doc._id, 'other')).toBe(false);
+  await jobs.process({ data: { id: doc._id } });
+  expect((await jobs.get(doc._id, 'one')).status).toBe('cancelled');
+});

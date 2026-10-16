@@ -26,10 +26,11 @@ const { instagramCapabilities, INSTAGRAM_FORMATS } = require('./utils/instagram'
 const { instagramDeliveryResult } = require('./utils/instagramDelivery');
 const { campaignContextBlock, MAX_CAMPAIGN_CONTEXT } = require('./calendarContext');
 const { repairScopedData } = require('./migrations');
+const { registerReels } = require('./reels');
 const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery, refreshExistingAccounts } = require('./meta');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/uploads';
-const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi']);
+const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.avi', '.mp3', '.m4a', '.wav']);
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 
@@ -320,7 +321,7 @@ app.post('/upload', async (request, reply) => {
   const ext = path.extname(data.filename).toLowerCase();
   if (!ALLOWED_EXTENSIONS.has(ext)) {
     data.file.resume();
-    return reply.code(400).send({ error: `File type "${ext}" is not allowed. Allowed: jpg, jpeg, png, gif, webp, mp4, mov, avi` });
+    return reply.code(400).send({ error: `File type "${ext}" is not allowed. Allowed: jpg, jpeg, png, gif, webp, mp4, mov, avi, mp3, m4a, wav` });
   }
 
   const filename = `${crypto.randomUUID()}${ext}`;
@@ -477,11 +478,12 @@ app.delete('/media/:filename', async (request, reply) => {
 
 app.post('/drafts', async (request, reply) => {
   const ws = request.workspaceId;
-  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [], firstComment = '' } = request.body || {};
+  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [], firstComment = '', instagramPlacement } = request.body || {};
+  if (instagramPlacement !== undefined && !['feed','story','reel'].includes(instagramPlacement)) return reply.code(400).send({ error: 'Invalid Instagram placement' });
   const db = await getDb();
   const now = new Date();
   const result = await db.collection('drafts').insertOne({
-    content, mediaUrl, scheduledAt, destinations, firstComment, workspaceId: ws, createdAt: now, updatedAt: now,
+    content, mediaUrl, scheduledAt, destinations, firstComment, ...(instagramPlacement && { instagramPlacement }), workspaceId: ws, createdAt: now, updatedAt: now,
   });
   const draft = await db.collection('drafts').findOne({ _id: result.insertedId });
   return reply.code(201).send(draft);
@@ -510,11 +512,12 @@ app.put('/drafts/:id', async (request, reply) => {
   const { id } = request.params;
   let oid;
   try { oid = new ObjectId(id); } catch { return reply.code(400).send({ error: 'Invalid draft ID' }); }
-  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [], firstComment = '' } = request.body || {};
+  const { content = '', mediaUrl = '', scheduledAt = '', destinations = [], firstComment = '', instagramPlacement } = request.body || {};
+  if (instagramPlacement !== undefined && !['feed','story','reel'].includes(instagramPlacement)) return reply.code(400).send({ error: 'Invalid Instagram placement' });
   const db = await getDb();
   const result = await db.collection('drafts').updateOne(
     { _id: oid, workspaceId: ws },
-    { $set: { content, mediaUrl, scheduledAt, destinations, firstComment, updatedAt: new Date() } }
+    { $set: { content, mediaUrl, scheduledAt, destinations, firstComment, ...(instagramPlacement && { instagramPlacement }), updatedAt: new Date() } }
   );
   if (!result.matchedCount) return reply.code(404).send({ error: 'Draft not found' });
   return { success: true };
@@ -1614,6 +1617,7 @@ app.post('/media/prepare-image', async (request, reply) => {
 
 const backgroundHandlers = {};
 const aiJobs = registerBackgroundJobs(app, getDb, backgroundHandlers, log);
+registerReels(app, { getDb, jobs: aiJobs, handlers: backgroundHandlers, uploadDir: UPLOAD_DIR, origin: APP_BASE_URL });
 function publicAiJob(job) {
   return { jobId: job._id, type: job.type, status: job.status, progress: job.progress,
     result: job.result, error: job.error, createdAt: job.createdAt, updatedAt: job.updatedAt };
@@ -1668,9 +1672,9 @@ function monthNameFor(calMonth) {
 
 const CALENDAR_SYSTEM = 'You are a social media content strategist. Return ONLY a valid JSON object — no markdown, no explanation, no code fences.';
 
-async function generateCalendarBrief(pconf, { brandContext, campaignContext = '', monthName, platforms }) {
+async function generateCalendarBrief(pconf, { brandContext, campaignContext = '', monthName, platforms, instagramPlacement = 'feed' }) {
   const platformNoteKeys = platforms.map((p) => `"${p}": "<one-sentence strategy>"`).join(', ');
-  const prompt = `${brandContext ? brandContext + '\n\n' : ''}Create a brief for the ${monthName} content calendar. Platforms: ${platforms.join(', ')}.
+  const prompt = `${brandContext ? brandContext + '\n\n' : ''}Create a brief for the ${monthName} content calendar. Platforms: ${platforms.join(', ')}. ${platforms.includes('instagram') ? 'Instagram format: ' + instagramPlacement + '. Use 3:4 artwork for feed and 9:16 for Story/Reel scenes.' : ''}
 ${campaignContextBlock(campaignContext)}
 Return this exact JSON:
 {
@@ -1696,10 +1700,10 @@ Return ONLY valid JSON.`;
   return brief;
 }
 
-async function generateCalendarPostsForPlatform(pconf, { brandContext, campaignContext = '', monthName, platform, brief, postsPerWeek }) {
+async function generateCalendarPostsForPlatform(pconf, { brandContext, campaignContext = '', monthName, platform, brief, postsPerWeek, instagramPlacement = 'feed' }) {
   const total = postsPerWeek * 4;
   const hint = CALENDAR_PLATFORM_HINTS[platform] || 'platform-native tone and length.';
-  const prompt = `${brandContext ? brandContext + '\n\n' : ''}Month: ${monthName}. Platform: ${platform}.
+  const prompt = `${brandContext ? brandContext + '\n\n' : ''}Month: ${monthName}. Platform: ${platform}. ${platform === 'instagram' ? 'Format: ' + instagramPlacement + '. Feed uses 3:4 images. Story/Reel scenes use 9:16. For Stories write concise on-screen text and visual directions; Stories have no API caption. For Reels include a strong opening and short scene ideas.' : ''}
 
 Approved content brief (follow it exactly):
 Theme: "${brief.theme}"
@@ -1735,6 +1739,7 @@ Return ONLY this JSON object:
     .slice(0, total)
     .map((p, i) => ({
       platform,
+      ...(platform === 'instagram' && { instagramPlacement }),
       week: Math.min(4, Math.max(1, parseInt(p.week) || (Math.floor(i / postsPerWeek) + 1))),
       suggestedDay: DAYS.includes(p.suggestedDay) ? p.suggestedDay : DAYS[i % 7],
       suggestedTime: /^\d{2}:\d{2}$/.test(p.suggestedTime || '') ? p.suggestedTime : '09:00',
@@ -1747,28 +1752,28 @@ Return ONLY this JSON object:
 }
 
 backgroundHandlers.content_brief = async (job, { checkpoint, setProgress, saveCheckpoint }) => {
-  const { brandContext, campaignContext = '', monthName, activePlatforms, calMonth } = job.payload;
+  const { brandContext, campaignContext = '', monthName, activePlatforms, calMonth, instagramPlacement = 'feed' } = job.payload;
   await setProgress({ step: 'brief', completed: 0, total: 1 });
-  const brief = checkpoint.brief || await generateCalendarBrief(await getActiveProviderConfig(job.workspaceId), { brandContext, campaignContext, monthName, platforms: activePlatforms });
+  const brief = checkpoint.brief || await generateCalendarBrief(await getActiveProviderConfig(job.workspaceId), { brandContext, campaignContext, monthName, platforms: activePlatforms, instagramPlacement });
   await saveCheckpoint({ brief });
   await setProgress({ completed: 1 });
   return { success: true, brief, monthName, month: calMonth, campaignContext };
 };
 backgroundHandlers.content_calendar = async (job, { checkpoint, setProgress, saveCheckpoint, assertWorkspace }) => {
-  const { brandContext, campaignContext = '', monthName, activePlatforms, calMonth, accountKey, postsPerWeek, approvedBrief } = job.payload;
+  const { brandContext, campaignContext = '', monthName, activePlatforms, calMonth, accountKey, postsPerWeek, approvedBrief, instagramPlacement = 'feed' } = job.payload;
   const pconf = await getActiveProviderConfig(job.workspaceId);
   const total = activePlatforms.length + 1;
   let brief = checkpoint.brief || approvedBrief;
-  if (!brief) { await setProgress({ step: 'brief', completed: 0, total }); brief = await generateCalendarBrief(pconf, { brandContext, campaignContext, monthName, platforms: activePlatforms }); }
+  if (!brief) { await setProgress({ step: 'brief', completed: 0, total }); brief = await generateCalendarBrief(pconf, { brandContext, campaignContext, monthName, platforms: activePlatforms, instagramPlacement }); }
   await saveCheckpoint({ brief });
   const byPlatform = { ...checkpoint.byPlatform };
   for (const platform of activePlatforms) {
     await setProgress({ step: platform, completed: Object.keys(byPlatform).length + 1, total });
-    if (!byPlatform[platform]) { byPlatform[platform] = await generateCalendarPostsForPlatform(pconf, { brandContext, campaignContext, monthName, platform, brief, postsPerWeek }); await saveCheckpoint({ byPlatform }); }
+    if (!byPlatform[platform]) { byPlatform[platform] = await generateCalendarPostsForPlatform(pconf, { brandContext, campaignContext, monthName, platform, brief, postsPerWeek, instagramPlacement }); await saveCheckpoint({ byPlatform }); }
   }
   const calendarId = checkpoint.calendarId || new ObjectId().toString();
   await saveCheckpoint({ calendarId });
-  const doc = { accountKey: accountKey || null, campaignContext, month: calMonth, monthName, platforms: activePlatforms, postsPerWeek, brief, posts: activePlatforms.flatMap(p => byPlatform[p]), workspaceId: job.workspaceId, createdAt: job.createdAt };
+  const doc = { accountKey: accountKey || null, campaignContext, instagramPlacement, month: calMonth, monthName, platforms: activePlatforms, postsPerWeek, brief, posts: activePlatforms.flatMap(p => byPlatform[p]), workspaceId: job.workspaceId, createdAt: job.createdAt };
   await assertWorkspace();
   await (await getDb()).collection('content_calendars').updateOne({ _id: new ObjectId(calendarId), workspaceId: job.workspaceId }, { $setOnInsert: doc }, { upsert: true });
   await setProgress({ step: 'done', completed: total, total });
@@ -1777,13 +1782,14 @@ backgroundHandlers.content_calendar = async (job, { checkpoint, setProgress, sav
 for (const [route, type] of [['/ai/content-brief', 'content_brief'], ['/ai/content-calendar', 'content_calendar']]) {
   app.post(route, async (request, reply) => {
     const ws = request.workspaceId;
-    const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw, campaignContext = '' } = request.body || {};
+    const { accountKey, platforms = [], month, approvedBrief, postsPerWeek: rawPpw, campaignContext = '', instagramPlacement = 'feed' } = request.body || {};
+    if (!['feed','story','reel'].includes(instagramPlacement)) return reply.code(400).send({ error: 'Invalid Instagram placement' });
     if (typeof campaignContext !== 'string' || campaignContext.length > MAX_CAMPAIGN_CONTEXT) return reply.code(400).send({ error: 'Campaign context must be text of at most 20,000 characters' });
     if (!Array.isArray(platforms) || !platforms.length || platforms.length > 7 || platforms.some(p => typeof p !== 'string' || !PLATFORM_SERVICES[p])) return reply.code(400).send({ error: 'Select supported platforms' });
     if (month !== undefined && (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month))) return reply.code(400).send({ error: 'Invalid month' });
     if (approvedBrief && (typeof approvedBrief.theme !== 'string' || !Array.isArray(approvedBrief.pillars))) return reply.code(400).send({ error: 'Invalid approved brief' });
     const calMonth = month || new Date().toISOString().slice(0, 7);
-    const job = await aiJobs.submit(ws, type, { accountKey, campaignContext: campaignContext.trim(), activePlatforms: [...new Set(platforms)], calMonth, monthName: monthNameFor(calMonth), postsPerWeek: Math.min(7, Math.max(1, parseInt(rawPpw) || 3)), approvedBrief: approvedBrief || null, brandContext: calendarBrandContext(await loadCalendarProfile(await getDb(), ws, accountKey)) });
+    const job = await aiJobs.submit(ws, type, { accountKey, instagramPlacement, campaignContext: campaignContext.trim(), activePlatforms: [...new Set(platforms)], calMonth, monthName: monthNameFor(calMonth), postsPerWeek: Math.min(7, Math.max(1, parseInt(rawPpw) || 3)), approvedBrief: approvedBrief || null, brandContext: calendarBrandContext(await loadCalendarProfile(await getDb(), ws, accountKey)) });
     return reply.code(202).send(publicAiJob(job));
   });
 }
@@ -1889,18 +1895,17 @@ app.get('/platforms/capabilities', async () => ({ publishing: Object.keys(PLATFO
 // or raw Graph request/error objects leave this endpoint.
 app.get('/instagram/capabilities', async request => {
   const credentials = await getCredentials(request.workspaceId, 'instagram');
-  const accounts = [];
-  for (const account of (credentials?.accounts || []).filter(a => a.selected)) {
+  const accounts = await Promise.all((credentials?.accounts || []).filter(a => a.selected).map(async account => {
     try {
       const token = decryptToken(account.accessToken);
       const profile = await axios.get(`https://graph.facebook.com/v22.0/${account.id}`, { params: { fields: 'id,account_type', access_token: token }, timeout: 15000 });
       const permissions = await axios.get('https://graph.facebook.com/v22.0/me/permissions', { params: { access_token: token }, timeout: 15000 });
       const granted = new Set((permissions.data.data || []).filter(p => p.status === 'granted').map(p => p.permission));
-      accounts.push({ id: account.id, ...instagramCapabilities(profile.data.account_type), publishingPermission: granted.has('instagram_content_publish'), checkedAt: new Date().toISOString() });
+      return { id: account.id, ...instagramCapabilities(profile.data.account_type), publishingPermission: granted.has('instagram_content_publish'), checkedAt: new Date().toISOString() };
     } catch (_) {
-      accounts.push({ id: account.id, ...instagramCapabilities(null), publishingPermission: null, error: 'Could not verify account access. Refresh or reconnect the account.' });
+      return { id: account.id, ...instagramCapabilities(null), publishingPermission: null, error: 'Could not verify account access. Refresh or reconnect the account.' };
     }
-  }
+  }));
   return { accounts };
 });
 
@@ -1925,6 +1930,7 @@ app.post('/post', async (request, reply) => {
       if (existing.response.processing) return reply.send(await refreshImmediatePost(existing, workspaceId));
       return reply.code(existing.statusCode).send(existing.response);
     }
+    if (existing?.destinations?.some(d => d.platform === 'instagram')) return reply.send(await refreshImmediatePost(existing, workspaceId));
     return reply.code(409).send({ error: 'Publishing outcome is not confirmed. Check your accounts before retrying.', uncertain: true });
   }
   const results = await Promise.allSettled(
@@ -1989,7 +1995,8 @@ app.post('/', async (_request, reply) => reply.code(410).send({ error: 'Use /pos
 async function refreshImmediatePost(receipt, workspaceId) {
   const db = await getDb();
   const output = [];
-  for (const result of receipt.response?.results || []) {
+  const prior = receipt.response?.results || (receipt.destinations || []).map(d => ({ platform: d.platform, accountId: d.accountId, instagramPlacement: d.instagramPlacement, success: false, uncertain: true, error: 'The original response was interrupted. Check the account before resending.' }));
+  for (const result of prior) {
     if (result.platform === 'instagram') {
       const destination = receipt.destinations?.find(d => destinationKey(d) === destinationKey(result)) || result;
       const delivery = await db.collection('instagram_deliveries').findOne({ _id: `${workspaceId}:${deliveryKey(receipt._id, destination)}`, workspaceId });
@@ -2000,13 +2007,16 @@ async function refreshImmediatePost(receipt, workspaceId) {
   const status = processing ? 'processing' : allOk ? 'published' : anyOk ? 'partial' : 'failed';
   const response = { success: allOk, processing, status, postId: receipt._id, results: output };
   await db.collection('post_requests').updateOne({ _id: receipt._id, workspaceId }, { $set: { response, statusCode: processing ? 202 : allOk ? 200 : 207 } });
-  await db.collection('posts').updateOne({ _id: receipt._id, workspaceId }, { $set: { status, platformResults: Object.fromEntries(output.map(r => [destinationKey(r), { ...(Array.isArray(r.result) ? r.result[0] : r.result), success: r.success, processing: !!r.processing, ...(r.error && { error: r.error }), ...(r.uncertain && { uncertain: true }) }])), ...(!processing && anyOk && { publishedAt: new Date() }) } });
+  await db.collection('posts').updateOne({ _id: receipt._id, workspaceId }, {
+    $set: { status, platformResults: Object.fromEntries(output.map(r => [destinationKey(r), { ...(Array.isArray(r.result) ? r.result[0] : r.result), success: r.success, processing: !!r.processing, ...(r.error && { error: r.error }), ...(r.uncertain && { uncertain: true }) }])), ...(!processing && anyOk && { publishedAt: new Date() }) },
+    $setOnInsert: { type: 'immediate', content: receipt.content || '', destinations: receipt.destinations || [], firstComment: receipt.firstComment, createdAt: receipt.createdAt },
+  }, { upsert: true });
   return response;
 }
 app.get('/post-status/:postId', async (request, reply) => {
   const receipt = await (await getDb()).collection('post_requests').findOne({ _id: request.params.postId, workspaceId: request.workspaceId });
-  if (!receipt?.response) return reply.code(404).send({ error: 'Delivery was not found in this workspace' });
-  return receipt.response.processing ? refreshImmediatePost(receipt, request.workspaceId) : receipt.response;
+  if (!receipt || (!receipt.response && !receipt.destinations?.some(d => d.platform === 'instagram'))) return reply.code(404).send({ error: 'Delivery was not found in this workspace' });
+  return !receipt.response || receipt.response.processing ? refreshImmediatePost(receipt, request.workspaceId) : receipt.response;
 });
 let instagramReceiptTimer;
 app.addHook('onReady', async () => {
@@ -2015,7 +2025,7 @@ app.addHook('onReady', async () => {
   instagramReceiptTimer = setInterval(async () => {
     if (running) return;
     running = true;
-    try { for (const row of await (await getDb()).collection('post_requests').find({ 'response.processing': true }).toArray()) await refreshImmediatePost(row, row.workspaceId); }
+    try { for (const row of await (await getDb()).collection('post_requests').find({ $or: [{ 'response.processing': true }, { status: 'processing', createdAt: { $lt: new Date(Date.now() - 120000) } }] }).toArray()) if (row.destinations?.some(d => d.platform === 'instagram')) await refreshImmediatePost(row, row.workspaceId); }
     catch (err) { log.error({ action: 'instagram_receipt_refresh', err: err.message }); }
     finally { running = false; }
   }, 10000);

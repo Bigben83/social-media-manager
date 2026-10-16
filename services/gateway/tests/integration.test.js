@@ -20,6 +20,22 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { axios.get.mockReset(); axios.post.mockReset(); });
 
+test('generation normalizes provider proportions and retains the workspace original', async () => {
+  const sharp = require('sharp');
+  const bytes = await sharp({ create: { width: 32, height: 48, channels: 3, background: 'blue' } }).png().toBuffer();
+  await db.collection('platform_credentials').updateOne({ _id: 'openai_config' }, { $set: { apiKey: 'test-image-key' } }, { upsert: true });
+  axios.post.mockResolvedValueOnce({ data: { data: [{ b64_json: bytes.toString('base64') }] } });
+  const response = await request('POST', '/ai/image', 'test', { prompt: 'A vertical scene', provider: 'openai', size: '9:16' });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({ width: 1080, height: 1920, aspect: '9:16', adjusted: true });
+  const files = await db.collection('media_files').find({ workspaceId: 'test' }).toArray();
+  const original = files.find(f => f.url === response.json().originalUrl);
+  const prepared = files.find(f => f.url === response.json().mediaUrl);
+  expect(original).toMatchObject({ width: 32, height: 48 });
+  expect(prepared).toMatchObject({ width: 1080, height: 1920, mimetype: 'image/jpeg' });
+  await db.collection('platform_credentials').deleteOne({ _id: 'openai_config' });
+});
+
 test('pending Instagram receipts reconcile without sending a second post and stay workspace scoped', async () => {
   const { deliveryKey } = require('../utils/publishing');
   const destination = { platform: 'instagram', accountId: 'ig-pending', instagramPlacement: 'story', imageUrl: '/media/story.jpg' };
