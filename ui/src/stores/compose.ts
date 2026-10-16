@@ -58,7 +58,26 @@ export const useComposeStore = defineStore('compose', () => {
   const draftId = ref<string | null>(null)
   let submissionFingerprint = ''
   let submissionId = ''
-  const lastResult = ref<{ ok: boolean; error?: string; scheduled?: boolean; results?: { platform: string; accountId?: string; success: boolean; error?: string; uncertain?: boolean }[] } | null>(null)
+  const lastResult = ref<{ ok: boolean; processing?: boolean; postId?: string; error?: string; scheduled?: boolean; results?: { platform: string; accountId?: string; instagramPlacement?: string; success: boolean; processing?: boolean; error?: string; uncertain?: boolean }[] } | null>(null)
+  let pendingContent = '', pendingMedia = '', checkingDelivery = false
+  const pendingKey = () => 'instagram.pending.' + String(axios.defaults.headers.common['X-Workspace-Id'] || 'default')
+  async function refreshPostStatus() {
+    if (checkingDelivery) return
+    let postId = lastResult.value?.processing ? lastResult.value.postId : ''
+    try { postId ||= sessionStorage.getItem(pendingKey()) || '' } catch { /* no browser storage */ }
+    if (!postId) return
+    checkingDelivery = true
+    try {
+      const response = await axios.get('/api/post-status/' + encodeURIComponent(postId))
+      const data = response.data
+      lastResult.value = { ok: data.success === true, processing: !!data.processing, postId, results: data.results }
+      if (!data.processing) {
+        try { sessionStorage.removeItem(pendingKey()) } catch { /* no browser storage */ }
+        if (data.success && content.value === pendingContent && mediaUrl.value === pendingMedia && !selectedDestinations.value.length) reset(true)
+      }
+    } catch { /* Keep the pending receipt; a lost status request never resends. */ }
+    finally { checkingDelivery = false }
+  }
 
   function charLimit(platform: string): number {
     return CHAR_LIMITS[platform] ?? 9999
@@ -222,6 +241,13 @@ export const useComposeStore = defineStore('compose', () => {
         }
         const response = await axios.post('/api/post', payload, { headers: { 'Idempotency-Key': submissionId } })
         const results = response.data.results || []
+        if (response.data.processing) {
+          pendingContent = content.value; pendingMedia = mediaUrl.value
+          lastResult.value = { ok: false, processing: true, postId: response.data.postId, results }
+          try { sessionStorage.setItem(pendingKey(), response.data.postId) } catch { /* no browser storage */ }
+          for (const dest of selected) if (results.some((r: { platform: string; accountId?: string; success?: boolean; processing?: boolean; uncertain?: boolean }) => r.platform === dest.platform && r.accountId === dest.accountId && (r.success || r.processing || r.uncertain))) dest.selected = false
+          return false
+        }
         const ok = results.length > 0 && results.every((result: { success: boolean }) => result.success)
         lastResult.value = { ok, results }
         if (!ok) {
@@ -248,6 +274,6 @@ export const useComposeStore = defineStore('compose', () => {
     content, mediaUrl, scheduledAt, firstComment, destinations, sending, savingDraft, draftId, lastResult,
     selectedDestinations, activeCharLimit,
     charLimit, isOverLimit,
-    initDestinations, toggleDestination, reset, loadDraft, saveDraft, post,
+    initDestinations, toggleDestination, reset, loadDraft, saveDraft, post, refreshPostStatus,
   }
 })

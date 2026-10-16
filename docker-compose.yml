@@ -152,7 +152,8 @@ services:
     restart: unless-stopped
     env_file: .env
     networks: [socialMediaManagerNetwork]
-    depends_on: [mongodb]
+    depends_on: [mongodb, redis]
+    stop_grace_period: 150s
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s

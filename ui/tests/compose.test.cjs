@@ -89,3 +89,18 @@ test('Instagram placement and Reel options survive draft reload, save and dispat
   assert.equal(sent.destinations[0].coverUrl, '/media/cover.jpg');
   assert.equal(sent.destinations[0].shareToFeed, false);
 });
+
+test('Instagram processing keeps the content and checks its receipt without reposting', async () => {
+  store.destinations = [{ key: 'instagram:one', platform: 'instagram', accountId: 'one', selected: true, instagramPlacement: 'reel' }];
+  store.mediaUrl = '/media/reel.mp4'; let posts = 0;
+  axios.post = async () => { posts++; return { data: { processing: true, postId: 'receipt', results: [{ platform: 'instagram', accountId: 'one', processing: true }] } }; };
+  assert.equal(await store.post(), false);
+  assert.equal(store.lastResult.processing, true);
+  assert.equal(store.content, 'Keep this post');
+  assert.equal(store.destinations[0].selected, false);
+  axios.get = async () => ({ data: { success: true, processing: false, results: [{ platform: 'instagram', accountId: 'one', success: true }] } });
+  store.content = 'A newer edit';
+  await store.refreshPostStatus();
+  assert.equal(store.lastResult.ok, true); assert.equal(posts, 1);
+  assert.equal(store.content, 'A newer edit');
+});

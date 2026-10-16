@@ -1,5 +1,6 @@
 export default {
   instagramPublishing: {
+    processing: 'Instagram is processing this delivery. You can leave this page; it will continue in the background.', checkStatus: 'Check delivery status',
     title: 'Instagram format', check: 'Check account access', feed: 'Feed post', story: 'Story', reel: 'Reel',
     businessRequired: 'Stories require a verified Instagram Business account. Check account access or reconnect.',
     permissionRequired: 'Instagram publishing permission is missing. Reconnect this account.',

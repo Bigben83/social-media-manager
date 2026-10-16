@@ -91,6 +91,7 @@
                       class="flex items-start gap-2 text-xs"
                     >
                       <span v-if="result.success" class="text-green-400 shrink-0 mt-px">✓</span>
+                      <span v-else-if="result.processing" class="text-blue-400 shrink-0 mt-px">…</span>
                       <span v-else class="text-red-400 shrink-0 mt-px">✗</span>
                       <span class="text-gray-400 shrink-0">{{ result.pageName || key }}</span>
                       <span v-if="result.success && result.postId" class="text-gray-600 font-mono truncate">
@@ -488,6 +489,7 @@ const composeStore = useComposeStore()
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface PlatformResult {
+  processing?: boolean
   success: boolean
   postId?: string
   pageId?: string

@@ -4,7 +4,8 @@ const BasePlatformService = require('./utils/BasePlatformService');
 const { getDb } = require('./utils/MongoDBConnector');
 const { decryptToken, warnIfNoKey } = require('./utils/crypto');
 const { getWorkspaceCredential } = require('./utils/credentials');
-const { instagramPlacement, instagramValidation, instagramContainerParams } = require('./utils/instagram');
+const { createInstagramPublisher } = require('./publishing');
+const { createMediaValidator } = require('./media');
 
 const GRAPH_API = 'https://graph.facebook.com/v22.0';
 // Instagram's Container API requires a publicly accessible image URL.
@@ -30,26 +31,32 @@ function resolveInstagramMediaUrl(url) {
   return url;
 }
 
-// Instagram's two-step publish requires the container to reach FINISHED status before
-// calling media_publish. Poll up to maxAttempts × intervalMs ms before giving up.
-async function waitForContainerReady(creationId, accessToken, maxAttempts = 12, intervalMs = 3000) {
-  for (let i = 0; i < maxAttempts; i++) {
-    const res = await axios.get(`${GRAPH_API}/${creationId}`, {
-      params: { fields: 'status_code,status', access_token: accessToken },
-    });
-    const { status_code, status } = res.data;
-    if (status_code === 'FINISHED') return;
-    if (status_code === 'ERROR') throw new Error(`Instagram media processing failed: ${status || 'unknown error'}`);
-    if (status_code === 'EXPIRED') throw new Error('Instagram media container expired before it could be published');
-    // IN_PROGRESS — wait and retry
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  throw new Error('Instagram media container did not finish processing in time (36s). Try again or use a faster-loading image URL.');
-}
-
 class InstagramService extends BasePlatformService {
   constructor() {
     super('instagram');
+    let queue, worker, connection, recovery;
+    this.publisher = createInstagramPublisher({ getDb, request: axios, getAccounts: ws => this._getAccounts(ws), resolveMediaUrl: resolveInstagramMediaUrl, validateMedia: createMediaValidator({ getDb, resolveMediaUrl: resolveInstagramMediaUrl }), queue: { add: (...args) => queue.add(...args), getJob: (...args) => queue.getJob(...args) } });
+    this.handlePublish = async (request, reply, workspaceId, key) => {
+      try {
+        const result = await this.publisher.submit(workspaceId, key, request.body || {});
+        return reply.code(result.processing ? 202 : result.success ? 200 : result.uncertain ? 409 : 400).send({ platform: 'instagram', ...result });
+      } catch (err) { return reply.code(err.statusCode || 503).send({ success: false, error: err.statusCode ? err.message : 'Instagram delivery is unavailable', retryable: !err.statusCode }); }
+    };
+    this.app.addHook('onReady', async () => {
+      if (process.env.NODE_ENV === 'test') return;
+      const { Queue, Worker } = require('bullmq');
+      const Redis = require('ioredis');
+      connection = new Redis(process.env.REDIS_URL || 'redis://redis:6379', { maxRetriesPerRequest: null });
+      connection.on('error', err => this.log.error({ action: 'instagram_redis', err: err.message }));
+      queue = new Queue('instagram-publish', { connection });
+      worker = new Worker('instagram-publish', job => this.publisher.process(job), { connection, concurrency: 2, lockDuration: 120000 });
+      worker.on('error', err => this.log.error({ action: 'instagram_worker', err: err.message }));
+      worker.on('failed', (job, err) => { void this.publisher.failed(job, err).catch(error => this.log.error({ action: 'instagram_failure_save', err: error.message })); });
+      await this.publisher.recover();
+      recovery = setInterval(() => { void this.publisher.recover().catch(err => this.log.error({ action: 'instagram_recover', err: err.message })); }, 30000);
+      recovery.unref();
+    });
+    this.app.addHook('onClose', async () => { clearInterval(recovery); if (worker) await worker.close(); if (queue) await queue.close(); if (connection) await connection.quit(); });
   }
 
   // Read selected Instagram Business Accounts from MongoDB.
@@ -163,70 +170,12 @@ class InstagramService extends BasePlatformService {
     return allItems;
   }
 
-  // Instagram requires media (image_url or video_url) — text-only posts are not supported.
-  async publishPost(post = {}) {
-    const { content, imageUrl, videoUrl, accountId, firstComment, workspaceId = 'default' } = post;
-    const invalid = instagramValidation(post);
-    if (invalid) throw Object.assign(new Error(invalid), { code: 'VALIDATION' });
-    const placement = instagramPlacement(post);
-    const allAccounts = await this._getAccounts(workspaceId);
-    if (allAccounts.length === 0) throw new Error('No Instagram accounts connected');
-
-    if (!imageUrl && !videoUrl) {
-      throw new Error('Instagram requires imageUrl or videoUrl — text-only posts are not supported by the Graph API');
-    }
-
-    // If a specific account is requested, target only that account
-    const accounts = accountId ? allAccounts.filter((a) => a.id === accountId) : allAccounts;
-    if (accounts.length === 0) throw new Error(`Instagram account ${accountId} not found or not connected`);
-
-    const results = [];
-    for (const account of accounts) {
-      if (placement === 'story') {
-        const profile = await axios.get(`${GRAPH_API}/${account.id}`, { params: { fields: 'account_type', access_token: account.accessToken }, timeout: 15000 });
-        if (profile.data.account_type !== 'BUSINESS') throw Object.assign(new Error('Instagram Stories publishing requires a Business account'), { code: 'VALIDATION' });
-      }
-      const containerParams = { ...instagramContainerParams(post, resolveInstagramMediaUrl), access_token: account.accessToken };
-
-      const containerRes = await axios.post(
-        `${GRAPH_API}/${account.id}/media`,
-        null,
-        { params: containerParams }
-      );
-      const creationId = containerRes.data.id;
-
-      // Wait for Instagram to finish processing the media before publishing
-      await waitForContainerReady(creationId, account.accessToken);
-
-      const publishRes = await axios.post(
-        `${GRAPH_API}/${account.id}/media_publish`,
-        null,
-        { params: { creation_id: creationId, access_token: account.accessToken } }
-      );
-      const postId = publishRes.data.id;
-
-      if (placement !== 'story' && firstComment?.trim()) {
-        try {
-          await axios.post(`${GRAPH_API}/${postId}/comments`, null, {
-            params: { message: firstComment.trim(), access_token: account.accessToken },
-            timeout: 10000,
-          });
-          this.app.log.info({ action: 'first_comment', platform: 'instagram', postId, outcome: 'success' });
-        } catch (err) {
-          this.app.log.warn({ action: 'first_comment', platform: 'instagram', postId, outcome: 'failure', err: err.response?.data?.error?.message || err.message });
-        }
-      }
-
-      results.push({ accountId: account.id, username: account.username, postId, instagramPlacement: post.instagramPlacement, placement });
-    }
-
-    return results;
-  }
 }
 
 if (require.main === module) {
   const service = new InstagramService();
   warnIfNoKey('instagram');
   service.start(process.env.PORT || 3005);
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => service.app.close().then(() => process.exit(0)));
 }
-module.exports = { InstagramService, resolveInstagramMediaUrl, waitForContainerReady };
+module.exports = { InstagramService, resolveInstagramMediaUrl };

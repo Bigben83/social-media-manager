@@ -45,6 +45,7 @@ class BasePlatformService {
       const workspaceId = request.headers['x-workspace-id'] || 'default';
       const key = request.headers['idempotency-key'];
       if (key && (typeof key !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(key))) return reply.code(400).send({ success: false, error: 'Invalid idempotency key', retryable: false });
+      if (this.handlePublish) return this.handlePublish(request, reply, workspaceId, key);
       let receipts;
       const receiptId = key ? `${workspaceId}:${this.platformName}:${key}` : null;
       if (receiptId) {

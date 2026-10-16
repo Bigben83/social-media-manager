@@ -204,7 +204,7 @@ function createToolServer({ db, auth, provider, callGateway, callScheduler, publ
     await col.updateOne(query,{$set:{state:'complete',result,updatedAt:new Date()}});return result;
   },{destructive:true,openWorld:true,idempotent:true,dispatch:true});
   tool('get_post_status','Read the outcome of a publishing/scheduling preview without sending it again.',{workspaceId:workspaceSchema,previewId:z.string().uuid()},'social:read',async({workspaceId,previewId})=>{
-    const row=await db.collection('mcp_post_previews').findOne({_id:previewId,workspaceId,grantId:auth.extra.grantId});if(!row)throw new Error('Preview not found');return {state:row.state,result:row.result||null,updatedAt:row.updatedAt||row.createdAt};
+    const row=await db.collection('mcp_post_previews').findOne({_id:previewId,workspaceId,grantId:auth.extra.grantId});if(!row)throw new Error('Preview not found');if(row.result?.processing&&row.result.postId){row.result=await callGateway('GET','/post-status/'+encodeURIComponent(row.result.postId),null,workspaceId);await db.collection('mcp_post_previews').updateOne({_id:previewId,workspaceId},{$set:{result:row.result,updatedAt:new Date()}});}return {state:row.result?.processing?'processing':row.state,result:row.result||null,updatedAt:row.updatedAt||row.createdAt};
   },{readOnly:true});
   return server;
 }

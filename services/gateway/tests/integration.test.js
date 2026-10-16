@@ -20,6 +20,22 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); fs.rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true }); });
 beforeEach(() => { axios.get.mockReset(); axios.post.mockReset(); });
 
+test('pending Instagram receipts reconcile without sending a second post and stay workspace scoped', async () => {
+  const { deliveryKey } = require('../utils/publishing');
+  const destination = { platform: 'instagram', accountId: 'ig-pending', instagramPlacement: 'story', imageUrl: '/media/story.jpg' };
+  axios.post.mockResolvedValue({ data: { success: false, processing: true, retryable: true } });
+  const accepted = await request('POST', '/post', 'posting', { content: '', destinations: [destination] });
+  expect(accepted.statusCode).toBe(202);
+  const postId = accepted.json().postId;
+  const calls = axios.post.mock.calls.length;
+  await db.collection('instagram_deliveries').insertOne({ _id: 'posting:' + deliveryKey(postId, destination), workspaceId: 'posting', status: 'published', result: { postId: 'confirmed-story' } });
+  const status = await request('GET', '/post-status/' + encodeURIComponent(postId), 'posting');
+  expect(status.json().success).toBe(true);
+  expect(status.json().results[0].result[0].postId).toBe('confirmed-story');
+  expect(axios.post.mock.calls.length).toBe(calls);
+  expect((await request('GET', '/post-status/' + encodeURIComponent(postId), 'other')).statusCode).toBe(404);
+});
+
 test('Instagram placement and cover options reach the adapter and distinct receipts', async () => {
   axios.post.mockResolvedValue({ data: { success: true, result: [{ postId: 'ig-post' }] } });
   const response = await request('POST', '/post', 'posting', { content: 'Caption', destinations: [{ platform: 'instagram', accountId: 'ig', instagramPlacement: 'reel', videoUrl: '/media/reel.mp4', coverUrl: '/media/cover.jpg', shareToFeed: false }] });

@@ -623,9 +623,10 @@
 
         <!-- Success message -->
         <div v-if="composeStore.lastResult" role="status" class="border rounded-xl px-4 py-3 text-sm" :class="composeStore.lastResult.ok ? 'bg-green-900/30 border-green-700 text-green-300' : 'bg-red-900/30 border-red-700 text-red-300'">
-          <p>{{ composeStore.lastResult.ok ? $t('compose.successMessage') : $t('compose.publishFailed') }}</p>
+          <p>{{ composeStore.lastResult.processing ? $t('instagramPublishing.processing') : composeStore.lastResult.ok ? $t('compose.successMessage') : $t('compose.publishFailed') }}</p>
+          <button v-if="composeStore.lastResult.processing" @click="composeStore.refreshPostStatus" class="underline">{{ $t('instagramPublishing.checkStatus') }}</button>
           <p v-if="composeStore.lastResult.error">{{ composeStore.lastResult.error }}</p>
-          <p v-for="(result, index) in composeStore.lastResult.results" :key="index">{{ result.platform }}{{ result.accountId ? ': ' + result.accountId : '' }} — {{ result.success ? $t('compose.deliverySucceeded') : result.error }}</p>
+          <p v-for="(result, index) in composeStore.lastResult.results" :key="index">{{ result.platform }}{{ result.accountId ? ': ' + result.accountId : '' }} — {{ result.processing ? $t('instagramPublishing.processing') : result.success ? $t('compose.deliverySucceeded') : result.error }}</p>
         </div>
 
         <!-- Draft saved message -->
@@ -656,7 +657,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
@@ -689,8 +690,11 @@ const mediaLoadError = ref(false)
 const activePreviewKey = ref('')
 const draftSavedBanner = ref(false)
 const firstCommentOpen = ref(false)
+const deliveryTimer = setInterval(() => { if (composeStore.lastResult?.processing) void composeStore.refreshPostStatus() }, 5000)
+onUnmounted(() => clearInterval(deliveryTimer))
 
 onMounted(async () => {
+  void composeStore.refreshPostStatus()
   await Promise.all([
     platformsStore.fetchStatuses(),
     platformsStore.fetchMetaConnections(),
@@ -896,6 +900,7 @@ const charNearLimit = computed(() =>
 )
 
 const canPost = computed(() =>
+  !composeStore.lastResult?.processing &&
   (!!composeStore.content.trim() || (instagramDestinations.value.length > 0 && composeStore.selectedDestinations.every(d => d.platform === 'instagram' && placementFor(d) === 'story'))) &&
   composeStore.selectedDestinations.length > 0 &&
   !overLimit.value &&

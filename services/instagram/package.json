@@ -8,12 +8,13 @@
   },
   "dependencies": {
     "axios": "^1.16.0",
-    "fastify": "^5.12.7",
-    "mongodb": "^6.20.0",
+    "bullmq": "^5.81.5",
     "dotenv": "^16.6.1",
+    "fastify": "^5.12.7",
+    "ioredis": "^5.11.1",
+    "mongodb": "^6.20.0",
     "pino": "^10.4.0"
   },
-  "devDependencies": {},
   "engines": {
     "node": ">=24"
   }

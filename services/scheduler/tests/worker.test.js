@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fakeDb = require('../../gateway/tests/fakeDb');
 const { createPostProcessor } = require('../worker');
 const { validatePost, scheduleDelay } = require('../utils/publishing');
+const { deliveryKey } = require('../utils/publishing');
 async function setup(post) {
   const db = fakeDb(); await db.collection('workspaces').insertOne({ _id: 'test' });
   const calls = [];
@@ -32,6 +33,19 @@ test('does not publish from a deleted workspace', async () => {
   const { db, process, calls, job } = await setup(async () => ({ data: { success: true } }));
   await db.collection('workspaces').deleteOne({ _id: 'test' });
   await process(job); assert.equal(calls.length, 0);
+});
+
+test('Instagram processing defers the job and reconciles the same durable receipt', async () => {
+  const { db, process, calls, job } = await setup(async () => ({ data: { success: false, processing: true } }));
+  const destination = { platform: 'instagram', accountId: 'ig', instagramPlacement: 'reel', videoUrl: '/media/reel.mp4' };
+  job.data.destinations = [destination];
+  let deferred = 0; job.moveToDelayed = async () => { deferred++; };
+  await assert.rejects(process(job), /bullmq:movedToDelayed/);
+  assert.equal(deferred, 1);
+  await db.collection('instagram_deliveries').insertOne({ _id: 'test:' + deliveryKey('scheduled:test:job', destination), workspaceId: 'test', status: 'published', result: { postId: 'reel' } });
+  await process(job);
+  assert.equal(calls.length, 1);
+  assert.equal((await db.collection('scheduled_jobs').findOne({ bullJobId: 'job' })).status, 'published');
 });
 test('rejects malformed and unsupported destinations before publishing', () => {
   assert.equal(validatePost('Post', [{ platform: 'facebook', accountId: 'one' }]), null);

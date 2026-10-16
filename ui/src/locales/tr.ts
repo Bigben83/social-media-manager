@@ -1,5 +1,6 @@
 export default {
   instagramPublishing: {
+    processing: 'Instagram bu gönderiyi işliyor. Sayfadan ayrılabilirsiniz; işlem arka planda devam eder.', checkStatus: 'Gönderi durumunu kontrol et',
     title: 'Instagram biçimi', check: 'Hesap erişimini kontrol et', feed: 'Akış gönderisi', story: 'Hikâye', reel: 'Reel',
     businessRequired: 'Hikâyeler doğrulanmış Instagram İşletme hesabı gerektirir. Hesap erişimini kontrol edin veya yeniden bağlanın.',
     permissionRequired: 'Instagram yayın izni eksik. Bu hesabı yeniden bağlayın.',

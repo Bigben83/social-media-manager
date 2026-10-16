@@ -23,6 +23,7 @@ const { registerBackgroundJobs } = require('./jobs');
 const { detectUploadType } = require('./media');
 const { imageMetadata, normalizeImage, saveImageAsset } = require('./imageAssets');
 const { instagramCapabilities, INSTAGRAM_FORMATS } = require('./utils/instagram');
+const { instagramDeliveryResult } = require('./utils/instagramDelivery');
 const { campaignContextBlock, MAX_CAMPAIGN_CONTEXT } = require('./calendarContext');
 const { repairScopedData } = require('./migrations');
 const { discoverAccounts, discoverPage, mergeDiscovery, publicDiscovery, refreshExistingAccounts } = require('./meta');
@@ -223,6 +224,7 @@ app.delete('/workspaces/:id', async (request, reply) => {
   if (id === 'default') return reply.code(400).send({ error: 'Cannot delete the default workspace' });
   const db = await getDb(); const workspace = await db.collection('workspaces').findOne({ _id: id });
   if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
+  if (await db.collection('instagram_deliveries').findOne({ workspaceId: id, status: { $in: ['queued', 'processing'] } })) return reply.code(409).send({ error: 'Instagram delivery is active. Wait for its outcome before deleting this workspace.' });
   await db.collection('workspaces').updateOne({ _id: id }, { $set: { deleting: true } });
   try {
     await axios.delete(`${process.env.SCHEDULER_SERVICE_URL || 'http://scheduler:3011'}/workspaces/${encodeURIComponent(id)}/jobs`, { headers: { 'X-Workspace-Id': id }, timeout: 30000 });
@@ -235,7 +237,7 @@ app.delete('/workspaces/:id', async (request, reply) => {
     if (!file.filename || /[\\/]/.test(file.filename) || file.filename.includes('..')) continue;
     try { await fs.promises.unlink(path.join(UPLOAD_DIR, file.filename)); } catch (err) { if (err.code !== 'ENOENT') log.warn({ action: 'workspace_media_cleanup', workspaceId: id, outcome: 'failure' }); }
   }
-  const collections = ['platform_credentials','competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','media_folders','feeds','scheduled_jobs','post_requests','publish_requests','oauth_states','ai_jobs','mcp_local_sessions', 'mcp_post_previews','mcp_audit'];
+  const collections = ['platform_credentials','competitors','hashtag_groups','hashtag_stats','account_profiles','content_calendars','bulk_draft_batches','drafts','posts','post_metrics','media_files','media_folders','feeds','scheduled_jobs','post_requests','publish_requests','instagram_deliveries','oauth_states','ai_jobs','mcp_local_sessions', 'mcp_post_previews','mcp_audit'];
   await Promise.all(collections.map(name => db.collection(name).deleteMany({ workspaceId: id })));
   await db.collection('workspaces').deleteOne({ _id: id });
   tokenExpiryCache.delete(id);
@@ -1914,12 +1916,15 @@ app.post('/post', async (request, reply) => {
   const postId = `immediate:${workspaceId}:${requestKey}`;
   const receipts = (await getDb()).collection('post_requests');
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ content, destinations, firstComment })).digest('hex');
-  try { await receipts.insertOne({ _id: postId, workspaceId, fingerprint, status: 'processing', createdAt: new Date() }); }
+  try { await receipts.insertOne({ _id: postId, workspaceId, fingerprint, content, firstComment, destinations, status: 'processing', createdAt: new Date() }); }
   catch (err) {
     if (err.code !== 11000) throw err;
     const existing = await receipts.findOne({ _id: postId, workspaceId });
     if (existing?.fingerprint !== fingerprint) return reply.code(409).send({ error: 'Publishing request changed; start a new submission' });
-    if (existing?.response) return reply.code(existing.statusCode).send(existing.response);
+    if (existing?.response) {
+      if (existing.response.processing) return reply.send(await refreshImmediatePost(existing, workspaceId));
+      return reply.code(existing.statusCode).send(existing.response);
+    }
     return reply.code(409).send({ error: 'Publishing outcome is not confirmed. Check your accounts before retrying.', uncertain: true });
   }
   const results = await Promise.allSettled(
@@ -1942,9 +1947,10 @@ app.post('/post', async (request, reply) => {
       : { platform: destinations[i].platform, accountId: destinations[i].accountId, instagramPlacement: destinations[i].instagramPlacement, success: false, ...failureResult(r.reason) }
   );
 
-  const anyFailed = output.some((r) => !r.success);
+  const anyProcessing = output.some(r => r.processing);
+  const anyFailed = output.some((r) => !r.success && !r.processing);
   const anySucceeded = output.some((r) => r.success);
-  const postStatus = anyFailed && anySucceeded ? 'partial' : anyFailed ? 'failed' : 'published';
+  const postStatus = anyProcessing ? 'processing' : anyFailed && anySucceeded ? 'partial' : anyFailed ? 'failed' : 'published';
 
   // Record the post for analytics
   try {
@@ -1958,7 +1964,7 @@ app.post('/post', async (request, reply) => {
       platformResults: Object.fromEntries(
         output.map((r) => [
           destinationKey(r),
-          { ...(Array.isArray(r.result) ? r.result[0] : r.result), success: r.success, ...(r.error && { error: r.error }), ...(r.uncertain && { uncertain: true }) },
+          { ...(Array.isArray(r.result) ? r.result[0] : r.result), success: r.success, ...(r.processing && { processing: true }), ...(r.error && { error: r.error }), ...(r.uncertain && { uncertain: true }) },
         ])
       ),
       status: postStatus,
@@ -1970,8 +1976,8 @@ app.post('/post', async (request, reply) => {
     app.log.warn({ action: 'post_record', outcome: 'failure', err: err.message });
   }
 
-  const response = { success: !anyFailed, status: postStatus, postId, results: output };
-  const statusCode = anyFailed ? 207 : 200;
+  const response = { success: !anyFailed && !anyProcessing, ...(anyProcessing && { processing: true }), status: postStatus, postId, results: output };
+  const statusCode = anyProcessing ? 202 : anyFailed ? 207 : 200;
   await receipts.updateOne({ _id: postId, workspaceId }, { $set: { status: 'done', statusCode, response, updatedAt: new Date() } });
   return reply.code(statusCode).send(response);
 });
@@ -1979,6 +1985,43 @@ app.post('/post', async (request, reply) => {
 // ─── Legacy post route ────────────────────────────────────────────────────────
 
 app.post('/', async (_request, reply) => reply.code(410).send({ error: 'Use /post to publish to selected accounts' }));
+
+async function refreshImmediatePost(receipt, workspaceId) {
+  const db = await getDb();
+  const output = [];
+  for (const result of receipt.response?.results || []) {
+    if (result.platform === 'instagram') {
+      const destination = receipt.destinations?.find(d => destinationKey(d) === destinationKey(result)) || result;
+      const delivery = await db.collection('instagram_deliveries').findOne({ _id: `${workspaceId}:${deliveryKey(receipt._id, destination)}`, workspaceId });
+      output.push(delivery ? { platform: result.platform, accountId: result.accountId, instagramPlacement: result.instagramPlacement, ...instagramDeliveryResult(delivery) } : result);
+    } else output.push(result);
+  }
+  const processing = output.some(r => r.processing), allOk = output.length > 0 && output.every(r => r.success), anyOk = output.some(r => r.success);
+  const status = processing ? 'processing' : allOk ? 'published' : anyOk ? 'partial' : 'failed';
+  const response = { success: allOk, processing, status, postId: receipt._id, results: output };
+  await db.collection('post_requests').updateOne({ _id: receipt._id, workspaceId }, { $set: { response, statusCode: processing ? 202 : allOk ? 200 : 207 } });
+  await db.collection('posts').updateOne({ _id: receipt._id, workspaceId }, { $set: { status, platformResults: Object.fromEntries(output.map(r => [destinationKey(r), { ...(Array.isArray(r.result) ? r.result[0] : r.result), success: r.success, processing: !!r.processing, ...(r.error && { error: r.error }), ...(r.uncertain && { uncertain: true }) }])), ...(!processing && anyOk && { publishedAt: new Date() }) } });
+  return response;
+}
+app.get('/post-status/:postId', async (request, reply) => {
+  const receipt = await (await getDb()).collection('post_requests').findOne({ _id: request.params.postId, workspaceId: request.workspaceId });
+  if (!receipt?.response) return reply.code(404).send({ error: 'Delivery was not found in this workspace' });
+  return receipt.response.processing ? refreshImmediatePost(receipt, request.workspaceId) : receipt.response;
+});
+let instagramReceiptTimer;
+app.addHook('onReady', async () => {
+  if (process.env.NODE_ENV === 'test') return;
+  let running = false;
+  instagramReceiptTimer = setInterval(async () => {
+    if (running) return;
+    running = true;
+    try { for (const row of await (await getDb()).collection('post_requests').find({ 'response.processing': true }).toArray()) await refreshImmediatePost(row, row.workspaceId); }
+    catch (err) { log.error({ action: 'instagram_receipt_refresh', err: err.message }); }
+    finally { running = false; }
+  }, 10000);
+  instagramReceiptTimer.unref();
+});
+app.addHook('onClose', async () => clearInterval(instagramReceiptTimer));
 
 // ─── Meta App Credentials ────────────────────────────────────────────────────
 
