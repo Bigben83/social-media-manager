@@ -7,6 +7,36 @@ function accountFilter(account) {
   return { platform, ...(rest.length && { accountId: rest.join(':') }) };
 }
 function destinationMatch(filter) { return filter ? { destinations: { $elemMatch: { platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) } } } : {}; }
+// Facebook may return PAGE_POST or POST in publishing receipts. Compare only
+// within the same workspace and account; captions are never an identity key.
+function nativeId(value) { return { $cond: [{ $eq: ['$$platform', 'facebook'] }, { $arrayElemAt: [{ $split: [{ $convert: { input: value, to: 'string', onNull: '', onError: '' } }, '_'] }, -1] }, { $convert: { input: value, to: 'string', onNull: '', onError: '' } }] }; }
+function importedPipeline(ws, filter) {
+  const receiptMatch = { $anyElementTrue: [{ $map: {
+    input: { $objectToArray: { $ifNull: ['$platformResults', {}] } }, as: 'receipt',
+    in: { $and: [
+      { $in: ['$$receipt.k', ['$$key', { $concat: ['$$key', ':story'] }, { $concat: ['$$key', ':reel'] }]] },
+      { $eq: [nativeId('$$receipt.v.postId'), nativeId('$$postId')] },
+    ] },
+  } }] };
+  const lookups = ['posts', 'scheduled_jobs'].flatMap((from, i) => [
+    { $lookup: { from, let: { platform: '$platform', key: { $concat: ['$platform', ':', '$accountId'] }, postId: '$postId' }, pipeline: [
+      { $match: { workspaceId: ws, $expr: receiptMatch } }, { $limit: 1 }, { $project: { _id: 1 } },
+    ], as: `receipt${i}` } },
+    { $match: { [`receipt${i}.0`]: { $exists: false } } },
+  ]);
+  return [
+    { $match: { workspaceId: ws, platform: { $in: ['facebook', 'instagram'] }, postId: { $type: 'string', $ne: '' }, accountId: { $type: 'string' }, ...(filter && { platform: filter.platform, ...(filter.accountId && { accountId: filter.accountId }) }) } },
+    { $sort: { fetchedAt: -1, _id: -1 } },
+    { $group: { _id: { platform: '$platform', accountId: '$accountId', postId: '$postId' }, doc: { $first: '$$ROOT' } } },
+    { $replaceRoot: { newRoot: '$doc' } },
+    ...lookups,
+    { $project: { _id: 1, type: { $literal: 'imported' }, content: 1, publishedAt: 1, permalink: 1, metrics: 1,
+      status: { $literal: 'published' },
+      destinations: [{ platform: '$platform', accountId: '$accountId' }],
+      platformResults: { $arrayToObject: [[{ k: { $concat: ['$platform', ':', '$accountId'] }, v: { success: true, postId: '$postId' } }]] },
+    } },
+  ];
+}
 function historyPipeline(ws, filter, month) {
   const scoped = { workspaceId: ws, ...destinationMatch(filter) };
   const pipeline = [
@@ -16,6 +46,7 @@ function historyPipeline(ws, filter, month) {
       { $match: { ...scoped, type: 'immediate', status: { $in: ['published','partial','failed'] } } },
       { $project: { _id: 1, type: 1, content: 1, destinations: 1, platformResults: 1, status: 1, publishedAt: 1 } },
     ] } },
+    { $unionWith: { coll: 'post_metrics', pipeline: importedPipeline(ws, filter) } },
   ];
   if (month) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('month must be YYYY-MM');
@@ -32,22 +63,22 @@ function normalizePost(doc, filter) {
   }));
   const values = Object.values(results);
   const status = values.length ? values.every(r=>r.success) ? 'published' : values.some(r=>r.success) ? 'partial' : 'failed' : doc.status;
-  return { _id: String(doc._id), type: doc.type, content: doc.content || '', destinations, platformResults: results, status, publishedAt: doc.publishedAt };
+  return { _id: String(doc._id), type: doc.type, content: doc.content || '', destinations, platformResults: results, status, publishedAt: doc.publishedAt, ...(doc.permalink && { permalink: doc.permalink }), ...(doc.metrics && { metrics: doc.metrics }) };
 }
 function summaryAccumulator(now = Date.now()) {
-  const data = { total: 0, published: 0, partial: 0, failed: 0, recentCount: 0 };
+  const data = { total: 0, imported: 0, published: 0, partial: 0, failed: 0, recentCount: 0 };
   const platforms = {}; const days = {}; let deliveries = 0; let succeeded = 0;
   return {
     add(post) {
-      data.total++; if (post.status in data) data[post.status]++;
+      data.total++; if (post.type === 'imported') data.imported++; else if (post.status in data) data[post.status]++;
       const results = Object.entries(post.platformResults); const successes = results.filter(([,r])=>r.success);
-      deliveries += results.length; succeeded += successes.length;
+      if (post.type !== 'imported') { deliveries += results.length; succeeded += successes.length; }
       const time = new Date(post.publishedAt).getTime();
       if (successes.length && time >= now - 7*86400000) data.recentCount++;
       if (successes.length && time >= now - 30*86400000) { const day = new Date(time).toISOString().slice(0,10); days[day] = (days[day] || 0)+1; }
       for (const [key] of successes) { const platform = key.split(':')[0]; platforms[platform] = (platforms[platform] || 0)+1; }
     },
-    result() { return { ...data, successRate: deliveries ? Math.round(100*succeeded/deliveries) : 0, byPlatform: platforms, byDay: Object.entries(days).sort(([a],[b])=>a.localeCompare(b)).map(([date,count])=>({date,count})) }; },
+    result() { return { ...data, deliveries, successRate: deliveries ? Math.round(100*succeeded/deliveries) : 0, byPlatform: platforms, byDay: Object.entries(days).sort(([a],[b])=>a.localeCompare(b)).map(([date,count])=>({date,count})) }; },
   };
 }
 function registerAnalytics(app, getDb) {

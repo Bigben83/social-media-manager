@@ -112,7 +112,10 @@ export default {
     totalPosts: 'Total Posts',
     last7Days: 'Last 7 Days',
     platformsReached: 'Platforms Reached',
-    successRate: 'Success Rate',
+    successRate: 'App Delivery Success',
+    importedSource: 'Imported from account',
+    appSource: 'Published with SocialManager',
+    deliveryScope: 'App deliveries only. {count} imported posts are included in activity totals.',
 
     postsPerDay: 'Posts per Day',
     postsPerDaySubtitle: 'Last 30 days',
@@ -121,7 +124,7 @@ export default {
     platformBreakdown: 'Platform Breakdown',
     successfulPosts: 'successful posts',
 
-    statusBreakdown: 'Status Breakdown',
+    statusBreakdown: 'App Delivery Status',
     published: 'Published',
     partial: 'Partial',
     failed: 'Failed',

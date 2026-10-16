@@ -224,7 +224,7 @@
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
             <p class="text-xs text-gray-500 mb-1">{{ $t('analytics.successRate') }}</p>
             <p class="text-3xl font-bold" :class="summary.successRate >= 80 ? 'text-green-400' : summary.successRate >= 50 ? 'text-yellow-400' : 'text-red-400'">
-              {{ summary.successRate }}%
+              {{ summary.deliveries ? `${summary.successRate}%` : '—' }}
             </p>
           </div>
         </div>
@@ -301,6 +301,7 @@
           <!-- Status Breakdown -->
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
             <h2 class="text-sm font-semibold text-white mb-4">{{ $t('analytics.statusBreakdown') }}</h2>
+            <p class="text-xs text-gray-500 mb-4">{{ $t('analytics.deliveryScope', { count: summary.imported }) }}</p>
             <div class="space-y-3">
               <div class="space-y-1">
                 <div class="flex justify-between text-xs">
@@ -345,13 +346,14 @@
           <div v-else class="space-y-2">
             <div
               v-for="post in posts"
-              :key="String(post._id)"
-              class="flex items-start gap-4 py-3 border-b border-gray-800 last:border-0"
+              :key="`${post.type}:${String(post._id)}`"
+              class="flex flex-wrap items-start gap-3 py-3 border-b border-gray-800 last:border-0"
             >
               <!-- Content preview -->
-              <p class="flex-1 text-sm line-clamp-2 min-w-0" :class="post.content ? 'text-gray-300' : 'text-gray-600 italic'">
-                {{ post.content || $t('analytics.noContent') }}
-              </p>
+              <div class="flex-1 min-w-40">
+                <p class="text-sm line-clamp-2" :class="post.content ? 'text-gray-300' : 'text-gray-600 italic'">{{ post.content || $t('analytics.noContent') }}</p>
+                <span class="text-xs text-gray-500">{{ $t(post.type === 'imported' ? 'analytics.importedSource' : 'analytics.appSource') }}</span>
+              </div>
 
               <!-- Platforms chips -->
               <div class="flex flex-wrap gap-1 shrink-0">
@@ -583,6 +585,8 @@ const { t } = useI18n()
 interface DayStat { date: string; count: number }
 interface Summary {
   total: number
+  imported: number
+  deliveries: number
   published: number
   partial: number
   failed: number
@@ -838,7 +842,8 @@ function platformBarWidth(count: number): number {
 }
 
 function statusWidth(count: number): number {
-  return summary.value?.total ? (count / summary.value.total) * 100 : 0
+  const total = summary.value ? summary.value.total - summary.value.imported : 0
+  return total ? (count / total) * 100 : 0
 }
 
 const auditSections = computed(() => {

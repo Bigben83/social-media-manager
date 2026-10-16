@@ -112,7 +112,10 @@ export default {
     totalPosts: 'Toplam Gönderi',
     last7Days: 'Son 7 Gün',
     platformsReached: 'Ulaşılan Platform',
-    successRate: 'Başarı Oranı',
+    successRate: 'Uygulama Gönderim Başarısı',
+    importedSource: 'Hesaptan içe aktarıldı',
+    appSource: 'SocialManager ile yayınlandı',
+    deliveryScope: 'Yalnızca uygulama gönderimleri. {count} içe aktarılan gönderi etkinlik toplamlarına dahildir.',
 
     postsPerDay: 'Günlük Gönderi',
     postsPerDaySubtitle: 'Son 30 gün',
@@ -121,7 +124,7 @@ export default {
     platformBreakdown: 'Platform Dağılımı',
     successfulPosts: 'başarılı gönderi',
 
-    statusBreakdown: 'Durum Dağılımı',
+    statusBreakdown: 'Uygulama Gönderim Durumu',
     published: 'Yayınlandı',
     partial: 'Kısmi',
     failed: 'Başarısız',
