@@ -409,6 +409,7 @@ export default {
       completed: 'Tamamlanan',
       failed: 'Başarısız',
       cancelled: 'İptal',
+      cancelling: 'Taslaklara taşınıyor',
     },
     platformResult: {
       posted: 'Gönderildi',
@@ -417,6 +418,10 @@ export default {
     },
     cancel: 'İptal',
     scheduledTab: 'Zamanlanmış',
+    cancelToDraft: 'Taslaklara Taşı',
+    returnedToDrafts: 'Zamanlanmış gönderi Taslaklara taşındı.',
+    viewReturnedDrafts: 'Taslakları Gör',
+    cancelError: 'Gönderi Taslaklara taşınamadı. Yenileyip tekrar deneyin.',
     calendarTab: 'Takvim',
     draftsTab: 'Taslaklar',
     bulkSchedule: {

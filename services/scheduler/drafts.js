@@ -94,7 +94,7 @@ function registerDraftScheduling(app, { getDb, getQueue, publicUrl, log }) {
     if (!row) {
       const prepared = await prepareDraft(db, workspaceId, item.draftId, timezone, origin);
       if (prepared.revision !== item.revision) fail('changed', 'Draft changed after review. Review it again before scheduling.');
-      row = { _id: postId, postId, bullJobId: postId, workspaceId, type: 'one-time', ...prepared.payload, scheduledAt: new Date(prepared.payload.scheduledAt), sourceDraftId: item.draftId, sourceDraftRevision: prepared.revision, sourceDraftUpdatedAt: prepared.draft.updatedAt, status: 'pending', queueState: 'preparing', attempts: 0, maxAttempts: 3, createdAt: new Date() };
+      row = { _id: postId, postId, bullJobId: postId, workspaceId, type: 'one-time', ...prepared.payload, scheduledAt: new Date(prepared.payload.scheduledAt), sourceDraftId: item.draftId, sourceDraftSnapshot: prepared.draft, sourceDraftRevision: prepared.revision, sourceDraftUpdatedAt: prepared.draft.updatedAt, status: 'pending', queueState: 'preparing', attempts: 0, maxAttempts: 3, createdAt: new Date() };
       try { await db.collection('scheduled_jobs').insertOne(row); }
       catch (err) { if (err.code !== 11000) throw err; row = await db.collection('scheduled_jobs').findOne(query); }
     }

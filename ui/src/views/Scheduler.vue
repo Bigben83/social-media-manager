@@ -27,6 +27,13 @@
       </div>
     </div>
 
+    <div v-if="cancelNotice || cancelError" class="px-6 pb-4 mx-auto w-full max-w-6xl text-sm" role="status">
+      <div v-if="cancelNotice" class="flex flex-wrap items-center gap-3 text-green-300">
+        {{ cancelNotice }} <button @click="mode = 'drafts'" class="underline">{{ $t('scheduler.viewReturnedDrafts') }}</button>
+      </div>
+      <p v-if="cancelError" role="alert" class="text-red-300">{{ cancelError }}</p>
+    </div>
+
     <!-- ── Scheduled panel — scrollable, constrained width ── -->
     <template v-if="mode === 'scheduled'">
       <div class="flex-1 overflow-y-auto px-6 pb-6">
@@ -110,11 +117,12 @@
                     {{ $t(`scheduler.statuses.${job.status}`) }}
                   </span>
                   <button
-                    v-if="job.status === 'pending'"
+                    v-if="['pending', 'cancelling'].includes(job.status)"
                     @click="cancelJob(job.bullJobId)"
+                    :disabled="cancellingIds.has(job.bullJobId)"
                     class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded transition-colors"
                   >
-                    {{ $t('scheduler.cancel') }}
+                    {{ $t('scheduler.cancelToDraft') }}
                   </button>
                 </div>
               </div>
@@ -260,11 +268,12 @@
                       </div>
                     </div>
                     <button
-                      v-if="job.status === 'pending'"
+                      v-if="['pending', 'cancelling'].includes(job.status)"
                       @click="cancelCalendarJob(job.bullJobId)"
+                      :disabled="cancellingIds.has(job.bullJobId)"
                       class="text-xs text-red-400 hover:text-red-300 flex-shrink-0 px-2 py-1 rounded hover:bg-red-900/20 transition-colors"
                     >
-                      {{ $t('scheduler.cancel') }}
+                      {{ $t('scheduler.cancelToDraft') }}
                     </button>
                   </div>
                 </div>
@@ -556,13 +565,24 @@ async function fetchJobs() {
   }
 }
 
+const cancellingIds = ref(new Set<string>())
+const cancelNotice = ref('')
+const cancelError = ref('')
 async function cancelJob(bullJobId: string) {
+  if (cancellingIds.value.has(bullJobId)) return
+  cancellingIds.value.add(bullJobId)
+  cancelNotice.value = ''; cancelError.value = ''
+  const ws = String(axios.defaults.headers.common['X-Workspace-Id'] || 'default')
   try {
-    await axios.delete(`/scheduler/jobs/${bullJobId}`)
-    jobs.value = jobs.value.filter((j) => j.bullJobId !== bullJobId)
-  } catch (err) {
-    console.error(err)
-  }
+    await axios.delete(`/scheduler/jobs/${encodeURIComponent(bullJobId)}`)
+    if (ws !== String(axios.defaults.headers.common['X-Workspace-Id'] || 'default')) return
+    jobs.value = jobs.value.filter(j => j.bullJobId !== bullJobId)
+    calendarJobs.value = calendarJobs.value.filter(j => j.bullJobId !== bullJobId)
+    cancelNotice.value = t('scheduler.returnedToDrafts')
+    await fetchDrafts()
+  } catch (error) {
+    if (ws === String(axios.defaults.headers.common['X-Workspace-Id'] || 'default')) cancelError.value = (error as { response?: { data?: { error?: string } } }).response?.data?.error || t('scheduler.cancelError')
+  } finally { cancellingIds.value.delete(bullJobId) }
 }
 
 // ── Calendar ───────────────────────────────────────────────────────────────────
@@ -656,14 +676,7 @@ async function fetchCalendarJobs() {
   }
 }
 
-async function cancelCalendarJob(bullJobId: string) {
-  try {
-    await axios.delete(`/scheduler/jobs/${bullJobId}`)
-    calendarJobs.value = calendarJobs.value.filter((j) => j.bullJobId !== bullJobId)
-  } catch (err) {
-    console.error(err)
-  }
-}
+const cancelCalendarJob = cancelJob
 
 // ── Drafts ─────────────────────────────────────────────────────────────────────
 

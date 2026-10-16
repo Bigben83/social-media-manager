@@ -69,7 +69,7 @@ app.post('/schedule', async (request, reply) => {
 
   await db.collection('scheduled_jobs').insertOne({
     _id: postId, postId, type: 'one-time', content, firstComment,
-    scheduledAt: new Date(scheduledAt), destinations: destList,
+    scheduledAt: new Date(scheduledAt), destinations: destList, media,
     status: 'pending', attempts: 0, maxAttempts: 3, bullJobId: postId, workspaceId, createdAt: new Date(),
   });
   try {
@@ -89,8 +89,7 @@ app.get('/jobs', async (request) => {
   const { status = 'pending' } = request.query;
   const workspaceId = request.headers['x-workspace-id'] || 'default';
   const db = await getDb();
-  // Include legacy jobs without workspaceId (backwards compat)
-  const filter = { status, workspaceId };
+  const filter = { status: status === 'pending' ? { $in: ['pending', 'cancelling'] } : status, workspaceId };
   const jobs = await db
     .collection('scheduled_jobs')
     .find(filter)
@@ -100,27 +99,7 @@ app.get('/jobs', async (request) => {
 });
 
 // Görevi iptal et
-app.delete('/jobs/:jobId', async (request, reply) => {
-  const { jobId } = request.params;
-  const workspaceId = request.headers['x-workspace-id'] || 'default';
-
-  const db = await getDb();
-  const jobDoc = await db.collection('scheduled_jobs').findOne({
-    bullJobId: jobId,
-    workspaceId,
-  });
-  if (!jobDoc) return reply.code(404).send({ error: 'Job bulunamadı' });
-
-  const job = await postQueue.getJob(jobId);
-  if (job) await job.remove();
-
-  await db.collection('scheduled_jobs').updateOne(
-    { bullJobId: jobId, workspaceId },
-    { $set: { status: 'cancelled' } }
-  );
-
-  return { success: true, jobId };
-});
+require('./cancellation').registerCancellation(app, { getDb, getQueue: () => postQueue, log });
 
 app.delete('/workspaces/:id/jobs', async (request, reply) => {
   const ws = request.headers['x-workspace-id'] || 'default';

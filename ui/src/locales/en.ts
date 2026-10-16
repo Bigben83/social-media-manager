@@ -409,6 +409,7 @@ export default {
       completed: 'Completed',
       failed: 'Failed',
       cancelled: 'Cancelled',
+      cancelling: 'Returning to Drafts',
     },
     platformResult: {
       posted: 'Posted',
@@ -417,6 +418,10 @@ export default {
     },
     cancel: 'Cancel',
     scheduledTab: 'Scheduled',
+    cancelToDraft: 'Return to Drafts',
+    returnedToDrafts: 'Scheduled post returned to Drafts.',
+    viewReturnedDrafts: 'View Drafts',
+    cancelError: 'Could not return this post to Drafts. Refresh and try again.',
     calendarTab: 'Calendar',
     draftsTab: 'Drafts',
     bulkSchedule: {
