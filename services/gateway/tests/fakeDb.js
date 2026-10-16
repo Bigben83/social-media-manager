@@ -10,6 +10,9 @@ function fakeDb() {
       return Object.entries(value).every(([op, test]) => {
         if (op === '$exists') return candidates.some(v => v !== undefined) === test;
         if (op === '$gt') return candidates.some(v => v > test);
+        if (op === '$gte') return candidates.some(v => v >= test);
+        if (op === '$lt') return candidates.some(v => v < test);
+        if (op === '$lte') return candidates.some(v => v <= test);
         if (op === '$in') return candidates.some(v => test.includes(v));
         if (op === '$not') return !candidates.some(v => test.test(String(v)));
         return false;

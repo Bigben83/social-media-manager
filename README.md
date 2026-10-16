@@ -116,6 +116,8 @@ Analytics combine immediate and scheduled posts with imported Facebook Page and 
 
 History, activity totals, account filters and CSV export include imports. Native provider post IDs are matched against publishing receipts within the same workspace/account to avoid counting app posts twice. Imported activity is labelled and excluded from app delivery status/success rates. CSV exports the complete filtered history and escapes spreadsheet formulas. Meta controls historical availability and permissions: older engagement insights may be unavailable, and this import cannot retrieve expired Stories. Instagram reach and views remain separate; unavailable metrics are stored as null. Hashtag metrics remain scoped per workspace/account.
 
+Brand and channel audits also use imported posts from the last 30 days. App delivery success is shown as unavailable when there were no app deliveries. Channel audits treat missing format metadata as unknown and include imported engagement using the post's publication date.
+
 MongoDB integration checks exercise real history aggregation, concurrent import requests and checkpoint recovery; CI runs them against MongoDB 7. To run locally against a disposable instance, set `MONGO_TEST_URI` and run `node --test tests/analytics-mongo.test.cjs`; each check creates and removes its own temporary database. Without that environment variable, these integration checks are skipped; importer tests with mocked Meta responses still run.
 
 Live feed notifications use Socket.IO rooms per workspace. The aggregator sends bounded events directly to the socket service. Legacy RabbitMQ, formatter, LinkedIn, and grammar containers have been retired; no production service depends on them.

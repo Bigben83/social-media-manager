@@ -173,8 +173,8 @@ export default {
     auditEngagement: 'Etkileşim',
     auditMix: 'İçerik Karması',
     auditRecommendations: 'Öneriler',
-    auditStats: '{count} gönderi · haftada {freq}x · %{rate} başarı',
-    auditError: 'Denetim başarısız — önce en az 3 gönderi yayınlayın.',
+    auditStats: '{count} gönderi · haftada {freq}x · uygulama gönderimi: {rate}',
+    auditError: 'Denetim başarısız. Hesap geçmişini eşitleyin veya son 30 gün içinde en az 3 gönderi yayınlayıp yeniden deneyin.',
 
     runChannelAudit: 'Kanal Denetimi',
     runningChannelAudit: 'Denetleniyor…',
@@ -183,7 +183,7 @@ export default {
     channelAuditDismiss: 'Kapat',
     channelAuditTopActions: 'Öncelikli Eylemler',
     channelAuditRecommendations: 'Öneriler',
-    channelAuditError: 'Kanal denetimi başarısız — önce en az 2 gönderi yayınlayın.',
+    channelAuditError: 'Kanal denetimi başarısız. Hesap geçmişini eşitleyin veya son 30 gün içinde en az 2 gönderi yayınlayıp yeniden deneyin.',
     channelAuditGeneratedAt: 'Oluşturuldu',
 
     insightsTitle: 'Gelişmiş İçgörüler',

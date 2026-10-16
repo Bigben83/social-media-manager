@@ -2,7 +2,7 @@
 const { destinationKey } = require('./utils/publishing');
 function accountFilter(account) {
   if (!account) return null;
-  if (typeof account !== 'string' || account.length > 200) throw new Error('Invalid account filter');
+  if (typeof account !== 'string' || account.length > 200) throw Object.assign(new Error('Invalid account filter'), { statusCode: 400 });
   const [platform, ...rest] = account.split(':');
   return { platform, ...(rest.length && { accountId: rest.join(':') }) };
 }
@@ -30,7 +30,7 @@ function importedPipeline(ws, filter) {
     { $group: { _id: { platform: '$platform', accountId: '$accountId', postId: '$postId' }, doc: { $first: '$$ROOT' } } },
     { $replaceRoot: { newRoot: '$doc' } },
     ...lookups,
-    { $project: { _id: 1, type: { $literal: 'imported' }, content: 1, publishedAt: 1, permalink: 1, metrics: 1,
+    { $project: { _id: 1, type: { $literal: 'imported' }, content: 1, publishedAt: 1, permalink: 1, metrics: 1, mediaType: 1,
       status: { $literal: 'published' },
       destinations: [{ platform: '$platform', accountId: '$accountId' }],
       platformResults: { $arrayToObject: [[{ k: { $concat: ['$platform', ':', '$accountId'] }, v: { success: true, postId: '$postId' } }]] },
@@ -63,7 +63,14 @@ function normalizePost(doc, filter) {
   }));
   const values = Object.values(results);
   const status = values.length ? values.every(r=>r.success) ? 'published' : values.some(r=>r.success) ? 'partial' : 'failed' : doc.status;
-  return { _id: String(doc._id), type: doc.type, content: doc.content || '', destinations, platformResults: results, status, publishedAt: doc.publishedAt, ...(doc.permalink && { permalink: doc.permalink }), ...(doc.metrics && { metrics: doc.metrics }) };
+  return { _id: String(doc._id), type: doc.type, content: doc.content || '', destinations, platformResults: results, status, publishedAt: doc.publishedAt, ...(doc.permalink && { permalink: doc.permalink }), ...(doc.metrics && { metrics: doc.metrics }), ...(doc.mediaType && { mediaType: doc.mediaType }) };
+}
+async function loadAuditHistory(db, ws, filter, since) {
+  const rows = await db.collection('scheduled_jobs').aggregate([...historyPipeline(ws, filter), { $match: { publishedAt: { $gte: since } } }]).toArray();
+  const posts = rows.map(row => normalizePost(row, filter));
+  const summary = summaryAccumulator(); posts.forEach(post => summary.add(post));
+  const totals = summary.result();
+  return { posts: posts.filter(post => ['published', 'partial'].includes(post.status)), imported: totals.imported, appSuccessRate: totals.deliveries ? totals.successRate : null };
 }
 function summaryAccumulator(now = Date.now()) {
   const data = { total: 0, imported: 0, published: 0, partial: 0, failed: 0, recentCount: 0 };
@@ -115,4 +122,4 @@ function registerAnalytics(app, getDb) {
     return reply.send(require('stream').Readable.from(csv()));
   });
 }
-module.exports = { accountFilter, destinationMatch, historyPipeline, normalizePost, summaryAccumulator, registerAnalytics };
+module.exports = { accountFilter, destinationMatch, historyPipeline, normalizePost, summaryAccumulator, loadAuditHistory, registerAnalytics };

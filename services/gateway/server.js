@@ -18,7 +18,7 @@ const {
 } = require('./ai');
 
 const { externalGet } = require('./utils/externalFetch');
-const { registerAnalytics, destinationMatch } = require('./analytics');
+const { registerAnalytics, accountFilter, loadAuditHistory } = require('./analytics');
 const { registerBackgroundJobs } = require('./jobs');
 const { detectUploadType } = require('./media');
 const { imageMetadata, normalizeImage, saveImageAsset } = require('./imageAssets');
@@ -2750,19 +2750,7 @@ app.get('/analytics/insights', async (request) => {
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
-// Parse "platform" or "platform:accountId" filter strings from the account query param.
-function parseAccountFilter(account) {
-  if (!account) return null;
-  const idx = account.indexOf(':');
-  if (idx === -1) return { platform: account };
-  return { platform: account.slice(0, idx), accountId: account.slice(idx + 1) };
-}
-
-// Build a MongoDB match fragment for scheduled_jobs given an account filter.
-function sjFilter(filter, workspaceId) { return { workspaceId, ...destinationMatch(filter) }; }
-
-// Build a MongoDB match fragment for posts (type:immediate) given an account filter.
-function ipFilter(filter) { return destinationMatch(filter); }
+const parseAccountFilter = accountFilter;
 
 registerAnalytics(app, getDb);
 
@@ -2774,14 +2762,11 @@ app.post('/analytics/audit', async (request, reply) => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
 
-  const recentPosts = await db.collection('posts').find({
-    workspaceId: ws,
-    publishedAt: { $gte: thirtyDaysAgo },
-    ...ipFilter(filter),
-  }, { projection: { content: 1, destinations: 1, publishedAt: 1, status: 1 } }).toArray();
+  const history = await loadAuditHistory(db, ws, filter, thirtyDaysAgo);
+  const recentPosts = history.posts;
 
   if (recentPosts.length < 3) {
-    return reply.code(400).send({ error: 'Not enough publishing history. Publish at least 3 posts first.' });
+    return reply.code(400).send({ error: 'Not enough recent history. Sync account history or publish at least 3 posts in the last 30 days.' });
   }
 
   // Posting frequency
@@ -2792,9 +2777,8 @@ app.post('/analytics/audit', async (request, reply) => {
   // Platforms used
   const platforms = [...new Set(recentPosts.flatMap((p) => (p.destinations || []).map((d) => d.platform)).filter(Boolean))];
 
-  // Success rate
-  const publishedCount = recentPosts.filter((p) => p.status === 'published').length;
-  const successRate    = Math.round((publishedCount / postsLast30) * 100);
+  // Imported activity is not evidence of an app delivery attempt.
+  const successRate = history.appSuccessRate;
 
   // Top hashtags from post content
   const hashtagCounts = {};
@@ -2845,7 +2829,8 @@ app.post('/analytics/audit', async (request, reply) => {
     `- Posts this week: ${postsLast7}`,
     `- Posts per week (avg): ${postsPerWeek}`,
     `- Platforms used: ${platforms.join(', ') || 'unknown'}`,
-    `- Success rate: ${successRate}%`,
+    `- Imported native posts: ${history.imported}`,
+    `- App delivery success rate: ${successRate === null ? 'no app deliveries in this period' : successRate + '%'}`,
     `- Average engagement per post: ${avgEngagement}`,
     `- Current peak posting hours (UTC): ${peakHours || 'not enough data'}`,
     `- Top hashtags in use: ${topHashtags || 'none detected'}`,
@@ -4249,26 +4234,21 @@ app.post('/ai/channel-audit', async (request, reply) => {
     profile = await db.collection('account_profiles').findOne({ _id: `${ws}:${accountKey}`, workspaceId: ws });
   }
 
-  // Load recent posts, optionally filtered by account
-  const postFilter = accountKey
-    ? { workspaceId: ws, publishedAt: { $gte: thirtyDaysAgo }, ...destinationMatch(parseAccountFilter(accountKey)) }
-    : { workspaceId: ws, publishedAt: { $gte: thirtyDaysAgo } };
-  const recentPosts = await db.collection('posts')
-    .find(postFilter, { projection: { content: 1, destinations: 1, publishedAt: 1, status: 1 } })
-    .toArray();
+  // Use the same deduplicated native and app history as the analytics page.
+  const recentPosts = (await loadAuditHistory(db, ws, parseAccountFilter(accountKey), thirtyDaysAgo)).posts;
 
   if (recentPosts.length < 2) {
-    return reply.code(400).send({ error: 'Not enough publishing history. Publish at least 2 posts first.' });
+    return reply.code(400).send({ error: 'Not enough recent history. Sync account history or publish at least 2 posts in the last 30 days.' });
   }
 
   // ── Local stats computation ──────────────────────────────────────────────
   const totalPosts = recentPosts.length;
 
-  // Format diversity: posts with imageUrl/videoUrl in any destination
-  const postsWithMedia = recentPosts.filter((p) =>
-    (p.destinations || []).some((d) => d.imageUrl || d.videoUrl),
-  ).length;
-  const mediaRatio = Math.round((postsWithMedia / totalPosts) * 100);
+  // Imported Instagram posts always contain media. Facebook imports without
+  // attachment metadata have unknown format; do not classify them as text-only.
+  const knownFormatPosts = recentPosts.filter(p => p.type !== 'imported' || p.mediaType || p.destinations.some(d => d.platform === 'instagram'));
+  const postsWithMedia = knownFormatPosts.filter(p => p.mediaType || (p.type === 'imported' && p.destinations.some(d => d.platform === 'instagram')) || p.destinations.some(d => d.imageUrl || d.videoUrl)).length;
+  const mediaRatio = knownFormatPosts.length ? Math.round(postsWithMedia / knownFormatPosts.length * 100) : null;
 
   // CTA detection
   const ctaWords = ['click', 'link in bio', 'shop', 'buy', 'register', 'sign up', 'subscribe', 'follow', 'comment', 'share', 'tag', 'dm'];
@@ -4295,7 +4275,7 @@ app.post('/ai/channel-audit', async (request, reply) => {
     ? { workspaceId: ws, platform: parseAccountFilter(accountKey).platform, ...(parseAccountFilter(accountKey).accountId && { accountId: parseAccountFilter(accountKey).accountId }) }
     : { workspaceId: ws };
   const metrics = await db.collection('post_metrics')
-    .find({ ...metricsFilter, createdAt: { $gte: thirtyDaysAgo } })
+    .find({ ...metricsFilter, publishedAt: { $gte: thirtyDaysAgo } })
     .toArray();
   const avgEngagement = metrics.length > 0
     ? Math.round((metrics.reduce((s, m) => s + (m.metrics?.engagementTotal || 0), 0) / metrics.length) * 10) / 10
@@ -4313,7 +4293,7 @@ app.post('/ai/channel-audit', async (request, reply) => {
 
   const statsBlock = [
     `Total posts (last 30 days): ${totalPosts}`,
-    `Posts with media (images/video): ${mediaRatio}%`,
+    `Posts with media (images/video): ${mediaRatio === null ? 'unknown' : mediaRatio + '%'} (${knownFormatPosts.length}/${totalPosts} posts have known format). Score unavailable format data neutrally.`,
     `Posts with a CTA (click, shop, follow, etc.): ${ctaRatio}%`,
     `Average hashtags per post: ${avgHashtags}`,
     `Average caption length: ${avgCaptionLength} characters`,

@@ -107,7 +107,7 @@
               <span class="font-semibold text-white">{{ $t('analytics.auditTitle') }}</span>
             </div>
             <span class="text-xs text-gray-500">
-              {{ $t('analytics.auditStats', { count: audit.stats.postsLast30, freq: audit.stats.postsPerWeek, rate: audit.stats.successRate }) }}
+              {{ $t('analytics.auditStats', { count: audit.stats.postsLast30, freq: audit.stats.postsPerWeek, rate: audit.stats.successRate === null ? '—' : `${audit.stats.successRate}%` }) }}
             </span>
           </div>
           <div class="flex items-center gap-3 shrink-0">
@@ -681,7 +681,7 @@ interface Audit {
   engagement: AuditSection & { benchmark: string }
   contentMix: AuditSection
   recommendations: string[]
-  stats: { postsLast30: number; postsLast7: number; postsPerWeek: number; platforms: string[]; successRate: number; avgEngagement: number }
+  stats: { postsLast30: number; postsLast7: number; postsPerWeek: number; platforms: string[]; successRate: number | null; avgEngagement: number }
 }
 const audit        = ref<Audit | null>(null)
 const auditLoading = ref(false)

@@ -173,8 +173,8 @@ export default {
     auditEngagement: 'Engagement',
     auditMix: 'Content Mix',
     auditRecommendations: 'Recommendations',
-    auditStats: '{count} posts · {freq}x/week · {rate}% success rate',
-    auditError: 'Audit failed — publish at least 3 posts first, then try again.',
+    auditStats: '{count} posts · {freq}x/week · app delivery: {rate}',
+    auditError: 'Audit failed. Sync account history or publish at least 3 posts in the last 30 days, then try again.',
 
     runChannelAudit: 'Channel Audit',
     runningChannelAudit: 'Auditing…',
@@ -183,7 +183,7 @@ export default {
     channelAuditDismiss: 'Dismiss',
     channelAuditTopActions: 'Top Actions',
     channelAuditRecommendations: 'Recommendations',
-    channelAuditError: 'Channel audit failed — publish at least 2 posts first, then try again.',
+    channelAuditError: 'Channel audit failed. Sync account history or publish at least 2 posts in the last 30 days, then try again.',
     channelAuditGeneratedAt: 'Generated',
 
     insightsTitle: 'Advanced Insights',

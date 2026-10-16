@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { MongoClient } = require('mongodb');
-const { historyPipeline, normalizePost, summaryAccumulator } = require('../services/gateway/analytics');
+const { historyPipeline, normalizePost, summaryAccumulator, loadAuditHistory } = require('../services/gateway/analytics');
 
 // Run against a disposable database: MONGO_TEST_URI=mongodb://... node --test tests/analytics-mongo.test.cjs
 test('native history aggregation deduplicates receipts and isolates workspaces/accounts', { skip: !process.env.MONGO_TEST_URI }, async () => {
@@ -39,6 +39,10 @@ test('native history aggregation deduplicates receipts and isolates workspaces/a
     assert.equal(summary.result().imported, 1);
     assert.equal(summary.result().deliveries, 2);
     assert.equal(summary.result().successRate, 100);
+    const audit = await loadAuditHistory(db, 'a', { platform: 'instagram', accountId: 'ig' }, new Date(date.getTime() - 1000));
+    assert.equal(audit.posts.length, 3);
+    assert.equal(audit.imported, 1);
+    assert.equal(audit.appSuccessRate, 100);
     assert.equal((await db.collection('scheduled_jobs').aggregate(historyPipeline('a', null, '2000-01')).toArray()).length, 0);
   } finally { await db.dropDatabase(); await client.close(); }
 });
@@ -81,5 +85,8 @@ test('history sync uses one active job per workspace and resumes its persisted c
     for (const doc of await db.collection('scheduled_jobs').aggregate(historyPipeline('a')).toArray()) summary.add(normalizePost(doc));
     assert.equal(summary.result().total, 2);
     assert.equal(summary.result().deliveries, 0);
+    const audit = await loadAuditHistory(db, 'a', null, new Date('2019-01-01'));
+    assert.equal(audit.posts.length, 2);
+    assert.equal(audit.appSuccessRate, null);
   } finally { await app.close(); await db.dropDatabase(); await client.close(); }
 });
