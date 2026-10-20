@@ -1,11 +1,11 @@
-const { PLATFORM_SERVICES, destinationKey, deliveryKey, failureResult } = require('./utils/publishing');
+const { PLATFORM_SERVICES, destinationKey, deliveryKey, failureResult, preflightPost } = require('./utils/publishing');
 const { instagramDeliveryResult } = require('./utils/instagramDelivery');
 
-function createPostProcessor({ getDb, axios, log }) {
+function createPostProcessor({ getDb, axios, log, preparePost = (content, destinations, workspaceId) => preflightPost(axios, workspaceId, content, destinations) }) {
   return async function processPostJob(job) {
     const { content, destinations, platforms, media = [], firstComment, workspaceId = 'default' } = job.data;
     const postId = job.data.postId || `scheduled:${workspaceId}:${job.id}`;
-    const destList = destinations || (platforms || []).map(platform => ({ platform }));
+    let destList = destinations || (platforms || []).map(platform => ({ platform }));
     const db = await getDb();
     const workspace = await db.collection('workspaces').findOne({ _id: workspaceId });
     const scheduled = await db.collection('scheduled_jobs').findOne({ bullJobId: String(job.id), workspaceId });
@@ -14,6 +14,19 @@ function createPostProcessor({ getDb, axios, log }) {
     if (scheduled && !claim.matchedCount) return { cancelled: true };
     const existing = await db.collection('posts').findOne({ _id: postId, workspaceId });
     const results = { ...(existing?.platformResults || {}) };
+    if (existing?.preparedDestinations) destList = existing.preparedDestinations;
+    else if (destList.some(d => d.platform === 'instagram') && !Object.keys(results).length) {
+      try {
+        destList = await preparePost(content, destList, workspaceId);
+        await db.collection('posts').updateOne({ _id: postId, workspaceId }, { $set: { preparedDestinations: destList } }, { upsert: true });
+      } catch (err) {
+        // Preflight is read-only: even a timeout cannot be an unknown publish.
+        const failure = { success: false, uncertain: false, retryable: !err.response || err.response.status === 429 || err.response.status >= 500, error: err.response?.data?.error || err.message || 'Attachment validation failed' };
+        await db.collection('scheduled_jobs').updateOne({ bullJobId: String(job.id), workspaceId }, { $set: { status: 'failed', failReason: 'Preflight: ' + failure.error, platformResults: Object.fromEntries(destList.map(d => [destinationKey(d), failure])) } });
+        if (failure.retryable) throw err;
+        return { preflight: true, error: failure.error };
+      }
+    }
     for (const dest of destList) {
       const key = destinationKey(dest);
       if (dest.platform === 'instagram') {

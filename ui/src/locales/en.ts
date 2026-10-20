@@ -7,6 +7,7 @@ export default {
     total: '{seconds} seconds', render: 'Render preview', cancel: 'Cancel render', retry: 'Retry saved render', progress: 'Rendering: {completed}/{total}. You can leave and return.', use: 'Attach this Reel',
   },
   instagramPublishing: {
+    imagePreparation: 'Instagram images are checked and converted to JPEG before publishing. Dimensions are preserved; incompatible attachments block all selected destinations.',
     processing: 'Instagram is processing this delivery. You can leave this page; it will continue in the background.', checkStatus: 'Check delivery status',
     title: 'Instagram format', check: 'Check account access', feed: 'Feed post', story: 'Story', reel: 'Reel',
     businessRequired: 'Stories require a verified Instagram Business account. Check account access or reconnect.',

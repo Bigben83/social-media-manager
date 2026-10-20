@@ -6,7 +6,7 @@ const { validateMetadata } = require('../services/instagram/media');
 async function fixture() {
   const db = fakeDb(), jobs = [], calls = [];
   await db.collection('workspaces').insertOne({ _id: 'one' });
-  const state = { status: 'FINISHED', failPoll: false, failPublish: false, rejectPublish: false, business: true };
+  const state = { status: 'FINISHED', failPoll: false, failPublish: false, rejectPublish: false, notReady: false, business: true };
   const request = {
     get: async (url) => {
       if (url.endsWith('/ig')) return { data: { account_type: state.business ? 'BUSINESS' : 'MEDIA_CREATOR' } };
@@ -15,6 +15,7 @@ async function fixture() {
     },
     post: async (url, _, options) => {
       calls.push({ url, params: options.params });
+      if (url.endsWith('/media_publish') && state.notReady) { state.notReady = false; throw { response: { status: 400, data: { error: { code: 9007, error_subcode: 2207027, message: 'Media ID is not available' } } } }; }
       if (url.endsWith('/media_publish') && state.rejectPublish) throw { response: { status: 400, data: { error: { message: 'Publishing permission denied' } } } };
       if (url.endsWith('/media_publish') && state.failPublish) { state.failPublish = false; throw Object.assign(new Error('lost publish'), { code: 'ETIMEDOUT' }); }
       return { data: { id: url.endsWith('/media') ? 'container' : 'post' } };
@@ -65,6 +66,26 @@ test('an explicit Instagram rejection is a known failure, distinct from a lost r
   f.state.rejectPublish = true; await f.publisher.process(f.jobs[0]);
   assert.equal((await f.row()).status, 'failed');
   assert.equal((await f.row()).error, 'Publishing permission denied');
+});
+
+test('9007 waits and retries the same media container without recreating it', async () => {
+  const f = await fixture(); await f.publisher.submit('one', 'key', f.body);
+  f.state.notReady = true;
+  await assert.rejects(f.publisher.process(f.jobs[0]), err => err.processing === true);
+  assert.equal((await f.row()).stage, 'processing');
+  await f.publisher.process(f.jobs[0]);
+  assert.equal((await f.row()).status, 'published');
+  assert.equal(f.calls.filter(c => c.url.endsWith('/media')).length, 1);
+  assert.equal(f.calls.filter(c => c.url.endsWith('/media_publish')).length, 2);
+});
+
+test('images wait for a finished container before media_publish, just like videos', async () => {
+  const f = await fixture(); await f.publisher.submit('one', 'key', { accountId: 'ig', imageUrl: '/media/image.jpg', content: 'Caption' });
+  f.state.status = 'IN_PROGRESS';
+  await assert.rejects(f.publisher.process(f.jobs[0]), err => err.processing === true);
+  assert.equal(f.calls.filter(c => c.url.endsWith('/media_publish')).length, 0);
+  f.state.status = 'FINISHED'; await f.publisher.process(f.jobs[0]);
+  assert.equal((await f.row()).status, 'published');
 });
 test('Stories verify Business eligibility and omit caption/comment publishing', async () => {
   const f = await fixture(), body = { accountId: 'ig', instagramPlacement: 'story', imageUrl: '/media/story.jpg', content: 'Internal text', firstComment: 'Do not send' };

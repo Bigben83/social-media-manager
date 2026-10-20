@@ -76,7 +76,22 @@ function createInstagramPublisher({ getDb, queue, request, getAccounts, resolveM
         if (status.status_code === 'FINISHED') {
           await assertWorkspace();
           await save({ stage: 'publishing' });
-          const response = await request.post(`${GRAPH_API}/${account.id}/media_publish`, null, { params: { creation_id: row.containerId, access_token: token }, timeout: 30000 });
+          let response;
+          try {
+            response = await request.post(`${GRAPH_API}/${account.id}/media_publish`, null, { params: { creation_id: row.containerId, access_token: token }, timeout: 30000 });
+          } catch (err) {
+            const graphError = err.response?.data?.error;
+            if (err.response?.status === 400 && (Number(graphError?.code) === 9007 || Number(graphError?.error_subcode) === 2207027)) {
+              // An explicit not-ready rejection is safe to retry with the SAME
+              // container. Lost responses still use the publishing guard above.
+              await save({ stage: 'processing', progress: 'WAITING_FOR_MEDIA' });
+              const current = (await getContainer()).data;
+              if (current.status_code === 'PUBLISHED') { await published(); return; }
+              if (['ERROR', 'EXPIRED'].includes(current.status_code)) throw Object.assign(new Error(current.status || 'Instagram media expired or failed processing'), { validation: true });
+              throw Object.assign(err, { processing: true });
+            }
+            throw err;
+          }
           if (!response.data.id) throw new Error('Instagram did not confirm the published media ID');
           await published(response.data.id);
           if (placement !== 'story' && row.body.firstComment?.trim()) {
@@ -90,6 +105,7 @@ function createInstagramPublisher({ getDb, queue, request, getAccounts, resolveM
       }
       throw Object.assign(new Error('Instagram is still processing this container'), { processing: true });
     } catch (err) {
+      if (err.processing) throw err;
       if (row.stage === 'publishing') {
         if (err.response?.status >= 400 && err.response.status < 500) {
           if (err.response.status === 429) { await save({ stage: 'processing' }); throw err; }
@@ -102,7 +118,7 @@ function createInstagramPublisher({ getDb, queue, request, getAccounts, resolveM
       const permanent = err.validation || (err.response?.status >= 400 && err.response.status < 500 && err.response.status !== 429);
       if (permanent) {
         const message = err.response?.data?.error?.message || err.message;
-        const ratioHint = row.body.instagramPlacement === 'feed' ? ' If Meta rejects 3:4, review a separate 4:5 export or publish the preserved 3:4 original in Instagram.' : '';
+        const ratioHint = !err.validation && row.body.instagramPlacement === 'feed' && /aspect|ratio/i.test(message) ? ' Review a separate 4:5 export or publish the preserved 3:4 original in Instagram.' : '';
         await save({ status: 'failed', error: message + ratioHint });
         return;
       }

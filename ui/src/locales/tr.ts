@@ -7,6 +7,7 @@ export default {
     total: '{seconds} saniye', render: 'Önizleme videosu oluştur', cancel: 'Oluşturmayı iptal et', retry: 'Kayıtlı işlemi yeniden dene', progress: 'Oluşturuluyor: {completed}/{total}. Sayfadan ayrılıp geri dönebilirsiniz.', use: 'Bu Reel videosunu ekle',
   },
   instagramPublishing: {
+    imagePreparation: 'Instagram görselleri yayınlanmadan önce kontrol edilir ve JPEG biçimine dönüştürülür. Boyutlar korunur; uyumsuz ekler seçili tüm hedeflere gönderimi durdurur.',
     processing: 'Instagram bu gönderiyi işliyor. Sayfadan ayrılabilirsiniz; işlem arka planda devam eder.', checkStatus: 'Gönderi durumunu kontrol et',
     title: 'Instagram biçimi', check: 'Hesap erişimini kontrol et', feed: 'Akış gönderisi', story: 'Hikâye', reel: 'Reel',
     businessRequired: 'Hikâyeler doğrulanmış Instagram İşletme hesabı gerektirir. Hesap erişimini kontrol edin veya yeniden bağlanın.',

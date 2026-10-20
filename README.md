@@ -142,6 +142,10 @@ For UI development, `npm run dev --workspace ui` starts Vite on port 5173. Use t
 
 ## Server operations
 
+Instagram attachments are decoded and checked before a multi-platform post is dispatched or scheduled, including bulk draft scheduling. Static PNG/WebP uploads get a workspace-owned JPEG copy with the same dimensions; the original and other destinations retain their attachment. Incompatible ratios, animated images, or unsupported video metadata stop the submission before Facebook is sent. Existing queued jobs also run preflight before their first dispatch. Prepared URLs are persisted so retries retain the same media and skip confirmed or uncertain destinations.
+
+The Instagram worker waits for `FINISHED` for images and videos. An explicit `9007`/`2207027` rejection rechecks and retries the same container; expired or failed containers stop. A lost publishing response is reconciled without repeating the publish request.
+
 This installation deploys at `cloud@192.168.8.80:/home/social-media-manager`. The application remains reachable through its existing port 8081. `/home/rack` belongs to a different application.
 
 Before each phase deployment, save the previous Git commit, tag the running images, and back up MongoDB. Phase backups live under `/home/social-media-manager-rollbacks`. Database archives and the original environment snapshot are encrypted with AES-256-GCM; recovery material is private, outside the repository. The archive format is `SMMBACKUP1` followed by a 12-byte nonce and authenticated ciphertext, with AAD `social-manager-backup:v1`.

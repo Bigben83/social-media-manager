@@ -10,7 +10,7 @@ const { createLogger } = require('./utils/logger');
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://gateway:8084';
 
-const { validatePost, scheduleDelay } = require('./utils/publishing');
+const { validatePost, scheduleDelay, preflightPost } = require('./utils/publishing');
 const { createPostProcessor } = require('./worker');
 
 const log = createLogger('scheduler');
@@ -55,7 +55,7 @@ app.post('/schedule', async (request, reply) => {
   const postId = randomUUID();
   const workspaceId = request.headers['x-workspace-id'] || 'default';
 
-  const destList = destinations || (platforms || []).map((p) => ({ platform: p }));
+  let destList = destinations || (platforms || []).map((p) => ({ platform: p }));
 
   const db = await getDb();
   const workspace = await db.collection('workspaces').findOne({ _id: workspaceId });
@@ -66,6 +66,9 @@ app.post('/schedule', async (request, reply) => {
   let delay;
   try { delay = scheduleDelay(scheduledAt); }
   catch (err) { return reply.code(400).send({ error: err.message }); }
+
+  try { destList = await preflightPost(axios, workspaceId, content, destList); }
+  catch (err) { return reply.code(err.response?.status === 400 ? 400 : 503).send({ error: err.response?.data?.error || 'Could not validate attachments; nothing was scheduled' }); }
 
   await db.collection('scheduled_jobs').insertOne({
     _id: postId, postId, type: 'one-time', content, firstComment,

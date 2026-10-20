@@ -1,5 +1,7 @@
 jest.mock('../utils/MongoDBConnector', () => ({ getDb: jest.fn() }));
 jest.mock('axios');
+// Dispatch tests isolate preparation; postPreflight.test covers the real route.
+jest.mock('../postPreflight', () => ({ createPostPreflight: () => async (_, destinations) => destinations }));
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

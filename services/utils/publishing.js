@@ -37,4 +37,10 @@ function failureResult(err) {
   const retryable = !ambiguous && (err.response?.data?.retryable ?? (['ECONNREFUSED', 'EAI_AGAIN'].includes(err.code) || status === 429 || status >= 500));
   return { success: false, retryable: !!retryable, uncertain: ambiguous || !!err.response?.data?.uncertain, error: ambiguous ? 'Publishing outcome is unknown. Check the account before retrying.' : (err.response?.data?.error || err.message || 'Publishing failed') };
 }
-module.exports = { PLATFORM_SERVICES, accountKey, destinationKey, deliveryKey, validatePost, failureResult, scheduleDelay };
+async function preflightPost(axios, workspaceId, content, destinations) {
+  if (!destinations.some(d => d.platform === 'instagram')) return destinations;
+  const response = await axios.post(`${process.env.GATEWAY_URL || 'http://gateway:8084'}/post/preflight`, { content, destinations }, { timeout: 120000, headers: { 'X-Workspace-Id': workspaceId } });
+  if (!response.data.success || !Array.isArray(response.data.destinations)) throw new Error('Publishing preflight could not be confirmed');
+  return response.data.destinations;
+}
+module.exports = { PLATFORM_SERVICES, accountKey, destinationKey, deliveryKey, validatePost, failureResult, scheduleDelay, preflightPost };

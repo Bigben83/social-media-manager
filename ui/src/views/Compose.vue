@@ -84,6 +84,7 @@
             <p v-if="placementFor(dest) === 'story'" class="text-gray-400">{{ $t('instagramPublishing.storyText') }}</p>
           </div>
           <p v-if="instagramIssue" class="text-amber-400 text-xs" role="status">{{ instagramIssue }}</p>
+          <p class="text-gray-400 text-xs">{{ $t('instagramPublishing.imagePreparation') }}</p>
         </div>
 
         <ReelBuilder @apply="applyRenderedReel" />

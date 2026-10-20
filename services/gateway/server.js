@@ -22,6 +22,7 @@ const { registerAnalytics, accountFilter, loadAuditHistory } = require('./analyt
 const { registerBackgroundJobs } = require('./jobs');
 const { detectUploadType } = require('./media');
 const { imageMetadata, normalizeImage, saveImageAsset } = require('./imageAssets');
+const { createPostPreflight } = require('./postPreflight');
 const { instagramCapabilities, INSTAGRAM_FORMATS } = require('./utils/instagram');
 const { instagramDeliveryResult } = require('./utils/instagramDelivery');
 const { campaignContextBlock, MAX_CAMPAIGN_CONTEXT } = require('./calendarContext');
@@ -1910,9 +1911,42 @@ app.get('/instagram/capabilities', async request => {
 });
 
 // Direct multi-platform post endpoint.
+const preflightPost = createPostPreflight({
+  getDb,
+  getAccounts: async ws => (await getCredentials(ws, 'instagram'))?.accounts || [],
+  loadMedia: async (url, ws) => {
+    let parsed;
+    try { parsed = new URL(url, APP_BASE_URL); } catch { throw new Error('Invalid attachment URL'); }
+    if (url.startsWith('/media/') || parsed.origin === new URL(APP_BASE_URL).origin) {
+      const filename = /^\/media\/([a-zA-Z0-9_.-]+)$/.exec(parsed.pathname)?.[1];
+      if (!filename || !await (await getDb()).collection('media_files').findOne({ filename, workspaceId: ws })) throw new Error('Attachment is missing or belongs to another workspace');
+      const file = path.join(UPLOAD_DIR, filename);
+      if ((await fs.promises.stat(file)).size > MAX_FILE_SIZE) throw new Error('Attachment exceeds 100 MB');
+      return fs.promises.readFile(file);
+    }
+    return Buffer.from((await externalGet(url, { responseType: 'arraybuffer', maxBytes: MAX_FILE_SIZE, timeout: 30000 })).data);
+  },
+  saveImage: (buffer, workspaceId, metadata) => saveImageAsset({ buffer, mime: 'image/jpeg', metadata, getDb, workspaceId, uploadDir: UPLOAD_DIR, origin: APP_BASE_URL }),
+});
+app.post('/post/preflight', async (request, reply) => {
+  const { content, destinations } = request.body || {};
+  const error = validatePost(content, destinations);
+  if (error) return reply.code(400).send({ error });
+  try { return { success: true, destinations: await preflightPost(content, destinations, request.workspaceId) }; }
+  catch (err) {
+    const retryable = isPreflightTransient(err);
+    return reply.code(retryable ? 503 : 400).send({ error: err.message, retryable, uncertain: false });
+  }
+});
+
+function isPreflightTransient(err) {
+  return err.response?.status === 429 || err.response?.status >= 500 || ['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'ETIMEDOUT', 'EAI_AGAIN'].includes(err.code);
+}
+
 // Body: { content: string, destinations: Array<{ platform, accountId?, imageUrl?, videoUrl?, link? }> }
 app.post('/post', async (request, reply) => {
-  const { content, destinations = [], firstComment } = request.body || {};
+  const { content, firstComment } = request.body || {};
+  let { destinations = [] } = request.body || {};
   const validationError = validatePost(content, destinations);
   if (validationError) return reply.code(400).send({ error: validationError });
   const requestKey = request.headers['idempotency-key'] || crypto.randomUUID();
@@ -1932,6 +1966,15 @@ app.post('/post', async (request, reply) => {
     }
     if (existing?.destinations?.some(d => d.platform === 'instagram')) return reply.send(await refreshImmediatePost(existing, workspaceId));
     return reply.code(409).send({ error: 'Publishing outcome is not confirmed. Check your accounts before retrying.', uncertain: true });
+  }
+  try {
+    destinations = await preflightPost(content, destinations, workspaceId);
+    await receipts.updateOne({ _id: postId, workspaceId }, { $set: { preparedDestinations: destinations } });
+  } catch (err) {
+    const statusCode = isPreflightTransient(err) ? 503 : 400;
+    const response = { success: false, status: 'failed', postId, error: err.message, preflight: true, uncertain: false };
+    await receipts.updateOne({ _id: postId, workspaceId }, { $set: { status: 'done', statusCode, response, updatedAt: new Date() } });
+    return reply.code(statusCode).send(response);
   }
   const results = await Promise.allSettled(
     destinations.map(async destination => {

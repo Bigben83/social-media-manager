@@ -26,7 +26,7 @@ async function fixture(run) {
     if (state.fail === 'after') { state.fail = ''; throw new Error('Queue response lost'); }
     return jobs.get(options.jobId);
   } };
-  const app = Fastify(); registerDraftScheduling(app, { getDb: async () => db, getQueue: () => queue, publicUrl: origin, log: { warn() {} } });
+  const app = Fastify(); registerDraftScheduling(app, { getDb: async () => db, getQueue: () => queue, publicUrl: origin, log: { warn() {} }, preparePost: async (_, destinations) => { if (state.fail === 'preflight') throw { response: { data: { error: 'Invalid image' } } }; return destinations; } });
   const request = async (path, body, workspace = 'one') => app.inject({ method: 'POST', url: '/drafts/' + path, headers: { 'x-workspace-id': workspace }, payload: { timezone: 'Australia/Sydney', ...body } });
   const preview = async (ids = [id]) => (await request('preview', { draftIds: ids })).json();
   const schedule = async items => (await request('schedule', { items: items.map(item => ({ draftId: item.draftId, revision: item.revision })), confirmation: 'SCHEDULE' })).json();
@@ -51,6 +51,16 @@ test('Story placement and Reel cover options survive bulk scheduling', () => fix
   assert.equal(items[0].destinations[0].instagramPlacement, 'story');
   await schedule(items);
   assert.equal(calls[0].data.destinations[0].instagramPlacement, 'story');
+}));
+
+test('preflight failure preserves the draft and creates no scheduled job', () => fixture(async ({ preview, schedule, state, db, jobs }) => {
+  const items = (await preview()).items;
+  state.fail = 'preflight';
+  assert.equal((await preview()).items[0].ready, false);
+  const result = await schedule(items);
+  assert.equal(result.scheduled, 0);
+  assert.equal(jobs.size, 0);
+  assert.ok(await db.collection('drafts').findOne({ _id: new ObjectId(id) }));
 }));
 
 test('scheduling moves drafts to a single durable delayed job and retries cannot duplicate it', () => fixture(async ({ db, preview, schedule, jobs, calls }) => {

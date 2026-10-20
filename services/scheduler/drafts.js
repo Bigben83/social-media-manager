@@ -1,6 +1,7 @@
 const { ObjectId } = require('mongodb');
 const { createHash } = require('crypto');
-const { validatePost, scheduleDelay, accountKey } = require('./utils/publishing');
+const { validatePost, scheduleDelay, accountKey, preflightPost } = require('./utils/publishing');
+const axios = require('axios');
 const { getWorkspaceCredential } = require('./utils/credentials');
 const { naiveDatetimeToUtc } = require('./utils/timezone');
 
@@ -69,7 +70,7 @@ async function prepareDraft(db, workspaceId, draftId, timezone, origin, now = Da
   return { draft, accounts, payload, revision: digest({ updatedAt: draft.updatedAt, payload }) };
 }
 
-function registerDraftScheduling(app, { getDb, getQueue, publicUrl, log }) {
+function registerDraftScheduling(app, { getDb, getQueue, publicUrl, log, preparePost = (content, destinations, workspaceId) => preflightPost(axios, workspaceId, content, destinations) }) {
   const origin = new URL(publicUrl || process.env.APP_BASE_URL || process.env.MCP_PUBLIC_URL || 'http://localhost:8081').origin;
   async function context(request) {
     const workspaceId = request.headers['x-workspace-id'] || 'default';
@@ -94,6 +95,8 @@ function registerDraftScheduling(app, { getDb, getQueue, publicUrl, log }) {
     if (!row) {
       const prepared = await prepareDraft(db, workspaceId, item.draftId, timezone, origin);
       if (prepared.revision !== item.revision) fail('changed', 'Draft changed after review. Review it again before scheduling.');
+      try { prepared.payload.destinations = await preparePost(prepared.payload.content, prepared.payload.destinations, workspaceId); }
+      catch (err) { fail('invalid_media', err.response?.data?.error || 'Could not validate attachments; nothing was scheduled'); }
       row = { _id: postId, postId, bullJobId: postId, workspaceId, type: 'one-time', ...prepared.payload, scheduledAt: new Date(prepared.payload.scheduledAt), sourceDraftId: item.draftId, sourceDraftSnapshot: prepared.draft, sourceDraftRevision: prepared.revision, sourceDraftUpdatedAt: prepared.draft.updatedAt, status: 'pending', queueState: 'preparing', attempts: 0, maxAttempts: 3, createdAt: new Date() };
       try { await db.collection('scheduled_jobs').insertOne(row); }
       catch (err) { if (err.code !== 11000) throw err; row = await db.collection('scheduled_jobs').findOne(query); }
@@ -122,6 +125,8 @@ function registerDraftScheduling(app, { getDb, getQueue, publicUrl, log }) {
     for (const draftId of request.body.draftIds) {
       try {
         const prepared = await prepareDraft(ctx.db, ctx.workspaceId, draftId, request.body.timezone, origin);
+        try { prepared.payload.destinations = await preparePost(prepared.payload.content, prepared.payload.destinations, ctx.workspaceId); }
+        catch (err) { fail('invalid_media', err.response?.data?.error || 'Could not validate attachments'); }
         const existing = await ctx.db.collection('scheduled_jobs').findOne({ _id: draftJobId(ctx.workspaceId, draftId), workspaceId: ctx.workspaceId });
         if (existing && existing.sourceDraftRevision !== prepared.revision) fail('already_scheduled', 'An earlier version of this draft already has a scheduled job');
         items.push({ draftId, ready: true, revision: prepared.revision, ...prepared.payload, accounts: prepared.accounts });
