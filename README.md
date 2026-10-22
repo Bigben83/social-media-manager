@@ -1,16 +1,57 @@
+<h1 align="center">SocialManager</h1>
+
+---
+
+### Self-hosted social media management for separate brands and workspaces. The UI supports English. The application uses Vue 3, Fastify 5 on Node 24, MongoDB 7, Redis/BullMQ, and Nginx.
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.77.0_Beta-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/license-AGPLv3-blue" alt="License" />
+  <img src="https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/built%20with-Claude%20AI-blueviolet?logo=anthropic&logoColor=white" alt="Built with Claude" />
+</p>
+
 ![SocialManager header](image/header.png)
 
-# SocialManager
+## Contents
+
+- [What it is](#what-it-is)
+- [What makes it different](#what-makes-it-different)
+- [Supported integrations](#supported-integrations)
+- [Run with Docker](#run-with-docker)
+- [Facebook and Instagram discovery](#facebook-and-instagram-discovery)
+- [Content planning](#content-planning)
+- [Claude and ChatGPT connectors (MCP)](#claude-and-chatgpt-connectors-mcp)
+- [ChatGPT plugin setup](#chatgpt-plugin-setup)
+- [Local Ollama assistant](#local-ollama-assistant)
+- [AI configuration](#ai-configuration)
+- [Publishing and analytics](#publishing-and-analytics)
+- [Development and verification](#development-and-verification)
+- [Server operations](#server-operations)
+- [Contributing](#contributing)
+- [License](#license)
+- [AI Assistance](#ai-assistance)
+
+
+## What it is
 
 Self-hosted social media management for separate brands and workspaces. The UI supports English and Turkish. The application uses Vue 3, Fastify 5 on Node 24, MongoDB 7, Redis/BullMQ, and Nginx.
 
+---
+
+## What makes it different
+
 Connect Claude or ChatGPT through the built-in Model Context Protocol (MCP) server to automate social media workflows from a conversation. Ask your assistant to read your brand context, create and save content plans, write or revise batches of drafts, select uploaded media and connected accounts, and prepare posts for scheduling or immediate publishing. With the required permissions and your explicit confirmation of each publishing or scheduling preview, the assistant can execute delivery and check the results. Content is written in your Claude or ChatGPT conversation, so this workflow needs no separate text-generation API key. See [Claude and ChatGPT connectors (MCP)](#claude-and-chatgpt-connectors-mcp) for setup.
+
+---
 
 ## Supported integrations
 
 Facebook Pages, linked professional Instagram accounts, Twitter/X, Mastodon, Bluesky, Pinterest, and TikTok have publishing adapters. Provider permissions, account type, and media accessibility still apply. LinkedIn, Reddit, and YouTube are unavailable and hidden from connection/publishing choices. Their old source is retained for reference; their containers are not part of production.
 
 Twitter/X, Mastodon, and Bluesky currently publish text only. Requests with media are rejected rather than dropping attachments. Instagram requires an image or video; TikTok requires a video. Pinterest needs an image and a board. Facebook supports text, links, images, and videos. A timeout can leave a provider outcome uncertain: check the account before resending. The UI preserves failed destinations and shows per-account results.
+
+---
 
 ## Run with Docker
 
@@ -29,6 +70,8 @@ Production images contain application code and locked dependencies. The UI serve
 
 Persistent data resides in `mongodb-data`, `redis-data`, and `media_uploads`. Redis enables append-only persistence. Backend health checks use `/health`. Scheduler shutdown allows 150 seconds for active deliveries. Do not delete volumes during normal updates.
 
+---
+
 ## Facebook and Instagram discovery
 
 Select the intended workspace before connecting Meta. OAuth uses a short-lived, one-time state bound to that workspace. Discovery follows paginated Page listings and accessible business portfolios. It persists pending selections across reloads.
@@ -37,11 +80,15 @@ Meta can omit a Page from its account listing even when a direct lookup is autho
 
 In Settings, **Refresh available accounts** and reconnecting also update pictures and tokens for saved accounts in the active workspace, preserving their selections. New accounts still require **Connect Selected**. Saved accounts remain visible when a health check fails or all accounts are deselected; unavailable pictures show the platform icon.
 
+---
+
 ## Content planning
 
 Content Plan includes an optional campaign context box (up to 20,000 characters). Add the feature to highlight, campaign goals, or numbered text for an introduction series. This context accompanies both brief generation and every platform’s post generation, remains in the recoverable background job, and is saved with the calendar. Changing campaign inputs clears a previously reviewed brief so the next approval uses the current context. Model output should still be reviewed before publishing.
 
 Compose includes **Create a Reel from images**: arrange up to 12 workspace images, edit scene text and timing, choose padding or cropping and cut/fade transitions, and optionally add an uploaded soundtrack you have permission to use. Rendering runs as a recoverable background job, exports 1080 × 1920 H.264/AAC video, and saves the result in the Media Library. Preview the finished video before attaching it; rendering never publishes. Failed renders can retry saved scene checkpoints, and active renders can be cancelled. Content Plan also carries the selected Instagram format into generated posts and drafts. Generative video providers and Facebook-specific shorts remain in [the product roadmap](ROADMAP.md).
+
+---
 
 ## Claude and ChatGPT connectors (MCP)
 
@@ -66,6 +113,8 @@ In **Content Plan**, choose the month/platforms, enter campaign context, and cli
 
 The endpoint uses the official MCP SDK with Streamable HTTP, OAuth discovery, PKCE, dynamic client registration, and revocation. Remote clients require internet access to the HTTPS URL. No additional host port is published. Configure the existing external proxy to preserve `Authorization`, `Accept`, and MCP headers and route `/mcp`, `/connector`, `/authorize`, `/token`, `/register`, `/revoke`, and the OAuth `/.well-known/` paths to this stack. This deployment's Nginx configuration includes those routes.
 
+---
+
 ### ChatGPT plugin setup
 
 ChatGPT uses the same MCP endpoint and owner password as Claude, with a separate OAuth approval. No OpenAI generation API key is needed for this conversation workflow.
@@ -80,6 +129,8 @@ Each chat app receives its own grant and tokens. Revoking ChatGPT at `/connector
 
 See OpenAI's [custom MCP plugin setup](https://developers.openai.com/api/docs/guides/custom-mcp-server), [OAuth authentication](https://developers.openai.com/plugins/build/auth), and [tool metadata reference](https://developers.openai.com/plugins/reference). UI labels and availability can vary by ChatGPT workspace. This adds a custom plugin for your account/workspace; it does not publish SocialManager to the public plugin directory. Other app Generate buttons continue to use the configured API/local provider.
 
+---
+
 ### Local Ollama assistant
 
 Open **Local assistant** in SocialManager (or Global Settings → Local models and connectors → Open local assistant). Sign in with the existing connector owner password, approve permissions for the selected workspace, and start a session. Read/drafts are selected by default. The selected Ollama model must advertise tool support; the app checks `/api/show` before starting. Configure its endpoint and model in the local group in Global Settings. The local assistant uses that Ollama configuration even when another generation provider is active; it never falls back to cloud inference.
@@ -92,6 +143,8 @@ Other Ollama chat clients can use the shared remote `/mcp` endpoint when they im
 
 Global Settings groups Claude's API/connector, OpenAI's API/ChatGPT plugin/image readiness, local Ollama/assistant/compatible endpoints/local images, Google/Gemini/Places, other AI providers, and social platform apps. Image settings save only fields for their own provider, preserving edits in other groups. Existing connector deep links remain available.
 
+---
+
 ## AI configuration
 
 Image creation exports exact dimensions: static Instagram artwork defaults to 3:4 (1080 × 1440), while Stories and Reel artwork use 9:16 (1080 × 1920). Generated originals stay in the workspace Media Library. Review the prepared image before attaching it; choose whole-image fitting with white padding or an explicit crop. Attached images also have a dimension preparation tool. A separately selected 4:5 export is available for API compatibility; the 3:4 original is preserved.
@@ -99,6 +152,8 @@ Image creation exports exact dimensions: static Instagram artwork defaults to 3:
 Ollama, Anthropic Claude, OpenAI, Groq, Gemini, and OpenAI-compatible endpoints are supported. Image generation supports the configured OpenAI, Gemini, xAI, or local image server. Keys are encrypted in MongoDB. A saved key or installed SDK does not prove that a provider accepts the credential: test with a real request. Provider authentication and stream errors are surfaced to the UI. Each configured cloud provider has a live Test Connection action; a static model list does not count as a successful connection.
 
 AI providers and app credentials in Global Settings are shared across workspaces; social account tokens are workspace-specific. Account profiles, drafts, calendars, media ownership, competitor data, feeds, analytics, and publishing receipts are isolated by workspace. This is data separation within the existing self-hosted access model, not a new authentication or user permission system. Network exposure and access controls are unchanged.
+
+---
 
 ## Publishing and analytics
 
@@ -124,6 +179,8 @@ MongoDB integration checks exercise real history aggregation, concurrent import 
 
 Live feed notifications use Socket.IO rooms per workspace. The aggregator sends bounded events directly to the socket service. Legacy RabbitMQ, formatter, LinkedIn, and grammar containers have been retired; no production service depends on them.
 
+---
+
 ## Development and verification
 
 Install Node 24 or later and FFmpeg/FFprobe with H.264 encoding support, then run the commands below. Docker images install their media tools and fonts automatically.
@@ -140,6 +197,8 @@ The root workspace lock supports reproducible CI. The install script links share
 
 For UI development, `npm run dev --workspace ui` starts Vite on port 5173. Use the Docker gateway/proxy for API access; production uses the compiled UI image. When upgrading dependencies, update the root lock and each affected service's independent lock, run checks and the audit, then rebuild the affected images.
 
+---
+
 ## Server operations
 
 Instagram attachments are decoded and checked before a multi-platform post is dispatched or scheduled, including bulk draft scheduling. Static PNG/WebP uploads get a workspace-owned JPEG copy with the same dimensions; the original and other destinations retain their attachment. Incompatible ratios, animated images, or unsupported video metadata stop the submission before Facebook is sent. Existing queued jobs also run preflight before their first dispatch. Prepared URLs are persisted so retries retain the same media and skip confirmed or uncertain destinations.
@@ -151,3 +210,41 @@ This installation deploys at `cloud@192.168.8.80:/home/social-media-manager`. Th
 Before each phase deployment, save the previous Git commit, tag the running images, and back up MongoDB. Phase backups live under `/home/social-media-manager-rollbacks`. Database archives and the original environment snapshot are encrypted with AES-256-GCM; recovery material is private, outside the repository. The archive format is `SMMBACKUP1` followed by a 12-byte nonce and authenticated ciphertext, with AAD `social-manager-backup:v1`.
 
 Rollback requires the matching code, images, environment key, and data snapshot. Never overwrite the encryption key or restore an older database casually. Retired containers and dependency volumes can remain stopped for rollback; do not broadly prune host resources shared with other applications.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please open an issue before submitting a pull request so we can discuss the
+approach — several recent features started as exactly that conversation.
+
+1. Fork the repository
+2. Create a branch: `git checkout -b feature/your-feature`
+3. Commit your changes
+4. Push and open a pull request
+
+---
+
+## License
+
+Licensed under the **GNU Affero General Public License v3.0** — see [LICENSE.txt](LICENSE.txt) for the full text.
+
+- You are free to use, modify and distribute this software.
+- If you run a modified version as a network service, you **must** make your modified source available
+  to users of that service under the same license.
+- Distributed copies and derivatives must also carry AGPLv3.
+
+This license keeps improvements — including those deployed as a service — open and available.
+
+---
+
+## AI assistance
+
+This project was designed and built with the help of [Claude](https://claude.ai) by Anthropic. AI
+assistance was used throughout: architecture, backend services, frontend components, the CI/CD pipeline,
+security configuration and unit tests.
+
+We believe in being transparent about how software is made. The code is reviewed and tested with AI
+assistance and maintained by the project authors.
+
+---
