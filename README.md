@@ -19,13 +19,14 @@
 - [What makes it different](#what-makes-it-different)
 - [Supported integrations](#supported-integrations)
 - [Run with Docker](#run-with-docker)
-- [Facebook and Instagram discovery](#facebook-and-instagram-discovery)
-- [Content planning](#content-planning)
-- [Claude and ChatGPT connectors (MCP)](#claude-and-chatgpt-connectors-mcp)
-- [ChatGPT plugin setup](#chatgpt-plugin-setup)
-- [Local Ollama assistant](#local-ollama-assistant)
-- [AI configuration](#ai-configuration)
-- [Publishing and analytics](#publishing-and-analytics)
+- [Features](#features)
+   - [Facebook and Instagram discovery](#facebook-and-instagram-discovery)
+   - [Content planning](#content-planning)
+   - [Claude and ChatGPT connectors (MCP)](#claude-and-chatgpt-connectors-mcp)
+   - [ChatGPT plugin setup](#chatgpt-plugin-setup)
+   - [Local Ollama assistant](#local-ollama-assistant)
+   - [AI configuration](#ai-configuration)
+   - [Publishing and analytics](#publishing-and-analytics)
 - [Development and verification](#development-and-verification)
 - [Server operations](#server-operations)
 - [Contributing](#contributing)
@@ -71,6 +72,8 @@ Production images contain application code and locked dependencies. The UI serve
 Persistent data resides in `mongodb-data`, `redis-data`, and `media_uploads`. Redis enables append-only persistence. Backend health checks use `/health`. Scheduler shutdown allows 150 seconds for active deliveries. Do not delete volumes during normal updates.
 
 ---
+
+## Features
 
 ## Facebook and Instagram discovery
 
