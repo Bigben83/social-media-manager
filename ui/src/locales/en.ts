@@ -462,6 +462,7 @@ export default {
         "queue_error": "Scheduling could not be confirmed. Retry this selection; existing jobs will be reused."
       }
     },
+    scheduledView: 'Scheduled view',
     draftView: 'Draft view',
     draftListView: 'List',
     draftCardsView: 'Cards',
@@ -469,6 +470,7 @@ export default {
     noDraftDate: 'No date set',
     draftUpdated: 'Updated {date}',
     draftMediaPreview: 'Draft media preview',
+    textOnlyPost: 'Text-only post',
     draftPreviewUnavailable: 'Preview unavailable',
     textOnlyDraft: 'Text-only draft',
     noDraftDestinations: 'No accounts selected',

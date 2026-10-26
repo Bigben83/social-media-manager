@@ -2,7 +2,7 @@
   <div class="h-screen flex flex-col overflow-hidden bg-gray-950 text-gray-100">
 
     <!-- Header + tabs — always constrained, never scrolls -->
-    <div class="flex-shrink-0 mx-auto w-full px-6 pt-6" :class="mode === 'drafts' && draftView === 'cards' ? 'max-w-6xl' : 'max-w-3xl'">
+    <div class="flex-shrink-0 mx-auto w-full px-6 pt-6" :class="(mode === 'drafts' && draftView === 'cards') || (mode === 'scheduled' && jobView === 'cards') ? 'max-w-6xl' : 'max-w-3xl'">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold">{{ $t('scheduler.title') }}</h1>
         <router-link
@@ -37,8 +37,11 @@
     <!-- ── Scheduled panel — scrollable, constrained width ── -->
     <template v-if="mode === 'scheduled'">
       <div class="flex-1 overflow-y-auto px-6 pb-6">
-        <div class="max-w-3xl mx-auto">
-          <div class="flex gap-2 mb-6">
+        <div class="mx-auto" :class="jobView === 'cards' ? 'max-w-6xl' : 'max-w-3xl'">
+          <div class="flex flex-wrap items-center gap-2 mb-6">
+            <div role="group" :aria-label="$t('scheduler.scheduledView')" class="flex gap-1 bg-gray-900 border border-gray-800 p-1 rounded-lg mr-2">
+              <button v-for="view in (['list', 'cards'] as const)" :key="view" @click="jobView = view" :aria-pressed="jobView === view" class="px-3 py-1 rounded text-sm transition-colors" :class="jobView === view ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'">{{ $t(view === 'list' ? 'scheduler.draftListView' : 'scheduler.draftCardsView') }}</button>
+            </div>
             <button
               v-for="s in statusOptions"
               :key="s.value"
@@ -61,18 +64,27 @@
             <p>{{ $t('scheduler.noJobs') }}</p>
           </div>
 
-          <div v-else class="space-y-3">
+          <div v-else :class="jobView === 'cards' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch' : 'space-y-3'">
             <div
               v-for="job in jobs"
               :key="job._id"
-              class="bg-gray-900 border border-gray-800 rounded-xl p-4"
+              class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden min-w-0 flex flex-col"
             >
-              <div class="flex items-start justify-between gap-4">
+              <!-- Media preview (cards only) -->
+              <div v-if="jobView === 'cards'" class="aspect-[4/3] bg-gray-950 flex items-center justify-center overflow-hidden border-b border-gray-800">
+                <video v-if="jobMediaUrl(job) && isVideoUrl(jobMediaUrl(job)!) && !mediaErrors.has(job._id)" :src="jobMediaUrl(job)!" controls preload="metadata" class="w-full h-full object-contain" :aria-label="$t('scheduler.draftMediaPreview')" @error="mediaErrors.add(job._id)" />
+                <img v-else-if="jobMediaUrl(job) && !mediaErrors.has(job._id)" :src="jobMediaUrl(job)!" :alt="$t('scheduler.draftMediaPreview')" loading="lazy" class="w-full h-full object-contain" @error="mediaErrors.add(job._id)" />
+                <div v-else class="text-gray-500 text-sm p-6 text-center flex flex-col items-center gap-2">
+                  <svg class="w-9 h-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  <span>{{ $t(jobMediaUrl(job) ? 'scheduler.draftPreviewUnavailable' : 'scheduler.textOnlyPost') }}</span>
+                </div>
+              </div>
+              <div class="p-4 flex flex-1 gap-4" :class="jobView === 'cards' ? 'flex-col' : 'items-start justify-between'">
                 <div class="flex-1 min-w-0">
                   <!-- Content preview -->
-                  <p class="text-sm text-gray-200 line-clamp-2 mb-2">{{ job.content || '(no content)' }}</p>
-                  <!-- Media indicator -->
-                  <p v-if="jobMediaUrl(job)" class="text-xs text-blue-400 mb-2 flex items-center gap-1 truncate">
+                  <p class="text-sm text-gray-200 whitespace-pre-wrap break-words mb-2" :class="jobView === 'cards' ? 'line-clamp-4' : 'line-clamp-2'">{{ job.content || '(no content)' }}</p>
+                  <!-- Media indicator (list only) -->
+                  <p v-if="jobMediaUrl(job) && jobView === 'list'" class="text-xs text-blue-400 mb-2 flex items-center gap-1 truncate">
                     <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01" />
                     </svg>
@@ -112,7 +124,7 @@
                   <!-- BullMQ failure reason -->
                   <p v-if="job.failReason" class="mt-1 text-xs text-red-400">{{ job.failReason }}</p>
                 </div>
-                <div class="flex items-center gap-2 flex-shrink-0">
+                <div class="flex items-center gap-2 flex-shrink-0" :class="jobView === 'cards' ? 'justify-end border-t border-gray-800 pt-3' : ''">
                   <span class="text-xs px-2 py-1 rounded-full font-medium" :class="statusClass(job.status)">
                     {{ $t(`scheduler.statuses.${job.status}`) }}
                   </span>
@@ -482,7 +494,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import dayjs from 'dayjs'
@@ -531,6 +543,9 @@ interface CalendarDay {
 const mode = ref<'scheduled' | 'calendar' | 'drafts'>('scheduled')
 const draftView = ref<'list' | 'cards'>(localStorage.getItem('scheduler.draftView') === 'cards' ? 'cards' : 'list')
 watch(draftView, value => { localStorage.setItem('scheduler.draftView', value) })
+const jobView = ref<'list' | 'cards'>(localStorage.getItem('scheduler.jobView') === 'cards' ? 'cards' : 'list')
+watch(jobView, value => { localStorage.setItem('scheduler.jobView', value) })
+const mediaErrors = reactive(new Set<string>())
 
 const modeTabs = computed(() => [
   { value: 'scheduled' as const, label: t('scheduler.scheduledTab'), badge: null },
@@ -743,6 +758,10 @@ function selectedDests(draft: Draft) {
       picture: page?.picture || instagram?.avatar || d.picture,
     }
   })
+}
+
+function isVideoUrl(url: string) {
+  return /\.(mp4|mov|avi|webm)(?:[?#]|$)/i.test(url)
 }
 
 function mediaName(url: string) {

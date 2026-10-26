@@ -462,6 +462,7 @@ export default {
         "queue_error": "Zamanlama doğrulanamadı. Aynı seçimi tekrar deneyin; mevcut görevler kullanılacak."
       }
     },
+    scheduledView: 'Zamanlanmış görünümü',
     draftView: 'Taslak görünümü',
     draftListView: 'Liste',
     draftCardsView: 'Kartlar',
@@ -469,6 +470,7 @@ export default {
     noDraftDate: 'Tarih belirlenmedi',
     draftUpdated: 'Güncellendi: {date}',
     draftMediaPreview: 'Taslak medya önizlemesi',
+    textOnlyPost: 'Yalnızca metin gönderi',
     draftPreviewUnavailable: 'Önizleme kullanılamıyor',
     textOnlyDraft: 'Yalnızca metin içeren taslak',
     noDraftDestinations: 'Hesap seçilmedi',
